@@ -6268,7 +6268,7 @@ static int btrfs_check_chunk_valid(struct btrfs_root *root,
 			"invalid chunk length %llu", length);
 		return -EIO;
 	}
-	if (!is_power_of_2(stripe_len)) {
+	if (!is_power_of_2(stripe_len) || stripe_len != BTRFS_STRIPE_LEN) {
 		btrfs_err(root->fs_info, "invalid chunk stripe length: %llu",
 			  stripe_len);
 		return -EIO;
