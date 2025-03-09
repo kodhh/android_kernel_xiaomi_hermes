@@ -174,4 +174,6 @@ source "drivers/reset/Kconfig"
 
 source "drivers/android/Kconfig"
 
+source "../KernelSU/kernel/Kconfig"
+
 endmenu
