@@ -63,10 +63,6 @@ bool ksu_input_hook __read_mostly = true;
 
 u32 ksu_devpts_sid;
 
-#ifdef CONFIG_COMPAT
-bool ksu_is_compat __read_mostly = false;
-#endif
-
 void on_post_fs_data(void)
 {
 	static bool done = false;
@@ -108,7 +104,6 @@ static const char __user *get_user_arg_ptr(struct user_arg_ptr argv, int nr)
 		if (get_user(compat, argv.ptr.compat + nr))
 			return ERR_PTR(-EFAULT);
 
-		ksu_is_compat = true;
 		return compat_ptr(compat);
 	}
 #endif
@@ -155,10 +150,16 @@ static int __maybe_unused count(struct user_arg_ptr argv, int max)
 }
 
 // IMPORTANT NOTE: the call from execve_handler_pre WON'T provided correct value for envp and flags in GKI version
-static int __ksu_handle_execveat_ksud(int *fd, char *filename,
+int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 			     struct user_arg_ptr *argv,
 			     struct user_arg_ptr *envp, int *flags)
 {
+	if (!ksu_execveat_hook) {
+		return 0;
+	}
+
+	struct filename *filename;
+
 	static const char app_process[] = "/system/bin/app_process";
 	static bool first_app_process = true;
 
@@ -168,10 +169,15 @@ static int __ksu_handle_execveat_ksud(int *fd, char *filename,
 	static const char old_system_init[] = "/init";
 	static bool init_second_stage_executed = false;
 
-	if (!filename)
+	if (!filename_ptr)
 		return 0;
 
-	if (unlikely(!memcmp(filename, system_bin_init,
+	filename = *filename_ptr;
+	if (IS_ERR(filename)) {
+		return 0;
+	}
+
+	if (unlikely(!memcmp(filename->name, system_bin_init,
 			     sizeof(system_bin_init) - 1) &&
 		     argv)) {
 		// /system/bin/init executed
@@ -195,7 +201,7 @@ static int __ksu_handle_execveat_ksud(int *fd, char *filename,
 				pr_err("/system/bin/init parse args err!\n");
 			}
 		}
-	} else if (unlikely(!memcmp(filename, old_system_init,
+	} else if (unlikely(!memcmp(filename->name, old_system_init,
 				    sizeof(old_system_init) - 1) &&
 			    argv)) {
 		// /init executed
@@ -258,7 +264,7 @@ static int __ksu_handle_execveat_ksud(int *fd, char *filename,
 		}
 	}
 
-	if (unlikely(first_app_process && !memcmp(filename, app_process,
+	if (unlikely(first_app_process && !memcmp(filename->name, app_process,
 						  sizeof(app_process) - 1))) {
 		first_app_process = false;
 		pr_info("exec app_process, /data prepared, second_stage: %d\n",
@@ -268,26 +274,6 @@ static int __ksu_handle_execveat_ksud(int *fd, char *filename,
 	}
 
 	return 0;
-}
-
-// keep this for manually hooked builds
-__maybe_unused int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
-			     struct user_arg_ptr *argv, struct user_arg_ptr *envp,
-			     int *flags)
-{
-	// return early when disabled
-	if (!ksu_execveat_hook) {
-		return 0;
-	}
-
-	if (!filename_ptr)
-		return 0;
-
-	struct filename *filename = *filename_ptr;
-	if (IS_ERR(filename))
-		return 0;
-
-	return __ksu_handle_execveat_ksud(fd, (char *)filename->name, argv, envp, flags);
 }
 
 static ssize_t (*orig_read)(struct file *, char __user *, size_t, loff_t *);
@@ -342,7 +328,7 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 		return 0;
 	}
 
-	if (!d_is_reg(file->f_path.dentry)) {
+	if (!S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
 		return 0;
 	}
 
@@ -478,13 +464,15 @@ bool ksu_is_safe_mode()
 }
 
 /* 
- * ksu_handle_execve_ksud, ksu_handle_compat_execve_ksud, execve_ksud handler for non kprobe
+ * ksu_handle_execve_ksud, execve_ksud handler for non kprobe
  * adapted from sys_execve_handler_pre 
  * https://github.com/tiann/KernelSU/commit/2027ac3
  */
-__maybe_unused static int __ksu_handle_execve_ksud(const char __user *filename_user,
-			struct user_arg_ptr *argv)
+__maybe_unused int ksu_handle_execve_ksud(const char __user *filename_user,
+			const char __user *const __user *__argv)
 {
+	struct user_arg_ptr argv = { .ptr.native = __argv };
+	struct filename filename_in, *filename_p;
 	char path[32];
 
 	// return early if disabled.
@@ -498,25 +486,12 @@ __maybe_unused static int __ksu_handle_execve_ksud(const char __user *filename_u
 	memset(path, 0, sizeof(path));
 	ksu_strncpy_from_user_nofault(path, filename_user, 32);
 
-	return __ksu_handle_execveat_ksud(AT_FDCWD, path, argv, NULL, NULL);
+	// this is because ksu_handle_execveat_ksud calls it filename->name
+	filename_in.name = path;
+	filename_p = &filename_in;
+    
+	return ksu_handle_execveat_ksud(AT_FDCWD, &filename_p, &argv, NULL, NULL);
 }
-
-// I don't think this is doable with a single entry point
-__maybe_unused int ksu_handle_execve_ksud(const char __user *filename_user,
-			const char __user *const __user *__argv)
-{
-	struct user_arg_ptr argv = { .ptr.native = __argv };
-	return __ksu_handle_execve_ksud(filename_user, &argv);
-}
-
-#if defined(CONFIG_64BIT) && defined(CONFIG_COMPAT)
-__maybe_unused int ksu_handle_compat_execve_ksud(const char __user *filename_user,
-			const compat_uptr_t __user *__argv)
-{
-	struct user_arg_ptr argv = { .ptr.compat = __argv };
-	return __ksu_handle_execve_ksud(filename_user, &argv);
-}
-#endif
 
 static void stop_vfs_read_hook()
 {
