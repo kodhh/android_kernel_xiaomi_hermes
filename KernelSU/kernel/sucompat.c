@@ -7,13 +7,13 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/ptrace.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 #include <linux/sched/task_stack.h>
 #else
 #include <linux/sched.h>
 #endif
 
-#include <linux/ptrace.h> /* current_user_stack_pointer */
 #include "objsec.h"
 #include "allowlist.h"
 #include "klog.h" // IWYU pragma: keep
@@ -25,11 +25,7 @@
 
 extern void escape_to_root();
 
-bool ksu_faccessat_hook __read_mostly = true;
-bool ksu_stat_hook __read_mostly = true;
-bool ksu_execve_sucompat_hook __read_mostly = true;
-bool ksu_execveat_sucompat_hook __read_mostly = true;
-bool ksu_devpts_hook __read_mostly = true;
+static bool ksu_sucompat_non_kp __read_mostly = true;
 
 static void __user *userspace_stack_buffer(const void *d, size_t len)
 {
@@ -59,11 +55,11 @@ int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
 {
 	const char su[] = SU_PATH;
 
-	if (!ksu_faccessat_hook) {
+	if (!ksu_sucompat_non_kp) {
 		return 0;
 	}
 	
-	if (!ksu_is_allow_uid(current_uid())) {
+	if (!ksu_is_allow_uid(current_uid().val)) {
 		return 0;
 	}
 
@@ -84,11 +80,11 @@ int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags)
 	// const char sh[] = SH_PATH;
 	const char su[] = SU_PATH;
 
-	if (!ksu_stat_hook) {
+	if (!ksu_sucompat_non_kp) {
 		return 0;
 	}
 	
-	if (!ksu_is_allow_uid(current_uid())) {
+	if (!ksu_is_allow_uid(current_uid().val)) {
 		return 0;
 	}
 
@@ -117,7 +113,7 @@ int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
 	const char sh[] = KSUD_PATH;
 	const char su[] = SU_PATH;
 
-	if (!ksu_execveat_sucompat_hook){
+	if (!ksu_sucompat_non_kp){
 		return 0;
 	}
 	
@@ -132,7 +128,7 @@ int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
 	if (likely(memcmp(filename->name, su, sizeof(su))))
 		return 0;
 
-	if (!ksu_is_allow_uid(current_uid()))
+	if (!ksu_is_allow_uid(current_uid().val))
 		return 0;
 
 	pr_info("do_execveat_common su found\n");
@@ -150,7 +146,7 @@ int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
 	const char su[] = SU_PATH;
 	char path[sizeof(su) + 1];
 
-	if (!ksu_execve_sucompat_hook){
+	if (!ksu_sucompat_non_kp){
 		return 0;
 	}
 	
@@ -163,7 +159,7 @@ int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
 	if (likely(memcmp(path, su, sizeof(su))))
 		return 0;
 
-	if (!ksu_is_allow_uid(current_uid()))
+	if (!ksu_is_allow_uid(current_uid().val))
 		return 0;
 
 	pr_info("sys_execve su found\n");
@@ -176,7 +172,7 @@ int ksu_handle_execve_sucompat(int *fd, const char __user **filename_user,
 
 int ksu_handle_devpts(struct inode *inode)
 {
-	if (!ksu_devpts_hook) {
+	if (!ksu_sucompat_non_kp) {
 		return 0;
 	}
 	
@@ -184,7 +180,7 @@ int ksu_handle_devpts(struct inode *inode)
 		return 0;
 	}
 
-	uid_t uid = current_uid();
+	uid_t uid = current_uid().val;
 	if (uid % 100000 < 10000) {
 		// not untrusted_app, ignore it
 		return 0;
@@ -211,20 +207,12 @@ int ksu_handle_devpts(struct inode *inode)
 // sucompat: permited process can execute 'su' to gain root access.
 void ksu_sucompat_init()
 {
-	ksu_faccessat_hook = true;
-	ksu_stat_hook = true;
-	ksu_execve_sucompat_hook = true;
-	ksu_execveat_sucompat_hook = true;
-	ksu_devpts_hook = true;
+	ksu_sucompat_non_kp = true;
 	pr_info("ksu_sucompat_init: hooks enabled: execve/execveat_su, faccessat, stat, devpts\n");
 }
 
 void ksu_sucompat_exit()
 {
-	ksu_faccessat_hook = false;
-	ksu_stat_hook = false;
-	ksu_execve_sucompat_hook = false;
-	ksu_execveat_sucompat_hook = false;
-	ksu_devpts_hook = false;
+	ksu_sucompat_non_kp = false;
 	pr_info("ksu_sucompat_exit: hooks disabled: execve/execveat_su, faccessat, stat, devpts\n");
 }

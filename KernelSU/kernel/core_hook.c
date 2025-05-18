@@ -1,4 +1,4 @@
-#include <linux/capability.h> 
+#include <linux/capability.h>
 #include <linux/cred.h>
 #include <linux/dcache.h>
 #include <linux/err.h>
@@ -18,7 +18,6 @@
 #include <linux/uidgid.h>
 #include <linux/version.h>
 #include <linux/mount.h>
-
 #include <linux/fs.h>
 #include <linux/namei.h>
 
@@ -47,7 +46,7 @@ static inline bool is_allow_su()
 		// we are manager, allow!
 		return true;
 	}
-	return ksu_is_allow_uid(current_uid());
+	return ksu_is_allow_uid(current_uid().val);
 }
 
 static inline bool is_unsupported_uid(uid_t uid)
@@ -131,22 +130,22 @@ void escape_to_root(void)
 		BUG_ON(!cred);
 	} while (!get_cred_rcu(cred));
 
-	if (cred->euid == 0) {
+	if (cred->euid.val == 0) {
 		pr_warn("Already root, don't escape!\n");
 		rcu_read_unlock();
 		return;
 	}
-	struct root_profile *profile = ksu_get_root_profile(cred->uid);
+	struct root_profile *profile = ksu_get_root_profile(cred->uid.val);
 
-	cred->uid = profile->uid;
-	cred->suid = profile->uid;
-	cred->euid = profile->uid;
-	cred->fsuid = profile->uid;
+	cred->uid.val = profile->uid;
+	cred->suid.val = profile->uid;
+	cred->euid.val = profile->uid;
+	cred->fsuid.val = profile->uid;
 
-	cred->gid = profile->gid;
-	cred->fsgid = profile->gid;
-	cred->sgid = profile->gid;
-	cred->egid = profile->gid;
+	cred->gid.val = profile->gid;
+	cred->fsgid.val = profile->gid;
+	cred->sgid.val = profile->gid;
+	cred->egid.val = profile->gid;
 	cred->securebits = 0;
 
 	BUILD_BUG_ON(sizeof(profile->capabilities.effective) !=
@@ -184,7 +183,7 @@ int ksu_handle_rename(struct dentry *old_dentry, struct dentry *new_dentry)
 		return 0;
 	}
 
-	if (current_uid() != 1000) {
+	if (current_uid().val != 1000) {
 		// skip non system uid
 		return 0;
 	}
@@ -216,6 +215,26 @@ int ksu_handle_rename(struct dentry *old_dentry, struct dentry *new_dentry)
 	return 0;
 }
 
+static void nuke_ext4_sysfs() {
+	struct path path;
+	int err = kern_path("/data/adb/modules", 0, &path);
+	if (err) {
+		pr_err("nuke path err: %d\n", err);
+		return;
+	}
+
+	struct super_block* sb = path.dentry->d_inode->i_sb;
+	const char* name = sb->s_type->name;
+	if (strcmp(name, "ext4") != 0) {
+		pr_info("nuke but module aren't mounted\n");
+		path_put(&path);
+		return;
+	}
+
+	ext4_unregister_sysfs(sb);
+ 	path_put(&path);
+}
+
 int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 		     unsigned long arg4, unsigned long arg5)
 {
@@ -228,14 +247,14 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 	}
 
 	// TODO: find it in throne tracker!
-	uid_t current_uid_val = current_uid();
+	uid_t current_uid_val = current_uid().val;
 	uid_t manager_uid = ksu_get_manager_uid();
 	if (current_uid_val != manager_uid &&
 	    current_uid_val % 100000 == manager_uid) {
 		ksu_set_manager_uid(current_uid_val);
 	}
 
-	bool from_root = 0 == current_uid();
+	bool from_root = 0 == current_uid().val;
 	bool from_manager = is_manager();
 
 	if (!from_root && !from_manager) {
@@ -259,7 +278,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 
 	if (arg2 == CMD_GRANT_ROOT) {
 		if (is_allow_su()) {
-			pr_info("allow root for: %d\n", current_uid());
+			pr_info("allow root for: %d\n", current_uid().val);
 			escape_to_root();
 			if (copy_to_user(result, &reply_ok, sizeof(reply_ok))) {
 				pr_err("grant_root: prctl reply error\n");
@@ -271,12 +290,12 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 	// Both root manager and root processes should be allowed to get version
 	if (arg2 == CMD_GET_VERSION) {
 		u32 version = KERNEL_SU_VERSION;
-		if (copy_to_user((void __user *)arg3, &version, sizeof(version))) {
+		if (copy_to_user(arg3, &version, sizeof(version))) {
 			pr_err("prctl reply error, cmd: %lu\n", arg2);
 		}
 		u32 version_flags = 0;
 		if (arg4 &&
-		    copy_to_user((void __user *)arg4, &version_flags, sizeof(version_flags))) {
+		    copy_to_user(arg4, &version_flags, sizeof(version_flags))) {
 			pr_err("prctl reply error, cmd: %lu\n", arg2);
 		}
 		return 0;
@@ -307,6 +326,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 		case EVENT_MODULE_MOUNTED: {
 			ksu_module_mounted = true;
 			pr_info("module mounted!\n");
+			nuke_ext4_sysfs();
 			break;
 		}
 		default:
@@ -319,7 +339,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 		if (!from_root) {
 			return 0;
 		}
-		if (!handle_sepolicy(arg3, (void __user *)arg4)) {
+		if (!handle_sepolicy(arg3, arg4)) {
 			if (copy_to_user(result, &reply_ok, sizeof(reply_ok))) {
 				pr_err("sepolicy: prctl reply error\n");
 			}
@@ -344,9 +364,9 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 		bool success = ksu_get_allow_list(array, &array_length,
 						  arg2 == CMD_GET_ALLOW_LIST);
 		if (success) {
-			if (!copy_to_user((void __user *)arg4, &array_length,
+			if (!copy_to_user(arg4, &array_length,
 					  sizeof(array_length)) &&
-			    !copy_to_user((void __user *)arg3, array,
+			    !copy_to_user(arg3, array,
 					  sizeof(u32) * array_length)) {
 				if (copy_to_user(result, &reply_ok,
 						 sizeof(reply_ok))) {
@@ -370,7 +390,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 		} else {
 			pr_err("unknown cmd: %lu\n", arg2);
 		}
-		if (!copy_to_user((void __user *)arg4, &allow, sizeof(allow))) {
+		if (!copy_to_user(arg4, &allow, sizeof(allow))) {
 			if (copy_to_user(result, &reply_ok, sizeof(reply_ok))) {
 				pr_err("prctl reply error, cmd: %lu\n", arg2);
 			}
@@ -388,14 +408,14 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 	// we are already manager
 	if (arg2 == CMD_GET_APP_PROFILE) {
 		struct app_profile profile;
-		if (copy_from_user(&profile, (void __user *)arg3, sizeof(profile))) {
+		if (copy_from_user(&profile, arg3, sizeof(profile))) {
 			pr_err("copy profile failed\n");
 			return 0;
 		}
 
 		bool success = ksu_get_app_profile(&profile);
 		if (success) {
-			if (copy_to_user((void __user *)arg3, &profile, sizeof(profile))) {
+			if (copy_to_user(arg3, &profile, sizeof(profile))) {
 				pr_err("copy profile failed\n");
 				return 0;
 			}
@@ -408,7 +428,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 
 	if (arg2 == CMD_SET_APP_PROFILE) {
 		struct app_profile profile;
-		if (copy_from_user(&profile, (void __user *)arg3, sizeof(profile))) {
+		if (copy_from_user(&profile, arg3, sizeof(profile))) {
 			pr_err("copy profile failed\n");
 			return 0;
 		}
@@ -423,7 +443,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 	}
 
 	if (arg2 == CMD_IS_SU_ENABLED) {
-		if (copy_to_user((void __user *)arg3, &ksu_su_compat_enabled,
+		if (copy_to_user(arg3, &ksu_su_compat_enabled,
 				 sizeof(ksu_su_compat_enabled))) {
 			pr_err("copy su compat failed\n");
 			return 0;
@@ -467,7 +487,7 @@ static bool is_appuid(kuid_t uid)
 #define FIRST_APPLICATION_UID 10000
 #define LAST_APPLICATION_UID 19999
 
-	uid_t appid = uid % PER_USER_RANGE;
+	uid_t appid = uid.val % PER_USER_RANGE;
 	return appid >= FIRST_APPLICATION_UID && appid <= LAST_APPLICATION_UID;
 }
 
@@ -479,7 +499,7 @@ static bool should_umount(struct path *path)
 
 	if (current->nsproxy->mnt_ns == init_nsproxy.mnt_ns) {
 		pr_info("ignore global mnt namespace process: %d\n",
-			current_uid());
+			current_uid().val);
 		return false;
 	}
 
@@ -516,8 +536,6 @@ static void try_umount(const char *mnt, bool check_mnt, int flags)
 		return;
 	}
 
-	// debug
-	pr_info("try_umount: umounting '%s'\n", mnt);
 	ksu_umount_mnt(&path, flags);
 }
 
@@ -535,26 +553,26 @@ int ksu_handle_setuid(struct cred *new, const struct cred *old)
 	kuid_t new_uid = new->uid;
 	kuid_t old_uid = old->uid;
 
-	if (0 != old_uid) {
+	if (0 != old_uid.val) {
 		// old process is not root, ignore it.
 		return 0;
 	}
 
-	if (!is_appuid(new_uid) || is_unsupported_uid(new_uid)) {
-		// pr_info("handle setuid ignore non application or isolated uid: %d\n", new_uid);
+	if (!is_appuid(new_uid) || is_unsupported_uid(new_uid.val)) {
+		// pr_info("handle setuid ignore non application or isolated uid: %d\n", new_uid.val);
 		return 0;
 	}
 
-	if (ksu_is_allow_uid(new_uid)) {
-		// pr_info("handle setuid ignore allowed application: %d\n", new_uid);
+	if (ksu_is_allow_uid(new_uid.val)) {
+		// pr_info("handle setuid ignore allowed application: %d\n", new_uid.val);
 		return 0;
 	}
 
-	if (!ksu_uid_should_umount(new_uid)) {
+	if (!ksu_uid_should_umount(new_uid.val)) {
 		return 0;
 	} else {
 #ifdef CONFIG_KSU_DEBUG
-		pr_info("uid: %d should not umount!\n", current_uid());
+		pr_info("uid: %d should not umount!\n", current_uid().val);
 #endif
 	}
 
@@ -569,7 +587,7 @@ int ksu_handle_setuid(struct cred *new, const struct cred *old)
 	}
 #ifdef CONFIG_KSU_DEBUG
 	// umount the target mnt
-	pr_info("handle umount for uid: %d, pid: %d\n", new_uid,
+	pr_info("handle umount for uid: %d, pid: %d\n", new_uid.val,
 		current->pid);
 #endif
 
@@ -578,6 +596,7 @@ int ksu_handle_setuid(struct cred *new, const struct cred *old)
 
 	// fixme: use `collect_mounts` and `iterate_mount` to iterate all mountpoint and
 	// filter the mountpoint whose target is `/data/adb`
+	try_umount("/odm", true, 0);
 	try_umount("/system", true, 0);
 	try_umount("/vendor", true, 0);
 	try_umount("/product", true, 0);
