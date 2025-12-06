@@ -15,6 +15,8 @@
 #include "ntfs.h"
 #include "ntfs_fs.h"
 
+#define SECTOR_SIZE    512             /* sector size (bytes) */
+
 // clang-format off
 const struct cpu_str NAME_MFT = {
 	4, 0, { '$', 'M', 'F', 'T' },
@@ -1538,7 +1540,7 @@ new_bio:
 		}
 		if (bio) {
 			bio_chain(bio, new);
-			submit_bio(bio);
+			submit_bio(bio->bi_rw, bio);
 		}
 		bio = new;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
@@ -1546,8 +1548,8 @@ new_bio:
 #else
 		bio->bi_bdev = bdev;
 #endif
-		bio->bi_iter.bi_sector = lbo >> 9;
-		bio->bi_opf = op;
+		bio->bi_sector = lbo >> 9;
+		bio->bi_rw = op;
 
 		while (len) {
 			off = vbo & (PAGE_SIZE - 1);
@@ -1587,7 +1589,7 @@ new_bio:
 out:
 	if (bio) {
 		if (!err)
-			err = submit_bio_wait(bio);
+			err = submit_bio_wait(bio->bi_rw, bio);
 		bio_put(bio);
 	}
 	blk_finish_plug(&plug);
@@ -1648,7 +1650,7 @@ new_bio:
 		}
 		if (bio) {
 			bio_chain(bio, new);
-			submit_bio(bio);
+			submit_bio(bio->bi_rw, bio);
 		}
 		bio = new;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
@@ -1656,8 +1658,8 @@ new_bio:
 #else
 		bio->bi_bdev = bdev;
 #endif
-		bio->bi_opf = REQ_OP_WRITE;
-		bio->bi_iter.bi_sector = lbo >> 9;
+		bio->bi_rw = REQ_WRITE;
+		bio->bi_sector = lbo >> 9;
 
 		for (;;) {
 			u32 add = len > PAGE_SIZE ? PAGE_SIZE : len;
@@ -1674,7 +1676,7 @@ new_bio:
 
 	if (bio) {
 		if (!err)
-			err = submit_bio_wait(bio);
+			err = submit_bio_wait(bio->bi_rw, bio);
 		bio_put(bio);
 	}
 	blk_finish_plug(&plug);
