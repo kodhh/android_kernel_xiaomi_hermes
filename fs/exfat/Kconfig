@@ -1,22 +1,27 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
-
 config EXFAT_FS
-	tristate "exFAT filesystem support"
+	tristate
+	default y
 	select NLS
-	select LEGACY_DIRECT_IO
+	select NLS_UTF8
 	help
-	  This allows you to mount devices formatted with the exFAT file system.
-	  exFAT is typically used on SD-Cards or USB sticks.
+	  If you want to use the exFAT file systems, then you must say Y or M here
+	  to inlucde exFAT support.
 
-	  To compile this as a module, choose M here: the module will be called
-	  exfat.
-
-config EXFAT_DEFAULT_IOCHARSET
-	string "Default iocharset for exFAT"
-	default "utf8"
+config EXFAT_VIRTUAL_XATTR
+	bool "Virtual xattr support for exFAT filesystem"
+	default y
 	depends on EXFAT_FS
 	help
-	  Set this to the default input/output character set to use for
-	  converting between the encoding is used for user visible filename and
-	  UTF-16 character that exfat filesystem use, and can be overridden with
-	  the "iocharset" mount option for exFAT filesystems.
+	  Modification of exFAT filesystem for virtual xattr
+
+config EXFAT_VIRTUAL_XATTR_SELINUX_LABEL
+	string "Default string for SELinux label"
+	depends on EXFAT_FS && EXFAT_VIRTUAL_XATTR
+	default "u:object_r:sdcard_external:s0"
+	help
+	  Set this to the default string for SELinux label.
+
+config EXFAT_SUPPORT_STLOG
+	bool "Enable storage log"
+	default y
+	depends on EXFAT_FS && PROC_STLOG
