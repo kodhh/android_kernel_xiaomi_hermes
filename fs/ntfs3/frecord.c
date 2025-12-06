@@ -2553,7 +2553,7 @@ int ni_read_frame(struct ntfs_inode *ni, u64 frame_vbo, struct page **pages,
 			down_read(&ni->file.run_lock);
 			err = ntfs_bio_pages(sbi, run, pages, pages_per_frame,
 					     frame_vbo, ondisk_size,
-					     REQ_READ);
+					     READ);
 			up_read(&ni->file.run_lock);
 			goto out1;
 		}
@@ -2585,7 +2585,7 @@ int ni_read_frame(struct ntfs_inode *ni, u64 frame_vbo, struct page **pages,
 	/* read 'ondisk_size' bytes from disk */
 	down_read(&ni->file.run_lock);
 	err = ntfs_bio_pages(sbi, run, pages_disk, npages_disk, vbo_disk,
-			     ondisk_size, REQ_READ);
+			     ondisk_size, READ);
 	up_read(&ni->file.run_lock);
 	if (err)
 		goto out3;
