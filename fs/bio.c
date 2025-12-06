@@ -277,6 +277,12 @@ void bio_init(struct bio *bio)
 }
 EXPORT_SYMBOL(bio_init);
 
+static void bio_chain_endio(struct bio *bio, int error)
+{
+	bio_endio(bio->bi_private, error);
+	bio_put(bio);
+}
+
 /**
  * bio_reset - reinitialize a bio
  * @bio:	bio to reset
@@ -297,6 +303,27 @@ void bio_reset(struct bio *bio)
 	bio->bi_flags = flags|(1 << BIO_UPTODATE);
 }
 EXPORT_SYMBOL(bio_reset);
+
+/**
+ * bio_chain - chain bio completions
+ * @bio: the target bio
+ * @parent: the @bio's parent bio
+ *
+ * The caller won't have a bi_end_io called when @bio completes - instead,
+ * @parent's bi_end_io won't be called until both @parent and @bio have
+ * completed; the chained bio will also be freed when it completes.
+ *
+ * The caller must not set bi_private or bi_end_io in @bio.
+ */
+void bio_chain(struct bio *bio, struct bio *parent)
+{
+	BUG_ON(bio->bi_private || bio->bi_end_io);
+
+	bio->bi_private = parent;
+	bio->bi_end_io	= bio_chain_endio;
+}
+EXPORT_SYMBOL(bio_chain);
+
 
 static void bio_alloc_rescue(struct work_struct *work)
 {
@@ -1682,6 +1709,34 @@ void bio_check_pages_dirty(struct bio *bio)
 		bio_put(bio);
 	}
 }
+
+void generic_start_io_acct(int rw, unsigned long sectors,
+			   struct hd_struct *part)
+{
+	int cpu = part_stat_lock();
+
+	part_round_stats(cpu, part);
+	part_stat_inc(cpu, part, ios[rw]);
+	part_stat_add(cpu, part, sectors[rw], sectors);
+	part_inc_in_flight(part, rw);
+
+	part_stat_unlock();
+}
+EXPORT_SYMBOL(generic_start_io_acct);
+
+void generic_end_io_acct(int rw, struct hd_struct *part,
+			 unsigned long start_time)
+{
+	unsigned long duration = jiffies - start_time;
+	int cpu = part_stat_lock();
+
+	part_stat_add(cpu, part, ticks[rw], duration);
+	part_round_stats(cpu, part);
+	part_dec_in_flight(part, rw);
+
+	part_stat_unlock();
+}
+EXPORT_SYMBOL(generic_end_io_acct);
 
 #if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE
 void bio_flush_dcache_pages(struct bio *bi)
