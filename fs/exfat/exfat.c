@@ -1128,7 +1128,7 @@ INT32 ffsGetStat(struct inode *inode, DIR_ENTRY_T *info)
 		if (!ep)
 			return FFS_MEDIAERR;
 		ep2 = ep;
-		buf_lock(sb, sector);
+		exfat_buf_lock(sb, sector);
 	}
 
 	info->Attr = p_fs->fs_func->get_entry_attr(ep);
@@ -1499,7 +1499,7 @@ INT32 ffsReadDir(struct inode *inode, DIR_ENTRY_T *dir_entry)
 			if ((type != TYPE_FILE) && (type != TYPE_DIR))
 				continue;
 
-			buf_lock(sb, sector);
+			exfat_buf_lock(sb, sector);
 			dir_entry->Attr = p_fs->fs_func->get_entry_attr(ep);
 
 			p_fs->fs_func->get_entry_time(ep, &tm, TM_CREATE);
@@ -3087,7 +3087,7 @@ void update_dir_checksum(struct super_block *sb, CHAIN_T *p_dir, INT32 entry)
 	if (!file_ep)
 		return;
 
-	buf_lock(sb, sector);
+	exfat_buf_lock(sb, sector);
 
 	num_entries = (INT32) file_ep->num_ext + 1;
 	chksum = calc_checksum_2byte((void *) file_ep, DENTRY_SIZE, 0, CS_DIR_ENTRY);
@@ -4749,7 +4749,7 @@ void remove_file(struct inode *inode, CHAIN_T *p_dir, INT32 entry)
 	if (!ep)
 		return;
 
-	buf_lock(sb, sector);
+	exfat_buf_lock(sb, sector);
 
 	num_entries = p_fs->fs_func->count_ext_entries(sb, p_dir, entry, ep);
 	if (num_entries < 0) {
@@ -4776,7 +4776,7 @@ INT32 rename_file(struct inode *inode, CHAIN_T *p_dir, INT32 oldentry, UNI_NAME_
 	if (!epold)
 		return FFS_MEDIAERR;
 
-	buf_lock(sb, sector_old);
+	exfat_buf_lock(sb, sector_old);
 
 	num_old_entries = p_fs->fs_func->count_ext_entries(sb, p_dir, oldentry, epold);
 	if (num_old_entries < 0) {
@@ -4814,7 +4814,7 @@ INT32 rename_file(struct inode *inode, CHAIN_T *p_dir, INT32 oldentry, UNI_NAME_
 
 		if (p_fs->vol_type == EXFAT) {
 			epold = get_entry_in_dir(sb, p_dir, oldentry+1, &sector_old);
-			buf_lock(sb, sector_old);
+			exfat_buf_lock(sb, sector_old);
 			epnew = get_entry_in_dir(sb, p_dir, newentry+1, &sector_new);
 
 			if (!epold || !epnew) {
@@ -4869,7 +4869,7 @@ INT32 move_file(struct inode *inode, CHAIN_T *p_olddir, INT32 oldentry, CHAIN_T 
 		p_fs->fs_func->get_entry_clu0(epmov) == p_newdir->dir)
 		return FFS_INVALIDPATH;
 
-	buf_lock(sb, sector_mov);
+	exfat_buf_lock(sb, sector_mov);
 
 	num_old_entries = p_fs->fs_func->count_ext_entries(sb, p_olddir, oldentry, epmov);
 	if (num_old_entries < 0) {
@@ -4906,7 +4906,7 @@ INT32 move_file(struct inode *inode, CHAIN_T *p_olddir, INT32 oldentry, CHAIN_T 
 
 	if (p_fs->vol_type == EXFAT) {
 		epmov = get_entry_in_dir(sb, p_olddir, oldentry+1, &sector_mov);
-		buf_lock(sb, sector_mov);
+		exfat_buf_lock(sb, sector_mov);
 		epnew = get_entry_in_dir(sb, p_newdir, newentry+1, &sector_new);
 		if (!epmov || !epnew) {
 			buf_unlock(sb, sector_mov);
