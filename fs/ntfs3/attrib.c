@@ -1304,7 +1304,7 @@ int attr_wof_frame_info(struct ntfs_inode *ni, struct ATTRIB *attr,
 				goto out1;
 
 			err = ntfs_bio_pages(sbi, run, &page, 1, from,
-					     to - from, REQ_OP_READ);
+					     to - from, 0);
 			if (err) {
 				page->index = -1;
 				goto out1;
