@@ -20,6 +20,10 @@
 #include "lib/lib.h"
 #endif
 
+#ifndef PAGE_KERNEL_RO
+# define PAGE_KERNEL_RO PAGE_KERNEL
+#endif
+
 static struct mft_inode *ni_ins_mi(struct ntfs_inode *ni, struct rb_root *tree,
 				   CLST ino, struct rb_node *ins)
 {
@@ -2186,7 +2190,7 @@ int ni_decompress_file(struct ntfs_inode *ni)
 			down_read(&ni->file.run_lock);
 			err = ntfs_bio_pages(sbi, &ni->file.run, pages,
 					     nr_pages, vbo, bytes,
-					     REQ_OP_WRITE);
+					     REQ_WRITE);
 			up_read(&ni->file.run_lock);
 		}
 
@@ -2549,7 +2553,7 @@ int ni_read_frame(struct ntfs_inode *ni, u64 frame_vbo, struct page **pages,
 			down_read(&ni->file.run_lock);
 			err = ntfs_bio_pages(sbi, run, pages, pages_per_frame,
 					     frame_vbo, ondisk_size,
-					     REQ_OP_READ);
+					     REQ_READ);
 			up_read(&ni->file.run_lock);
 			goto out1;
 		}
@@ -2581,7 +2585,7 @@ int ni_read_frame(struct ntfs_inode *ni, u64 frame_vbo, struct page **pages,
 	/* read 'ondisk_size' bytes from disk */
 	down_read(&ni->file.run_lock);
 	err = ntfs_bio_pages(sbi, run, pages_disk, npages_disk, vbo_disk,
-			     ondisk_size, REQ_OP_READ);
+			     ondisk_size, REQ_READ);
 	up_read(&ni->file.run_lock);
 	if (err)
 		goto out3;
@@ -2795,7 +2799,7 @@ int ni_write_frame(struct ntfs_inode *ni, struct page **pages,
 	err = ntfs_bio_pages(sbi, &ni->file.run,
 			     ondisk_size < frame_size ? pages_disk : pages,
 			     pages_per_frame, frame_vbo, ondisk_size,
-			     REQ_OP_WRITE);
+			     REQ_WRITE);
 	up_read(&ni->file.run_lock);
 
 out3:
