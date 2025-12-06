@@ -77,12 +77,7 @@ config CRYPTO_RNG2
 	tristate
 	select CRYPTO_ALGAPI2
 
-config CRYPTO_PCOMP
-	tristate
-	select CRYPTO_PCOMP2
-	select CRYPTO_ALGAPI
-
-config CRYPTO_PCOMP2
+config CRYPTO_ACOMP2
 	tristate
 	select CRYPTO_ALGAPI2
 
