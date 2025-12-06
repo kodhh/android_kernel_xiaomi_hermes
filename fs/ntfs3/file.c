@@ -12,6 +12,7 @@
 #include <linux/fiemap.h>
 #include <linux/msdos_fs.h> /* FAT_IOCTL_XXX */
 #include <linux/nls.h>
+#include <linux/aio.h>
 #include <linux/uio.h>
 
 #include "debug.h"
@@ -393,7 +394,7 @@ static int ntfs_extend(struct inode *inode, loff_t pos, size_t count,
 		err = 0;
 	}
 
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = ntfs_current_time(inode);
 	mark_inode_dirty(inode);
 
 	if (IS_SYNC(inode)) {
@@ -451,7 +452,7 @@ static int ntfs_truncate(struct inode *inode, loff_t new_size)
 	ni_unlock(ni);
 
 	ni->std_fa |= FILE_ATTRIBUTE_ARCHIVE;
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = ntfs_current_time(inode);
 	if (!IS_DIRSYNC(inode)) {
 		dirty = 1;
 	} else {
@@ -530,7 +531,7 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo_down);
+		truncate_pagecache(inode, vbo, vbo_down);
 
 		ni_lock(ni);
 		err = attr_punch_hole(ni, vbo, len);
@@ -559,7 +560,7 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo_down);
+		truncate_pagecache(inode, vbo ,vbo_down);
 
 		ni_lock(ni);
 		err = attr_collapse_range(ni, vbo, len);
@@ -621,7 +622,7 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 	}
 
 	if (!err) {
-		inode->i_ctime = inode->i_mtime = current_time(inode);
+		inode->i_ctime = inode->i_mtime = ntfs_current_time(inode);
 		mark_inode_dirty(inode);
 	}
 out:
@@ -727,7 +728,7 @@ static ssize_t ntfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 		return -EOPNOTSUPP;
 	}
 
-	if (is_compressed(ni) && (iocb->ki_flags & IOCB_DIRECT)) {
+	if (is_compressed(ni)) {
 		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
 		return -EOPNOTSUPP;
 	}
@@ -1023,7 +1024,7 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		return -EOPNOTSUPP;
 	}
 
-	if (is_compressed(ni) && (iocb->ki_flags & IOCB_DIRECT)) {
+	if (is_compressed(ni)) {
 		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
 		return -EOPNOTSUPP;
 	}
