@@ -327,7 +327,7 @@ int attr_make_nonresident(struct ntfs_inode *ni, struct ATTRIB *attr,
 	if (le)
 		al_remove_le(ni, le);
 
-	err = ni_insert_nonresident(ni, attr_s->type, attr_name(attr_s),
+	err = ni_insert_nonresident(ni, attr_s->type, attr_name_ntfs(attr_s),
 				    attr_s->name_len, run, 0, alen,
 				    attr_s->flags, &attr, NULL);
 	if (err)
@@ -1381,7 +1381,7 @@ int attr_is_frame_compressed(struct ntfs_inode *ni, struct ATTRIB *attr,
 	run = &ni->file.run;
 
 	if (!run_lookup_entry(run, vcn, &lcn, &clen, &idx)) {
-		err = attr_load_runs_vcn(ni, attr->type, attr_name(attr),
+		err = attr_load_runs_vcn(ni, attr->type, attr_name_ntfs(attr),
 					 attr->name_len, run, vcn);
 		if (err)
 			return err;
@@ -1418,7 +1418,7 @@ int attr_is_frame_compressed(struct ntfs_inode *ni, struct ATTRIB *attr,
 		if (!run_get_entry(run, ++idx, &vcn, &lcn, &clen) ||
 		    vcn_next != vcn) {
 			err = attr_load_runs_vcn(ni, attr->type,
-						 attr_name(attr),
+						 attr_name_ntfs(attr),
 						 attr->name_len, run, vcn_next);
 			if (err)
 				return err;

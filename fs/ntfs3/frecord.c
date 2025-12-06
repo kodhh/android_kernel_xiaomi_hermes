@@ -814,7 +814,7 @@ int ni_create_attr_list(struct ntfs_inode *ni)
 		le->id = attr->id;
 
 		if (attr->name_len)
-			memcpy(le->name, attr_name(attr),
+			memcpy(le->name, attr_name_ntfs(attr),
 			       sizeof(short) * attr->name_len);
 		else if (attr->type == ATTR_STD)
 			continue;
@@ -1347,7 +1347,7 @@ int ni_expand_list(struct ntfs_inode *ni)
 		asize = le32_to_cpu(attr->size);
 
 		/* Always insert into new record to avoid collisions (deep recursive) */
-		err = ni_ins_attr_ext(ni, le, attr->type, attr_name(attr),
+		err = ni_ins_attr_ext(ni, le, attr->type, attr_name_ntfs(attr),
 				      attr->name_len, asize, attr_svcn(attr),
 				      le16_to_cpu(attr->name_off), true,
 				      &ins_attr, NULL);
@@ -1916,7 +1916,7 @@ int ni_fiemap(struct ntfs_inode *ni, struct fiemap_extent_info *fieinfo,
 			down_write(run_lock);
 
 			err = attr_load_runs_vcn(ni, attr->type,
-						 attr_name(attr),
+						 attr_name_ntfs(attr),
 						 attr->name_len, run, vcn);
 
 			up_write(run_lock);
@@ -2224,7 +2224,7 @@ remove_wof:
 		if (attr->type != ATTR_REPARSE &&
 		    (attr->type != ATTR_DATA ||
 		     attr->name_len != ARRAY_SIZE(WOF_NAME) ||
-		     memcmp(attr_name(attr), WOF_NAME, sizeof(WOF_NAME))))
+		     memcmp(attr_name_ntfs(attr), WOF_NAME, sizeof(WOF_NAME))))
 			continue;
 
 		svcn = le64_to_cpu(attr->nres.svcn);

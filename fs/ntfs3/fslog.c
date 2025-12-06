@@ -2962,7 +2962,7 @@ static inline int cmp_type_and_name(const struct ATTRIB *a1,
 				    const struct ATTRIB *a2)
 {
 	return a1->type != a2->type || a1->name_len != a2->name_len ||
-	       (a1->name_len && memcmp(attr_name(a1), attr_name(a2),
+	       (a1->name_len && memcmp(attr_name_ntfs(a1), attr_name_ntfs(a2),
 				       a1->name_len * sizeof(short)));
 }
 
@@ -4744,7 +4744,7 @@ fake_attr:
 	} else {
 		if (attr->type == ATTR_ALLOC &&
 		    attr->name_len == ARRAY_SIZE(I30_NAME) &&
-		    !memcmp(attr_name(attr), I30_NAME, sizeof(I30_NAME))) {
+		    !memcmp(attr_name_ntfs(attr), I30_NAME, sizeof(I30_NAME))) {
 			oa->run1 = &ni_oe->dir.alloc_run;
 			goto final_oe;
 		}

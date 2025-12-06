@@ -427,7 +427,7 @@ static inline bool is_attr_indexed(const struct ATTRIB *attr)
 	return !attr->non_res && (attr->res.flags & RESIDENT_FLAG_INDEXED);
 }
 
-static inline __le16 const *attr_name(const struct ATTRIB *attr)
+static inline __le16 const *attr_name_nfts(const struct ATTRIB *attr)
 {
 	return Add2Ptr(attr, le16_to_cpu(attr->name_off));
 }

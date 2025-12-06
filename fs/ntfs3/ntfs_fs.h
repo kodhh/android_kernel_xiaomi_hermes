@@ -1104,7 +1104,7 @@ static inline int attr_load_runs_attr(struct ntfs_inode *ni,
 				      struct ATTRIB *attr,
 				      struct runs_tree *run, CLST vcn)
 {
-	return attr_load_runs_vcn(ni, attr->type, attr_name(attr),
+	return attr_load_runs_vcn(ni, attr->type, attr_name_ntfs(attr),
 				  attr->name_len, run, vcn);
 }
 

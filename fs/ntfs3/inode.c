@@ -201,10 +201,10 @@ next_attr:
 		if (attr->name_len &&
 		    ((ino != MFT_REC_BADCLUST || !attr->non_res ||
 		      attr->name_len != ARRAY_SIZE(BAD_NAME) ||
-		      memcmp(attr_name(attr), BAD_NAME, sizeof(BAD_NAME))) &&
+		      memcmp(attr_name_ntfs(attr), BAD_NAME, sizeof(BAD_NAME))) &&
 		     (ino != MFT_REC_SECURE || !attr->non_res ||
 		      attr->name_len != ARRAY_SIZE(SDS_NAME) ||
-		      memcmp(attr_name(attr), SDS_NAME, sizeof(SDS_NAME))))) {
+		      memcmp(attr_name_ntfs(attr), SDS_NAME, sizeof(SDS_NAME))))) {
 			/* file contains stream attribute. ignore it */
 			goto next_attr;
 		}
@@ -258,7 +258,7 @@ next_attr:
 		is_root = true;
 
 		if (attr->name_len != ARRAY_SIZE(I30_NAME) ||
-		    memcmp(attr_name(attr), I30_NAME, sizeof(I30_NAME)))
+		    memcmp(attr_name_ntfs(attr), I30_NAME, sizeof(I30_NAME)))
 			goto next_attr;
 
 		if (root->type != ATTR_NAME ||
@@ -281,7 +281,7 @@ next_attr:
 
 	case ATTR_ALLOC:
 		if (!is_root || attr->name_len != ARRAY_SIZE(I30_NAME) ||
-		    memcmp(attr_name(attr), I30_NAME, sizeof(I30_NAME)))
+		    memcmp(attr_name_ntfs(attr), I30_NAME, sizeof(I30_NAME)))
 			goto next_attr;
 
 		inode->i_size = le64_to_cpu(attr->nres.data_size);
@@ -303,7 +303,7 @@ next_attr:
 			run = &sbi->mft.bitmap.run;
 			break;
 		} else if (is_dir && attr->name_len == ARRAY_SIZE(I30_NAME) &&
-			   !memcmp(attr_name(attr), I30_NAME,
+			   !memcmp(attr_name_ntfs(attr), I30_NAME,
 				   sizeof(I30_NAME)) &&
 			   attr->non_res) {
 			run = &ni->dir.bitmap_run;

@@ -27,7 +27,7 @@ static inline int compare_attr(const struct ATTRIB *left, enum ATTR_TYPE type,
 	/*
 	 * They have the same type code, so we have to compare the names.
 	 */
-	return ntfs_cmp_names(attr_name(left), left->name_len, name, name_len,
+	return ntfs_cmp_names(attr_name_ntfs(left), left->name_len, name, name_len,
 			      upcase, true);
 }
 
@@ -316,7 +316,7 @@ next_attr:
 	if (attr->name_len != name_len)
 		goto next_attr;
 
-	if (name_len && memcmp(attr_name(attr), name, name_len * sizeof(short)))
+	if (name_len && memcmp(attr_name_ntfs(attr), name, name_len * sizeof(short)))
 		goto next_attr;
 
 	if (id && *id != attr->id)

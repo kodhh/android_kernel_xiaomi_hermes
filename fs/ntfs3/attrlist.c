@@ -152,7 +152,7 @@ struct ATTR_LIST_ENTRY *al_find_le(struct ntfs_inode *ni,
 {
 	CLST svcn = attr_svcn(attr);
 
-	return al_find_ex(ni, le, attr->type, attr_name(attr), attr->name_len,
+	return al_find_ex(ni, le, attr->type, attr_name_ntfs(attr), attr->name_len,
 			  &svcn);
 }
 
