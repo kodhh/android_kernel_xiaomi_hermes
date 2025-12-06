@@ -27,6 +27,7 @@
 #define NTFS_FLAGS_MFTMIRR		0x00001000
 #define NTFS_FLAGS_NEED_REPLAY		0x04000000
 
+#define  REQ_OP_READ	0
 
 /* ni->ni_flags */
 /*

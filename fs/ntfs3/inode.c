@@ -983,7 +983,7 @@ static int ntfs_write_end(struct file *file, struct address_space *mapping,
 
 	if (err >= 0) {
 		if (!(ni->std_fa & FILE_ATTRIBUTE_ARCHIVE)) {
-			inode->i_ctime = inode->i_mtime = current_time(inode);
+			inode->i_ctime = inode->i_mtime = ntfs_current_time(inode);
 			ni->std_fa |= FILE_ATTRIBUTE_ARCHIVE;
 			dirty = true;
 		}
@@ -1841,7 +1841,7 @@ out3:
 		make_bad_inode(inode);
 	}
 
-	dir->i_mtime = dir->i_ctime = current_time(dir);
+	dir->i_mtime = dir->i_ctime = ntfs_current_time(dir);
 	mark_inode_dirty(dir);
 	inode->i_ctime = dir->i_ctime;
 	if (inode->i_nlink)
