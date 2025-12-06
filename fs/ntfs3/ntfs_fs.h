@@ -313,7 +313,7 @@ struct ntfs_inode {
 	 * Usually i_valid <= inode->i_size
 	 */
 	u64 i_valid;
-	struct timespec64 i_crtime;
+	struct timespec i_crtime;
 
 	struct mutex ni_lock;
 
@@ -927,15 +927,21 @@ static inline size_t bitmap_size(size_t bits)
 
 #define NTFS_TIME_GRAN 100
 
+static inline struct timespec ntfs_current_time(struct inode *inode)
+{
+	return (inode->i_sb->s_time_gran < NSEC_PER_SEC) ?
+		current_fs_time(inode->i_sb) : CURRENT_TIME_SEC;
+}
+
 /*
  * kernel2nt
  *
  * converts in-memory kernel timestamp into nt time
  */
-static inline __le64 kernel2nt(const struct timespec64 *ts)
+static inline __le64 kernel2nt(const struct timespec *ts)
 {
 	// 10^7 units of 100 nanoseconds one second
-	return cpu_to_le64(_100ns2seconds *
+	return cpu_to_le32(_100ns2seconds *
 				   (ts->tv_sec + SecondsToStartOf1970) +
 			   ts->tv_nsec / NTFS_TIME_GRAN);
 }
@@ -945,9 +951,9 @@ static inline __le64 kernel2nt(const struct timespec64 *ts)
  *
  * converts on-disk nt time into kernel timestamp
  */
-static inline void nt2kernel(const __le64 tm, struct timespec64 *ts)
+static inline void nt2kernel(const __le64 tm, struct timespec *ts)
 {
-	u64 t = le64_to_cpu(tm) - _100ns2seconds * SecondsToStartOf1970;
+	u64 t = le32_to_cpu(tm) - _100ns2seconds * SecondsToStartOf1970;
 
 	// WARNING: do_div changes its first argument(!)
 	ts->tv_nsec = do_div(t, _100ns2seconds) * 100;

@@ -1317,7 +1317,7 @@ struct inode *ntfs_create_inode(
 	inode = &ni->vfs_inode;
 
 	inode->i_atime = inode->i_mtime = inode->i_ctime = ni->i_crtime =
-		current_time(inode);
+		ntfs_current_time(inode);
 
 	rec = ni->mi.mrec;
 	rec->hard_links = cpu_to_le16(1);
