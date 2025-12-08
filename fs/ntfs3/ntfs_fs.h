@@ -5,6 +5,8 @@
  *
  */
 
+#include <linux/ratelimit.h>
+
 // clang-format off
 #define MINUS_ONE_T			((size_t)(-1))
 /* Biggest MFT / smallest cluster */

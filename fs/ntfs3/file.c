@@ -1042,7 +1042,7 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		inode_lock(inode);
 	}
 
-	ret = generic_write_checks(iocb, from);
+	ret = generic_write_checks(file，iocb, from);
 	if (ret <= 0)
 		goto out;
 
@@ -1158,7 +1158,6 @@ const struct file_operations ntfs_file_operations = {
 	.llseek = generic_file_llseek,
 	.read		= do_sync_read,
 	.write		= do_sync_write,
-	.aio_read	= generic_file_aio_read,
 	.unlocked_ioctl = ntfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ntfs_compat_ioctl,
