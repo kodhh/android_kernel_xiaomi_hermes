@@ -25,6 +25,13 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
+#ifndef fallthrough
+#if __has_attribute(__fallthrough__)
+#define fallthrough __attribute__((__fallthrough__))
+#else
+#define fallthrough do {} while (0)  /* fallthrough */
+#endif
+#endif
 
 /* "Force inline" macro (not required, but helpful for performance)  */
 #define forceinline __always_inline

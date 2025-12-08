@@ -23,6 +23,13 @@
 #include "ntfs.h"
 #include "ntfs_fs.h"
 
+/* Because kfree isn't assignment-compatible with void(void*) ;-/ */
+void kfree_link(void *p)
+{
+	kfree(p);
+}
+EXPORT_SYMBOL(kfree_link);
+
 /*
  * ntfs_read_mft
  *
@@ -624,7 +631,7 @@ static noinline int ntfs_get_block_vbo(struct inode *inode, u64 vbo,
 		bh->b_size = bytes = block_size;
 		off = vbo & (PAGE_SIZE - 1);
 		set_bh_page(bh, page, off);
-		ll_rw_block(REQ_OP_READ, 0, 1, &bh);
+		ll_rw_block(READ, 1, &bh);
 		wait_on_buffer(bh);
 		/* Uhhuh. Read error. Complain and punt. */
 		if (!buffer_uptodate(bh)) {
@@ -762,73 +769,76 @@ static int ntfs_get_block_direct_IO_W(struct inode *inode, sector_t iblock,
 
 static ssize_t ntfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
-	struct file *file = iocb->ki_filp;
-	struct address_space *mapping = file->f_mapping;
-	struct inode *inode = mapping->host;
-	struct ntfs_inode *ni = ntfs_i(inode);
-	size_t count = iov_iter_count(iter);
-	loff_t vbo = iocb->ki_pos;
-	loff_t end = vbo + count;
-	int wr = iov_iter_rw(iter) & WRITE;
-	const struct iovec *iov = iter->iov;
-	unsigned long nr_segs = iter->nr_segs;
-	loff_t valid;
-	ssize_t ret;
+    struct file *file = iocb->ki_filp;
+    struct address_space *mapping = file->f_mapping;
+    struct inode *inode = mapping->host;
+    struct ntfs_inode *ni = ntfs_i(inode);
+    size_t count = iov_iter_count(iter);
+    loff_t vbo = iocb->ki_pos;
+    loff_t end = vbo + count;
+    int wr = iov_iter_rw(iter) & WRITE;
+    const struct iovec *iov = iter->iov;
+    unsigned long nr_segs = iter->nr_segs;
+    loff_t valid;
+    ssize_t ret;
 
-	if (is_resident(ni)) {
-		/*switch to buffered write*/
-		ret = 0;
-		goto out;
-	}
+    if (is_resident(ni)) {
+        /*switch to buffered write*/
+        ret = 0;
+        goto out;
+    }
 
-	ret = blockdev_direct_IO(iocb, inode, iter,
-				 wr ? ntfs_get_block_direct_IO_W
-				    : ntfs_get_block_direct_IO_R);
-	valid = ni->i_valid;
-	if (wr) {
-		if (ret <= 0)
-			goto out;
+    /* 根据您提供的函数签名修改 */
+    ret = blockdev_direct_IO(wr ? WRITE : READ, iocb, inode,
+                             iov, vbo, nr_segs,
+                             wr ? ntfs_get_block_direct_IO_W
+                                : ntfs_get_block_direct_IO_R);
+    
+    valid = ni->i_valid;
+    if (wr) {
+        if (ret <= 0)
+            goto out;
 
-		vbo += ret;
-		if (vbo > valid && !S_ISBLK(inode->i_mode)) {
-			ni->i_valid = vbo;
-			mark_inode_dirty(inode);
-		}
-	} else if (vbo < valid && valid < end) {
-		/* fix page */
-		unsigned long uaddr = ~0ul;
-		struct page *page;
-		long i, npages;
-		size_t dvbo = valid - vbo;
-		size_t off = 0;
+        vbo += ret;
+        if (vbo > valid && !S_ISBLK(inode->i_mode)) {
+            ni->i_valid = vbo;
+            mark_inode_dirty(inode);
+        }
+    } else if (vbo < valid && valid < end) {
+        /* fix page */
+        unsigned long uaddr = ~0ul;
+        struct page *page;
+        long i, npages;
+        size_t dvbo = valid - vbo;
+        size_t off = 0;
 
-		/*Find user address*/
-		for (i = 0; i < nr_segs; i++) {
-			if (off <= dvbo && dvbo < off + iov[i].iov_len) {
-				uaddr = (unsigned long)iov[i].iov_base + dvbo -
-					off;
-				break;
-			}
-			off += iov[i].iov_len;
-		}
+        /*Find user address*/
+        for (i = 0; i < nr_segs; i++) {
+            if (off <= dvbo && dvbo < off + iov[i].iov_len) {
+                uaddr = (unsigned long)iov[i].iov_base + dvbo -
+                    off;
+                break;
+            }
+            off += iov[i].iov_len;
+        }
 
-		if (uaddr == ~0ul)
-			goto fix_error;
+        if (uaddr == ~0ul)
+            goto fix_error;
 
-		npages = get_user_pages_unlocked(uaddr, 1, &page, FOLL_WRITE);
+        npages = get_user_pages_unlocked(uaddr, 1, &page, FOLL_WRITE);
 
-		if (npages <= 0)
-			goto fix_error;
+        if (npages <= 0)
+            goto fix_error;
 
-		zero_user_segment(page, valid & (PAGE_SIZE - 1), PAGE_SIZE);
-		put_page(page);
-	}
+        zero_user_segment(page, valid & (PAGE_SIZE - 1), PAGE_SIZE);
+        put_page(page);
+    }
 
 out:
-	return ret;
+    return ret;
 fix_error:
-	ntfs_inode_warn(inode, "file garbage at 0x%llx", valid);
-	goto out;
+    ntfs_inode_warn(inode, "file garbage at 0x%llx", valid);
+    goto out;
 }
 
 int ntfs_set_size(struct inode *inode, u64 new_size)
@@ -2045,12 +2055,14 @@ static const char *ntfs_get_link(struct dentry *de, struct inode *inode,
 }
 
 const struct inode_operations ntfs_link_inode_operations = {
-	.get_link = ntfs_get_link,
+	.readlink = ntfs_get_link,
 	.setattr = ntfs3_setattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
+#if 0
 	.set_acl = ntfs_set_acl,
+#endif
 };
 
 const struct address_space_operations ntfs_aops = {

@@ -723,7 +723,7 @@ static int ntfs_xattr_set_acl(
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
 		err = posix_acl_valid(mnt_userns, acl);
 #else
-		err = posix_acl_valid(&init_user_ns, acl);
+		err = posix_acl_valid(acl);
 #endif
 		if (err)
 			goto release_and_out;
@@ -824,27 +824,73 @@ out:
  */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
 int ntfs_acl_chmod(struct user_namespace *mnt_userns, struct inode *inode)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+/* Linux 4.8 到 5.11 版本 */
+int ntfs_acl_chmod(struct inode *inode)
 #else
+/* Linux 3.10 到 4.7 版本 */
 int ntfs_acl_chmod(struct inode *inode)
 #endif
 {
-	struct super_block *sb = inode->i_sb;
+    struct super_block *sb = inode->i_sb;
+    int err = 0;
+    struct posix_acl *acl;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
-	if (!(sb->s_flags & SB_POSIXACL))
+    if (!(sb->s_flags & SB_POSIXACL))
 #else
-	if (!(sb->s_flags & MS_POSIXACL))
+    if (!(sb->s_flags & MS_POSIXACL))
 #endif
-		return 0;
+        return 0;
 
-	if (S_ISLNK(inode->i_mode))
-		return -EOPNOTSUPP;
+    if (S_ISLNK(inode->i_mode))
+        return -EOPNOTSUPP;
 
+    /* 内核版本特定的posix_acl_chmod调用 */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-	return posix_acl_chmod(mnt_userns, inode, inode->i_mode);
+    /* 5.12+ 版本：带user_namespace参数 */
+    err = posix_acl_chmod(mnt_userns, inode, inode->i_mode);
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+    /* 4.8 到 5.11 版本：标准posix_acl_chmod */
+    err = posix_acl_chmod(inode, inode->i_mode);
 #else
-	return posix_acl_chmod(inode, inode->i_mode);
+    /* Linux 3.10 到 4.7 版本：手动处理旧的posix_acl_chmod API */
+    
+    /* 1. 获取文件的ACL */
+    acl = ntfs_get_acl(inode, ACL_TYPE_ACCESS);
+    if (IS_ERR(acl)) {
+        err = PTR_ERR(acl);
+        goto out;
+    }
+    
+    if (acl) {
+        /* 2. 克隆ACL以便修改 */
+        struct posix_acl *clone;
+        
+        clone = posix_acl_clone(acl, GFP_KERNEL);
+        if (!clone) {
+            err = -ENOMEM;
+            goto out_release;
+        }
+        
+        /* 3. 修改克隆的ACL */
+        err = posix_acl_chmod(&clone, GFP_KERNEL, inode->i_mode);
+        if (err) {
+            posix_acl_release(clone);
+            goto out_release;
+        }
+        
+        /* 4. 设置新的ACL */
+        err = ntfs_set_acl(inode, clone, ACL_TYPE_ACCESS);
+        posix_acl_release(clone);
+    }
+    
+out_release:
+    posix_acl_release(acl);
+out:
 #endif
+
+    return err;
 }
 
 /*

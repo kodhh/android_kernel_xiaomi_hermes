@@ -44,3 +44,13 @@
 #ifndef struct_size
 #define struct_size(p, member, n) (sizeof(*(p)) + n * sizeof(*(p)->member))
 #endif
+
+/* Account to memcg */
+#ifdef CONFIG_MEMCG_KMEM
+# define SLAB_ACCOUNT		((slab_flags_t __force)0x04000000U)
+#else
+# define SLAB_ACCOUNT		0
+#endif
+
+#define RENAME_NOREPLACE	(1 << 0)	/* Don't overwrite target */
+#define MS_LAZYTIME	(1<<25) /* Update the on-disk [acm]times lazily */

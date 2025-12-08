@@ -10,9 +10,7 @@
 #include <linux/compat.h>
 #include <linux/falloc.h>
 #include <linux/fiemap.h>
-#include <linux/msdos_fs.h> /* FAT_IOCTL_XXX */
 #include <linux/nls.h>
-#include <linux/aio.h>
 #include <linux/uio.h>
 
 #include "debug.h"
@@ -24,6 +22,7 @@ static int ntfs_ioctl_fitrim(struct ntfs_sb_info *sbi, unsigned long arg)
 	struct fstrim_range __user *user_range;
 	struct fstrim_range range;
 	struct request_queue *q = bdev_get_queue(sbi->sb->s_bdev);
+	unsigned int discard_granularity;
 	int err;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -36,7 +35,9 @@ static int ntfs_ioctl_fitrim(struct ntfs_sb_info *sbi, unsigned long arg)
 	if (copy_from_user(&range, user_range, sizeof(range)))
 		return -EFAULT;
 
-	range.minlen = max_t(u32, range.minlen, q->limits.discard_granularity);
+	discard_granularity = blk_queue_discard_granularity(q);
+	
+	range.minlen = max_t(u32, range.minlen, discard_granularity);
 
 	err = ntfs_trim_fs(sbi, &range);
 	if (err < 0)
@@ -58,7 +59,7 @@ static long ntfs_ioctl(struct file *filp, u32 cmd, unsigned long arg)
 	case FAT_IOCTL_GET_ATTRIBUTES:
 		return put_user(le32_to_cpu(ntfs_i(inode)->std_fa), user_attr);
 
-	case FAT_IOCTL_GET_VOLUME_ID:
+	case VFAT_IOCTL_GET_VOLUME_ID:
 		return put_user(sbi->volume.ser_num, user_attr);
 
 	case FITRIM:
@@ -531,7 +532,7 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo, vbo_down);
+		truncate_pagecache(inode, vbo, end);
 
 		ni_lock(ni);
 		err = attr_punch_hole(ni, vbo, len);
@@ -560,7 +561,7 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo ,vbo_down);
+		truncate_pagecache(inode, vbo, end);
 
 		ni_lock(ni);
 		err = attr_collapse_range(ni, vbo, len);
@@ -1042,7 +1043,21 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		inode_lock(inode);
 	}
 
-	ret = generic_write_checks(file，iocb, from);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
+	// 3.16+ 内核使用新版 API
+	ret = generic_write_checks(iocb, from);
+#else
+	// 3.10-3.15 内核使用旧版 API
+	loff_t pos = iocb->ki_pos;
+	size_t count = iov_iter_count(from);
+	
+	ret = generic_write_checks(file, &pos, &count, 0);
+	if (ret >= 0) {
+		iocb->ki_pos = pos;
+		iov_iter_truncate(from, count);
+	}
+#endif
+
 	if (ret <= 0)
 		goto out;
 
@@ -1052,7 +1067,12 @@ static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		goto out;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
 	ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
+#else
+	ret = ntfs_extend(inode, iocb->ki_pos, count, file);
+#endif
+
 	if (ret)
 		goto out;
 
@@ -1156,8 +1176,8 @@ const struct inode_operations ntfs_file_inode_operations = {
 
 const struct file_operations ntfs_file_operations = {
 	.llseek = generic_file_llseek,
-	.read		= do_sync_read,
-	.write		= do_sync_write,
+	.read		= ntfs_file_read_iter,
+	.write		= ntfs_file_write_iter,
 	.unlocked_ioctl = ntfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ntfs_compat_ioctl,
@@ -1166,7 +1186,6 @@ const struct file_operations ntfs_file_operations = {
 	.mmap = ntfs_file_mmap,
 	.open = ntfs_file_open,
 	.fsync = generic_file_fsync,
-	.splice_read	= generic_file_splice_read,
 	.splice_write	= generic_file_splice_write,
 	.fallocate = ntfs_fallocate,
 	.release = ntfs_file_release,

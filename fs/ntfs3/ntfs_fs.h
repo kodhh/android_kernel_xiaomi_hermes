@@ -6,7 +6,8 @@
  */
 
 #include <linux/ratelimit.h>
-#include <uapi/linux/msdos_fs.h>
+#include <linux/msdos_fs.h> /* FAT_IOCTL_XXX */
+#include <linux/aio.h>
 
 // clang-format off
 #define MINUS_ONE_T			((size_t)(-1))
@@ -924,42 +925,132 @@ static inline size_t bitmap_size(size_t bits)
 	return QuadAlign((bits + 7) >> 3);
 }
 
-#define _100ns2seconds 10000000
-#define SecondsToStartOf1970 0x00000002B6109100
-
+#define _100ns2seconds 10000000ULL
+#define SecondsToStartOf1970 0x00000002B6109100ULL
 #define NTFS_TIME_GRAN 100
+#define NTFS_MAX_UNIX_SECONDS 0x7FFFFFFF  // 2038年限制
 
+/*
+ * ntfs_current_time - 获取当前时间并调整为文件系统粒度
+ */
 static inline struct timespec ntfs_current_time(struct inode *inode)
 {
-	return (inode->i_sb->s_time_gran < NSEC_PER_SEC) ?
-		current_fs_time(inode->i_sb) : CURRENT_TIME_SEC;
+    struct timespec now;
+    
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
+    // 3.17+ 使用current_kernel_time
+    now = current_kernel_time();
+#else
+    // 3.10及以下版本使用getnstimeofday
+    struct timeval tv;
+    do_gettimeofday(&tv);
+    now.tv_sec = tv.tv_sec;
+    now.tv_nsec = tv.tv_usec * 1000;
+#endif
+    
+    // 根据文件系统时间粒度调整精度
+    if (inode->i_sb->s_time_gran > 1) {
+        now.tv_nsec -= now.tv_nsec % inode->i_sb->s_time_gran;
+    }
+    
+    // 确保纳秒在有效范围内
+    if (now.tv_nsec >= NSEC_PER_SEC) {
+        now.tv_sec++;
+        now.tv_nsec -= NSEC_PER_SEC;
+    }
+    
+    return now;
 }
 
 /*
- * kernel2nt
- *
- * converts in-memory kernel timestamp into nt time
+ * kernel2nt_safe - 安全地将内核时间转换为NTFS时间（100纳秒单位）
+ * 返回：0成功，负数错误码
  */
-static inline __le64 kernel2nt(const struct timespec *ts)
+static inline int kernel2nt_safe(const struct timespec *ts, __le64 *nt_time)
 {
-	// 10^7 units of 100 nanoseconds one second
-	return cpu_to_le32(_100ns2seconds *
-				   (ts->tv_sec + SecondsToStartOf1970) +
-			   ts->tv_nsec / NTFS_TIME_GRAN);
+    u64 result;
+    
+    // 检查输入
+    if (ts->tv_sec < 0) {
+        // Unix时间不能为负，设置为0（1970-01-01）
+        result = _100ns2seconds * SecondsToStartOf1970;
+    } else {
+        // 使用64位计算
+        result = (u64)ts->tv_sec;
+        
+        // 检查是否超出NTFS可表示范围
+        if (result > 0x7FFFFFFFFFFFFFFFULL / _100ns2seconds - SecondsToStartOf1970) {
+            // 超出范围，使用最大值
+            result = 0x7FFFFFFFFFFFFFFFULL;
+        } else {
+            result += SecondsToStartOf1970;
+            result *= _100ns2seconds;
+            
+            // 添加纳秒部分
+            if (ts->tv_nsec >= 0 && ts->tv_nsec < NSEC_PER_SEC) {
+                result += ts->tv_nsec / NTFS_TIME_GRAN;
+            }
+            
+            // 检查最终结果
+            if (result > 0x7FFFFFFFFFFFFFFFULL) {
+                result = 0x7FFFFFFFFFFFFFFFULL;
+            }
+        }
+    }
+    
+    *nt_time = cpu_to_le64(result);
+    return 0;
 }
 
 /*
- * nt2kernel
- *
- * converts on-disk nt time into kernel timestamp
+ * nt2kernel_safe - 安全地将NTFS时间转换为内核时间戳
+ * 返回：0成功，负数错误码
  */
-static inline void nt2kernel(const __le64 tm, struct timespec *ts)
+static inline int nt2kernel_safe(const __le64 tm, struct timespec *ts)
 {
-	u64 t = le32_to_cpu(tm) - _100ns2seconds * SecondsToStartOf1970;
-
-	// WARNING: do_div changes its first argument(!)
-	ts->tv_nsec = do_div(t, _100ns2seconds) * 100;
-	ts->tv_sec = t;
+    u64 t = le64_to_cpu(tm);
+    u64 sec64;
+    u32 nsec100;
+    
+    // 检查是否为0（无效时间）
+    if (t == 0) {
+        ts->tv_sec = 0;
+        ts->tv_nsec = 0;
+        return 0;
+    }
+    
+    // 减去1601-1970的时间差
+    if (t < _100ns2seconds * SecondsToStartOf1970) {
+        // NTFS时间早于1970年，这在NTFS中是合法的
+        // 但Unix时间不能为负，我们设为0
+        ts->tv_sec = 0;
+        ts->tv_nsec = 0;
+        return 0;
+    }
+    
+    t -= _100ns2seconds * SecondsToStartOf1970;
+    
+    // 计算秒和100纳秒单位
+    sec64 = t / _100ns2seconds;
+    nsec100 = do_div(t, _100ns2seconds);  // t现在包含剩余的100纳秒单位
+    
+    // 检查是否适合32位time_t（2038年问题）
+    if (sec64 > NTFS_MAX_UNIX_SECONDS) {
+        // 超过2038年，设为最大值
+        ts->tv_sec = NTFS_MAX_UNIX_SECONDS;
+        ts->tv_nsec = 999999999;  // 最大纳秒值
+        return -EOVERFLOW;
+    }
+    
+    ts->tv_sec = (time_t)sec64;
+    ts->tv_nsec = (long)(nsec100 * NTFS_TIME_GRAN);
+    
+    // 确保纳秒在有效范围内
+    if (ts->tv_nsec >= NSEC_PER_SEC) {
+        ts->tv_nsec = NSEC_PER_SEC - 1;
+    }
+    
+    return 0;
 }
 
 static inline struct ntfs_sb_info *ntfs_sb(struct super_block *sb)

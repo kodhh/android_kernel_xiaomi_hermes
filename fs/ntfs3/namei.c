@@ -151,7 +151,7 @@ static int ntfs_link(struct dentry *ode, struct inode *dir, struct dentry *de)
 	if (inode != dir)
 		ni_lock(ni);
 
-	dir->i_ctime = dir->i_mtime = inode->i_ctime = current_time(inode);
+	dir->i_ctime = dir->i_mtime = inode->i_ctime = ntfs_current_time(inode);
 	inc_nlink(inode);
 	ihold(inode);
 
@@ -443,7 +443,7 @@ static int ntfs_rename(struct inode *old_dir,
 	else
 		mark_inode_dirty(old_inode);
 
-	old_dir->i_ctime = old_dir->i_mtime = current_time(old_dir);
+	old_dir->i_ctime = old_dir->i_mtime = ntfs_current_time(old_dir);
 	if (IS_DIRSYNC(old_dir))
 		(void)ntfs_sync_inode(old_dir);
 	else
@@ -617,7 +617,9 @@ const struct inode_operations ntfs_dir_inode_operations = {
 	.rename = ntfs_rename,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
+#if 0
 	.set_acl = ntfs_set_acl,
+#endif
 	.setattr = ntfs3_setattr,
 	.getattr = ntfs_getattr,
 	.listxattr = ntfs_listxattr,
