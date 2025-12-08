@@ -2,9 +2,9 @@ name: Build Kernel
 
 on:
   push:
-    branches: [ lineage-16.0 ]
+    branches: [ test ]
   pull_request:
-    branches: [ lineage-16.0 ]
+    branches: [ test ]
 
 jobs:
   build:
