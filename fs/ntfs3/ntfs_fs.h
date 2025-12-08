@@ -6,6 +6,7 @@
  */
 
 #include <linux/ratelimit.h>
+#include <uapi/linux/msdos_fs.h>
 
 // clang-format off
 #define MINUS_ONE_T			((size_t)(-1))

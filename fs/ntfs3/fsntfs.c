@@ -15,8 +15,6 @@
 #include "ntfs.h"
 #include "ntfs_fs.h"
 
-#define SECTOR_SIZE    512             /* sector size (bytes) */
-
 // clang-format off
 const struct cpu_str NAME_MFT = {
 	4, 0, { '$', 'M', 'F', 'T' },
@@ -1658,7 +1656,7 @@ new_bio:
 #else
 		bio->bi_bdev = bdev;
 #endif
-		bio->bi_rw = REQ_WRITE;
+		bio->bi_rw = WRITE;
 		bio->bi_sector = lbo >> 9;
 
 		for (;;) {

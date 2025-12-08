@@ -2190,7 +2190,7 @@ int ni_decompress_file(struct ntfs_inode *ni)
 			down_read(&ni->file.run_lock);
 			err = ntfs_bio_pages(sbi, &ni->file.run, pages,
 					     nr_pages, vbo, bytes,
-					     REQ_WRITE);
+					     WRITE);
 			up_read(&ni->file.run_lock);
 		}
 
@@ -2799,7 +2799,7 @@ int ni_write_frame(struct ntfs_inode *ni, struct page **pages,
 	err = ntfs_bio_pages(sbi, &ni->file.run,
 			     ondisk_size < frame_size ? pages_disk : pages,
 			     pages_per_frame, frame_vbo, ondisk_size,
-			     REQ_WRITE);
+			     WRITE);
 	up_read(&ni->file.run_lock);
 
 out3:
