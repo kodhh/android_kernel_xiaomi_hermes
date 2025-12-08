@@ -1063,7 +1063,7 @@ out:
 	inode_unlock(inode);
 
 	if (ret > 0)
-		ret = generic_write_sync(iocb, ret);
+		ret = generic_write_sync(file, iocb, ret);
 
 	return ret;
 }
@@ -1148,14 +1148,17 @@ const struct inode_operations ntfs_file_inode_operations = {
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
+#if 0
 	.set_acl = ntfs_set_acl,
+#endif
 	.fiemap = ntfs_fiemap,
 };
 
 const struct file_operations ntfs_file_operations = {
 	.llseek = generic_file_llseek,
-	.read_iter = ntfs_file_read_iter,
-	.write_iter = ntfs_file_write_iter,
+	.read		= do_sync_read,
+	.write		= do_sync_write,
+	.aio_read	= generic_file_aio_read,
 	.unlocked_ioctl = ntfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ntfs_compat_ioctl,
@@ -1164,7 +1167,8 @@ const struct file_operations ntfs_file_operations = {
 	.mmap = ntfs_file_mmap,
 	.open = ntfs_file_open,
 	.fsync = generic_file_fsync,
-	.splice_write = iter_file_splice_write,
+	.splice_read	= generic_file_splice_read,
+	.splice_write	= generic_file_splice_write,
 	.fallocate = ntfs_fallocate,
 	.release = ntfs_file_release,
 };
