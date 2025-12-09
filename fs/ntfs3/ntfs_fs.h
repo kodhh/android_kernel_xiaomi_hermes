@@ -948,43 +948,6 @@ static inline size_t bitmap_size(size_t bits)
 #define _100ns2seconds 10000000ULL
 #define SecondsToStartOf1970 0x00000002B6109100ULL
 #define NTFS_TIME_GRAN 100
-#define NTFS_MAX_UNIX_SECONDS 0x7FFFFFFF  // 2038年限制
-
-/*
- * kernel2nt - 将内核时间戳转换为NT时间（100纳秒单位）
- * 这是原始版本的修复版，保持原有接口
- */
-static inline __le64 kernel2nt(const struct timespec *ts)
-{
-    u64 result;
-    
-    // 计算NTFS时间
-    result = _100ns2seconds * ((u64)ts->tv_sec + SecondsToStartOf1970) +
-             (u32)ts->tv_nsec / NTFS_TIME_GRAN;
-    
-    return cpu_to_le64(result);
-}
-
-/*
- * nt2kernel - 将NT时间转换为内核时间戳
- * 保持原有接口
- */
-static inline void nt2kernel(const __le64 tm, struct timespec *ts)
-{
-    u64 t = le64_to_cpu(tm);
-    u64 sec64;
-    u32 nsec100;
-    
-    // 减去1601-1970的时间差
-    t -= _100ns2seconds * SecondsToStartOf1970;
-    
-    // 计算秒和纳秒
-    sec64 = t / _100ns2seconds;
-    nsec100 = do_div(t, _100ns2seconds);  // t现在包含剩余的100纳秒单位
-    
-    ts->tv_sec = (time_t)sec64;
-    ts->tv_nsec = (long)(nsec100 * NTFS_TIME_GRAN);
-}
 
 /*
  * ntfs_current_time - 获取当前时间并调整为文件系统粒度
@@ -1018,7 +981,22 @@ static inline struct timespec ntfs_current_time(struct inode *inode)
     return now;
 }
 
-static inline void nt2kernel_fast(const __le64 tm, struct timespec *ts)
+/*
+ * 简化的转换函数（不检查溢出，适用于内部使用）
+ */
+static inline __le64 kernel2nt(const struct timespec *ts)
+{
+    u64 result;
+    
+    // 直接计算，假设时间在合理范围内
+    result = (u64)ts->tv_sec + SecondsToStartOf1970;
+    result *= _100ns2seconds;
+    result += (u32)ts->tv_nsec / NTFS_TIME_GRAN;
+    
+    return cpu_to_le64(result);
+}
+
+static inline void nt2kernel(const __le64 tm, struct timespec *ts)
 {
     u64 t = le64_to_cpu(tm);
     u64 sec64;

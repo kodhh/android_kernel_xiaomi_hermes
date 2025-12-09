@@ -25,6 +25,13 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
+/*
+ * Copy from include/linux/compiler_attributes.h
+ */
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
 #ifndef fallthrough
 #if __has_attribute(__fallthrough__)
 #define fallthrough __attribute__((__fallthrough__))
