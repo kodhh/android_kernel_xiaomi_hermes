@@ -529,7 +529,7 @@ static int ntfs_atomic_open(struct inode *dir, struct dentry *dentry,
 
 	ni_lock_dir(ni);
 
-    if (d_unhashed(entry)) {
+    if (d_unhashed(dentry)) {
 		fnd = fnd_get();
 		if (!fnd) {
 			err = -ENOMEM;
