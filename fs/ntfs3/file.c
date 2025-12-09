@@ -10,6 +10,8 @@
 #include <linux/compat.h>
 #include <linux/falloc.h>
 #include <linux/fiemap.h>
+#include <linux/slab.h>
+#include <linux/blkdev.h>
 #include <linux/nls.h>
 #include <linux/uio.h>
 
@@ -22,7 +24,6 @@ static int ntfs_ioctl_fitrim(struct ntfs_sb_info *sbi, unsigned long arg)
 	struct fstrim_range __user *user_range;
 	struct fstrim_range range;
 	struct request_queue *q = bdev_get_queue(sbi->sb->s_bdev);
-	unsigned int discard_granularity;
 	int err;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -35,9 +36,7 @@ static int ntfs_ioctl_fitrim(struct ntfs_sb_info *sbi, unsigned long arg)
 	if (copy_from_user(&range, user_range, sizeof(range)))
 		return -EFAULT;
 
-	discard_granularity = blk_queue_discard_granularity(q);
-	
-	range.minlen = max_t(u32, range.minlen, discard_granularity);
+	range.minlen = max_t(u32, range.minlen, q->limits.discard_granularity);
 
 	err = ntfs_trim_fs(sbi, &range);
 	if (err < 0)
@@ -716,41 +715,85 @@ out:
 	return err;
 }
 
-static ssize_t ntfs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+/*
+ * file_operations::aio_read (For Linux 3.10)
+ * 由高版本的 ntfs_file_read_iter 降级移植
+ */
+static ssize_t ntfs_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
+                                  unsigned long nr_segs, loff_t pos)
 {
-	ssize_t err;
-	size_t count = iov_iter_count(iter);
-	struct file *file = iocb->ki_filp;
-	struct inode *inode = file->f_mapping->host;
-	struct ntfs_inode *ni = ntfs_i(inode);
+    ssize_t err;
+    struct file *file = iocb->ki_filp;
+    struct inode *inode = file->f_mapping->host;
+    struct ntfs_inode *ni = ntfs_i(inode);
+    struct iov_iter iter;
+    size_t count, total_len;
 
-	if (is_encrypted(ni)) {
-		ntfs_inode_warn(inode, "encrypted i/o not supported");
-		return -EOPNOTSUPP;
-	}
+    /* 3. 原有的各种不支持状态检查 */
+    if (is_encrypted(ni)) {
+        ntfs_inode_warn(inode, "encrypted i/o not supported");
+        return -EOPNOTSUPP;
+    }
 
-	if (is_compressed(ni)) {
-		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
-		return -EOPNOTSUPP;
-	}
+    if (is_compressed(ni)) {
+        ntfs_inode_warn(inode, "direct i/o + compressed not supported");
+        return -EOPNOTSUPP;
+    }
 
 #ifndef CONFIG_NTFS3_LZX_XPRESS
-	if (ni->ni_flags & NI_FLAG_COMPRESSED_MASK) {
-		ntfs_inode_warn(
-			inode,
-			"activate CONFIG_NTFS3_LZX_XPRESS to read external compressed files");
-		return -EOPNOTSUPP;
-	}
+    if (ni->ni_flags & NI_FLAG_COMPRESSED_MASK) {
+        ntfs_inode_warn(inode,
+            "activate CONFIG_NTFS3_LZX_XPRESS to read external compressed files");
+        return -EOPNOTSUPP;
+    }
 #endif
 
-	if (is_dedup(ni)) {
-		ntfs_inode_warn(inode, "read deduplicated not supported");
-		return -EOPNOTSUPP;
-	}
+    if (is_dedup(ni)) {
+        ntfs_inode_warn(inode, "read deduplicated not supported");
+        return -EOPNOTSUPP;
+    }
 
-	err = count ? generic_file_read_iter(iocb, iter) : 0;
+    /* 1. 根据3.10内核参数构造 iov_iter */
+    total_len = iov_length(iov, nr_segs);
+    iov_iter_init(&iter, iov, nr_segs, total_len, 0);
+    count = iov_iter_count(&iter);
 
-	return err;
+    /* 2. 更新 kiocb 中的读取位置 */
+    iocb->ki_pos = pos;
+
+    /* 4. 调用3.10内核对应的通用读取函数 */
+    err = count ? generic_file_aio_read(iocb, iov, nr_segs, pos) : 0;
+
+    return err;
+}
+
+static ssize_t ntfs_file_read(struct file *file, char __user *buf,
+			      size_t count, loff_t *ppos)
+{
+	struct iovec iov = {
+		.iov_base = (void __user *)buf,
+		.iov_len = count
+	};
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	/* 初始化同步 kiocb */
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+	kiocb.ki_nbytes = count;
+
+	/* 调用异步读函数 */
+	ret = ntfs_file_aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
+	
+	/* 如果是异步操作，等待完成 */
+	if (ret == -EIOCBQUEUED)
+		ret = wait_on_sync_kiocb(&kiocb);
+	
+	/* 更新读取位置 */
+	if (ret > 0)
+		*ppos = kiocb.ki_pos;
+	
+	return ret;
 }
 
 /* returns array of locked pages */
@@ -824,7 +867,7 @@ static ssize_t ntfs_compress_write(struct kiocb *iocb, struct iov_iter *from)
 		return -ENOMEM;
 
 	current->backing_dev_info = inode_to_bdi(inode);
-	err = file_remove_privs(file);
+	err = file_remove_suid(file);
 	if (err)
 		goto out;
 
@@ -1010,81 +1053,107 @@ out:
 }
 
 /*
- * file_operations::write_iter
+ * file_operations::aio_write (For Linux 3.10)
+ * 由高版本的 ntfs_file_write_iter 降级移植
  */
-static ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
+                                   unsigned long nr_segs, loff_t pos)
 {
-	struct file *file = iocb->ki_filp;
-	struct address_space *mapping = file->f_mapping;
-	struct inode *inode = mapping->host;
-	ssize_t ret;
-	struct ntfs_inode *ni = ntfs_i(inode);
+    struct file *file = iocb->ki_filp;
+    struct address_space *mapping = file->f_mapping;
+    struct inode *inode = mapping->host;
+    ssize_t ret;
+    struct ntfs_inode *ni = ntfs_i(inode);
+    struct iov_iter iter;
+    size_t count, total_len;
 
-	if (is_encrypted(ni)) {
-		ntfs_inode_warn(inode, "encrypted i/o not supported");
-		return -EOPNOTSUPP;
-	}
+    /* 2. 原有的状态检查逻辑 */
+    if (is_encrypted(ni)) {
+        ntfs_inode_warn(inode, "encrypted i/o not supported");
+        return -EOPNOTSUPP;
+    }
+    if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
+        ntfs_inode_warn(inode, "direct i/o + compressed not supported");
+        return -EOPNOTSUPP;
+    }
+    if (is_dedup(ni)) {
+        ntfs_inode_warn(inode, "write into deduplicated not supported");
+        return -EOPNOTSUPP;
+    }
 
-	if (is_compressed(ni)) {
-		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
-		return -EOPNOTSUPP;
-	}
+    /* 3. 上锁逻辑（3.10内核没有 IOCB_NOWAIT） */
+    if (!inode_trylock(inode)) {
+        inode_lock(inode);
+    }
 
-	if (is_dedup(ni)) {
-		ntfs_inode_warn(inode, "write into deduplicated not supported");
-		return -EOPNOTSUPP;
-	}
+    /* 1. 正确初始化 iov_iter (3.10版本) */
+    total_len = iov_length(iov, nr_segs);
+    iov_iter_init(&iter, iov, nr_segs, total_len, 0); /* written=0 */
+    
+    iocb->ki_pos = pos;
 
-	if (!inode_trylock(inode)) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
-		if (iocb->ki_flags & IOCB_NOWAIT)
-			return -EAGAIN;
-#endif
-		inode_lock(inode);
-	}
+    /* 4. 调用3.10版本的generic_write_checks */
+    count = iov_iter_count(&iter); // 从迭代器获取总长度
+    ret = generic_write_checks(file, &iocb->ki_pos, &count, 0); // isblk=0
+    if (ret < 0)                  // 函数错误返回负值
+        goto out;
+    // 函数成功时，`count` 被更新为允许写入的长度
+    ret = count;
+    if (ret <= 0)
+        goto out;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
-	// 3.16+ 内核使用新版 API
-	ret = generic_write_checks(iocb, from);
-#else
-	// 3.10-3.15 内核使用旧版 API
-	loff_t pos = iocb->ki_pos;
-	size_t count = iov_iter_count(from);
-	
-	ret = generic_write_checks(file, &pos, &count, 0);
-	if (ret >= 0) {
-		iocb->ki_pos = pos;
-		iov_iter_truncate(from, count);
-	}
-#endif
+    /* 5. 【关键】同步截断迭代器长度 */
+    iov_iter_truncate(&iter, count);
 
-	if (ret <= 0)
-		goto out;
+    /* 6. 检查压缩标志（不应出现的情况） */
+    if (WARN_ON(ni->ni_flags & NI_FLAG_COMPRESSED_MASK)) {
+        ret = -EOPNOTSUPP;
+        goto out;
+    }
 
-	if (WARN_ON(ni->ni_flags & NI_FLAG_COMPRESSED_MASK)) {
-		/* should never be here, see ntfs_file_open*/
-		ret = -EOPNOTSUPP;
-		goto out;
-	}
+    /* 7. 扩展文件 */
+    ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
+    if (ret)
+        goto out;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)
-	ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
-#else
-	ret = ntfs_extend(inode, iocb->ki_pos, count, file);
-#endif
-
-	if (ret)
-		goto out;
-
-	ret = is_compressed(ni) ? ntfs_compress_write(iocb, from)
-				: __generic_file_write_iter(iocb, from);
+    /* 8. 核心写入分支 */
+    if (is_compressed(ni)) {
+        /* 压缩写入：传递已截断的迭代器 */
+        ret = ntfs_compress_write(iocb, &iter);
+    } else {
+        /* 普通文件：调用3.10的通用写入函数 */
+        ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
+    }
 
 out:
-	inode_unlock(inode);
+    inode_unlock(inode);
 
-	if (ret > 0)
-		ret = generic_write_sync(file, iocb, ret);
+    /* 9. 同步写入（使用3.10的函数） */
+    if (ret > 0) {
+    /* 使用更新后的文件位置 iocb->ki_pos，而非原始参数 pos */
+        generic_write_sync(file, iocb->ki_pos - ret, ret);
+    }
 
+    return ret;
+}
+
+static ssize_t ntfs_file_write(struct file *file, const char __user *buf,
+			       size_t count, loff_t *ppos)
+{
+	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = count };
+	struct kiocb kiocb;
+	ssize_t ret;
+
+	init_sync_kiocb(&kiocb, file);
+	kiocb.ki_pos = *ppos;
+	kiocb.ki_nbytes = count;
+	kiocb.ki_left = count;
+
+	ret = ntfs_file_aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
+	if (-EIOCBQUEUED == ret)
+		ret = wait_on_sync_kiocb(&kiocb);
+	
+	*ppos = kiocb.ki_pos;
 	return ret;
 }
 
@@ -1176,8 +1245,10 @@ const struct inode_operations ntfs_file_inode_operations = {
 
 const struct file_operations ntfs_file_operations = {
 	.llseek = generic_file_llseek,
-	.read		= ntfs_file_read_iter,
-	.write		= ntfs_file_write_iter,
+	.read		= ntfs_file_read,
+	.write		= ntfs_file_write,
+	.aio_read		= ntfs_file_aio_read,
+	.aio_write		= ntfs_file_aio_write,
 	.unlocked_ioctl = ntfs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = ntfs_compat_ioctl,
