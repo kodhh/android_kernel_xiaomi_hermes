@@ -560,7 +560,7 @@ void buf_modify(struct super_block *sb, UINT32 sec)
 	sm_V(&b_sem);
 }
 
-void buf_lock(struct super_block *sb, UINT32 sec)
+void ext4_buf_lock(struct super_block *sb, UINT32 sec)
 {
 	BUF_CACHE_T *bp;
 
