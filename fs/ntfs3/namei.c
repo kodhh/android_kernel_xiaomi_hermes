@@ -529,7 +529,10 @@ static int ntfs_atomic_open(struct inode *dir, struct dentry *dentry,
 
 	ni_lock_dir(ni);
 
-	if (d_in_lookup(dentry)) {
+    // 替换 d_in_lookup(dentry)
+    if (dentry->d_flags & DCACHE_UNHASHED) {
+        // 这个 dentry 还没有被 hash 到 dentry cache 中
+        // 说明它正在 lookup 过程中
 		fnd = fnd_get();
 		if (!fnd) {
 			err = -ENOMEM;
