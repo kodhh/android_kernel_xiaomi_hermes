@@ -767,78 +767,94 @@ static int ntfs_get_block_direct_IO_W(struct inode *inode, sector_t iblock,
 				  bh_result, create, GET_BLOCK_DIRECT_IO_W);
 }
 
-static ssize_t ntfs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+static ssize_t ntfs_direct_IO(int rw, struct kiocb *iocb,
+			      const struct iovec *iov, loff_t offset,
+			      unsigned long nr_segs)
 {
-    struct file *file = iocb->ki_filp;
-    struct address_space *mapping = file->f_mapping;
-    struct inode *inode = mapping->host;
-    struct ntfs_inode *ni = ntfs_i(inode);
-    size_t count = iov_iter_count(iter);
-    loff_t vbo = iocb->ki_pos;
-    loff_t end = vbo + count;
-    int wr = iov_iter_rw(iter) & WRITE;
-    const struct iovec *iov = iter->iov;
-    unsigned long nr_segs = iter->nr_segs;
-    loff_t valid;
-    ssize_t ret;
+	struct file *file = iocb->ki_filp;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	struct ntfs_inode *ni = ntfs_i(inode);
+	size_t count = 0;
+	loff_t vbo = offset;
+	loff_t end;
+	int wr = (rw == WRITE);
+	loff_t valid;
+	ssize_t ret;
+	int i;
 
-    if (is_resident(ni)) {
-        /*switch to buffered write*/
-        ret = 0;
-        goto out;
-    }
+	/* 计算总长度 */
+	for (i = 0; i < nr_segs; i++)
+		count += iov[i].iov_len;
+	end = vbo + count;
 
-    /* 根据您提供的函数签名修改 */
-    ret = blockdev_direct_IO(wr ? WRITE : READ, iocb, inode,
-                             iov, vbo, nr_segs,
-                             wr ? ntfs_get_block_direct_IO_W
-                                : ntfs_get_block_direct_IO_R);
-    
-    valid = ni->i_valid;
-    if (wr) {
-        if (ret <= 0)
-            goto out;
+	if (is_resident(ni)) {
+		/* switch to buffered write */
+		ret = 0;
+		goto out;
+	}
 
-        vbo += ret;
-        if (vbo > valid && !S_ISBLK(inode->i_mode)) {
-            ni->i_valid = vbo;
-            mark_inode_dirty(inode);
-        }
-    } else if (vbo < valid && valid < end) {
-        /* fix page */
-        unsigned long uaddr = ~0ul;
-        struct page *page;
-        long i, npages;
-        size_t dvbo = valid - vbo;
-        size_t off = 0;
+	/* 在 3.10 中，blockdev_direct_IO 的参数顺序不同 */
+	ret = blockdev_direct_IO(rw, iocb, inode, iov, offset, nr_segs,
+				 wr ? ntfs_get_block_direct_IO_W
+				    : ntfs_get_block_direct_IO_R);
+	
+	valid = ni->i_valid;
+	if (wr) {
+		if (ret <= 0)
+			goto out;
 
-        /*Find user address*/
-        for (i = 0; i < nr_segs; i++) {
-            if (off <= dvbo && dvbo < off + iov[i].iov_len) {
-                uaddr = (unsigned long)iov[i].iov_base + dvbo -
-                    off;
-                break;
-            }
-            off += iov[i].iov_len;
-        }
+		vbo += ret;
+		if (vbo > valid && !S_ISBLK(inode->i_mode)) {
+			ni->i_valid = vbo;
+			mark_inode_dirty(inode);
+		}
+	} else if (vbo < valid && valid < end) {
+		/* fix page */
+		unsigned long uaddr = ~0ul;
+		struct page *page;
+		long npages;
+		size_t dvbo = valid - vbo;
+		size_t off = 0;
+		struct mm_struct *mm;
 
-        if (uaddr == ~0ul)
-            goto fix_error;
+		/* Find user address */
+		for (i = 0; i < nr_segs; i++) {
+			if (off <= dvbo && dvbo < off + iov[i].iov_len) {
+				uaddr = (unsigned long)iov[i].iov_base + dvbo - off;
+				break;
+			}
+			off += iov[i].iov_len;
+		}
 
-        npages = get_user_pages_unlocked(uaddr, 1, &page, FOLL_WRITE);
+		if (uaddr == ~0ul)
+			goto fix_error;
 
-        if (npages <= 0)
-            goto fix_error;
+		/* 在 3.10 中，使用 get_user_pages */
+		mm = current->mm;
+		down_read(&mm->mmap_sem);
+		/* get_user_pages 在 3.10 中的参数：
+		 * struct task_struct *tsk, struct mm_struct *mm,
+		 * unsigned long start, unsigned long nr_pages,
+		 * int write, int force, struct page **pages,
+		 * struct vm_area_struct **vmas
+		 */
+		npages = get_user_pages(current, mm, uaddr, 1,
+					wr ? 1 : 0, 0, &page, NULL);
+		up_read(&mm->mmap_sem);
 
-        zero_user_segment(page, valid & (PAGE_SIZE - 1), PAGE_SIZE);
-        put_page(page);
-    }
+		if (npages <= 0)
+			goto fix_error;
+
+		zero_user_segment(page, valid & (PAGE_SIZE - 1), PAGE_SIZE);
+		put_page(page);
+	}
 
 out:
-    return ret;
+	return ret;
 fix_error:
-    ntfs_inode_warn(inode, "file garbage at 0x%llx", valid);
-    goto out;
+	ntfs_inode_warn(inode, "file garbage at 0x%llx", valid);
+	goto out;
 }
 
 int ntfs_set_size(struct inode *inode, u64 new_size)
@@ -2030,32 +2046,50 @@ out:
 	return err;
 }
 
-static const char *ntfs_get_link(struct dentry *de, struct inode *inode,
-				 struct delayed_call *done)
+int ntfs_readlink(struct dentry *dentry, char __user *user_buffer, int buflen)
 {
-	int err;
-	char *ret;
+    struct inode *inode = d_inode(dentry);
+    char *kernel_buffer;
+    int err;
 
-	if (!de)
-		return ERR_PTR(-ECHILD);
+    // 1. 参数检查
+    if (buflen <= 0)
+        return -EINVAL;
 
-	ret = kmalloc(PAGE_SIZE, GFP_NOFS);
-	if (!ret)
-		return ERR_PTR(-ENOMEM);
+    // 2. 在内核空间分配临时缓冲区
+    kernel_buffer = kmalloc(PAGE_SIZE, GFP_NOFS);
+    if (!kernel_buffer)
+        return -ENOMEM;
 
-	err = ntfs_readlink_hlp(inode, ret, PAGE_SIZE);
-	if (err < 0) {
-		kfree(ret);
-		return ERR_PTR(err);
-	}
+    // 3. 调用核心逻辑函数读取链接目标
+    // 注意：3.10 版本的 ntfs_readlink_hlp 只有 3 个参数
+    err = ntfs_readlink_hlp(inode, kernel_buffer, PAGE_SIZE);
+    if (err < 0)
+        goto out_free;
 
-	set_delayed_call(done, kfree_link, ret);
+    // 4. 检查用户缓冲区是否足够大
+    if (err > buflen) {
+        err = -ENAMETOOLONG; // 用户缓冲区太小
+        goto out_free;
+    }
 
-	return ret;
+    // 5. 将结果从内核缓冲区复制到用户空间
+    if (copy_to_user(user_buffer, kernel_buffer, err)) {
+        err = -EFAULT; // 复制失败
+        goto out_free;
+    }
+
+    // 6. 成功：返回复制的字节数（不含终止符）
+    // 注意：ntfs_readlink_hlp 返回的是字符串长度（不包括终止符）
+    // 所以直接使用 err 作为返回值即可
+
+out_free:
+    kfree(kernel_buffer);
+    return err;
 }
 
 const struct inode_operations ntfs_link_inode_operations = {
-	.readlink = ntfs_get_link,
+	.readlink = ntfs_readlink,
 	.setattr = ntfs3_setattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,

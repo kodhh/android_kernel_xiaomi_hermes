@@ -469,8 +469,8 @@ out:
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL
 static inline void ntfs_posix_acl_release(struct posix_acl *acl)
 {
-	if (acl && refcount_dec_and_test(&acl->a_refcount))
-		kfree(acl);
+    if (acl && atomic_dec_and_test(&acl->a_refcount))
+        kfree(acl);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
@@ -777,7 +777,7 @@ int ntfs_init_acl(struct inode *inode,
 	}
 
 	acl = default_acl;
-	err = __posix_acl_create(&acl, GFP_NOFS, &inode->i_mode);
+	err = posix_acl_create(&acl, GFP_NOFS, &inode->i_mode);
 	if (err < 0)
 		goto out1;
 	if (!err) {
@@ -942,11 +942,11 @@ ssize_t ntfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	return ret;
 }
 
-static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
-			 struct inode *inode, const char *name, void *buffer,
-			 size_t size)
+static int ntfs_getxattr(struct dentry *dentry, const char *name,
+		void *buffer, size_t size, int type)
 {
 	int err;
+	struct inode *inode = dentry->d_inode;
 	struct ntfs_inode *ni = ntfs_i(inode);
 	size_t name_len = strlen(name);
 
@@ -1052,15 +1052,11 @@ out:
  *
  * inode_operations::setxattr
  */
-static noinline int ntfs_setxattr(const struct xattr_handler *handler,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-				  struct user_namespace *mnt_userns,
-#endif
-				  struct dentry *de, struct inode *inode,
-				  const char *name, const void *value,
-				  size_t size, int flags)
+static noinline int ntfs_setxattr(struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags, int type)
 {
 	int err = -EINVAL;
+	struct inode *inode = dentry->d_inode;
 	struct ntfs_inode *ni = ntfs_i(inode);
 	size_t name_len = strlen(name);
 	enum FILE_ATTRIBUTE new_fa;
@@ -1184,9 +1180,21 @@ out:
 	return err;
 }
 
-static bool ntfs_xattr_user_list(struct dentry *dentry)
+static size_t ntfs_xattr_user_list(struct dentry *dentry, char *list,
+    size_t list_size, const char *name, size_t name_len, int type)
 {
-	return true;
+    int total_len, prefix_len = 0;
+    const char *prefix = NULL;
+    prefix = XATTR_USER_PREFIX;
+    prefix_len = XATTR_USER_PREFIX_LEN;
+
+    total_len = prefix_len + name_len + 1;
+    if (list && total_len <= list_size) {
+        memcpy(list, prefix, prefix_len);
+        memcpy(list+prefix_len, name, name_len);
+        list[prefix_len + name_len] = '\0';
+    }
+    return total_len;
 }
 
 static const struct xattr_handler ntfs_xattr_handler = {

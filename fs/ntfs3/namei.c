@@ -606,6 +606,12 @@ struct dentry *ntfs3_get_parent(struct dentry *child)
 	return ERR_PTR(-ENOENT);
 }
 
+static int ntfs_rename2(struct inode *old_dir, struct dentry *old_dentry,
+			struct inode *new_dir, struct dentry *new_dentry)
+{
+	return ntfs_rename(old_dir, old_dentry, new_dir, new_dentry, 0);
+}
+
 const struct inode_operations ntfs_dir_inode_operations = {
 	.lookup = ntfs_lookup,
 	.create = ntfs_create,
@@ -614,7 +620,7 @@ const struct inode_operations ntfs_dir_inode_operations = {
 	.symlink = ntfs_symlink,
 	.mkdir = ntfs_mkdir,
 	.rmdir = ntfs_rmdir,
-	.rename = ntfs_rename,
+	.rename = ntfs_rename2,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
 #if 0

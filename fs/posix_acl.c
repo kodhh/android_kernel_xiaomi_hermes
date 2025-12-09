@@ -55,8 +55,7 @@ posix_acl_alloc(int count, gfp_t flags)
 /*
  * Clone an ACL.
  */
-static struct posix_acl *
-posix_acl_clone(const struct posix_acl *acl, gfp_t flags)
+struct posix_acl *posix_acl_clone(const struct posix_acl *acl, gfp_t flags)
 {
 	struct posix_acl *clone = NULL;
 
