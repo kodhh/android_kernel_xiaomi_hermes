@@ -735,7 +735,7 @@ static ssize_t ntfs_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
         return -EOPNOTSUPP;
     }
 
-    if (is_compressed(ni)) {
+    if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
         ntfs_inode_warn(inode, "direct i/o + compressed not supported");
         return -EOPNOTSUPP;
     }
@@ -765,35 +765,6 @@ static ssize_t ntfs_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
     err = count ? generic_file_aio_read(iocb, iov, nr_segs, pos) : 0;
 
     return err;
-}
-
-static ssize_t ntfs_file_read(struct file *file, char __user *buf,
-			      size_t count, loff_t *ppos)
-{
-	struct iovec iov = {
-		.iov_base = (void __user *)buf,
-		.iov_len = count
-	};
-	struct kiocb kiocb;
-	ssize_t ret;
-
-	/* 初始化同步 kiocb */
-	init_sync_kiocb(&kiocb, file);
-	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = count;
-
-	/* 调用异步读函数 */
-	ret = ntfs_file_aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
-	
-	/* 如果是异步操作，等待完成 */
-	if (ret == -EIOCBQUEUED)
-		ret = wait_on_sync_kiocb(&kiocb);
-	
-	/* 更新读取位置 */
-	if (ret > 0)
-		*ppos = kiocb.ki_pos;
-	
-	return ret;
 }
 
 /* returns array of locked pages */
@@ -1072,10 +1043,12 @@ static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
         ntfs_inode_warn(inode, "encrypted i/o not supported");
         return -EOPNOTSUPP;
     }
+
     if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
         ntfs_inode_warn(inode, "direct i/o + compressed not supported");
         return -EOPNOTSUPP;
     }
+
     if (is_dedup(ni)) {
         ntfs_inode_warn(inode, "write into deduplicated not supported");
         return -EOPNOTSUPP;
@@ -1090,6 +1063,7 @@ static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
     total_len = iov_length(iov, nr_segs);
     iov_iter_init(&iter, iov, nr_segs, total_len, 0); /* written=0 */
     
+    /* 2. 更新 kiocb 中的读取位置 */
     iocb->ki_pos = pos;
 
     /* 4. 调用3.10版本的generic_write_checks */
@@ -1135,26 +1109,6 @@ out:
     }
 
     return ret;
-}
-
-static ssize_t ntfs_file_write(struct file *file, const char __user *buf,
-			       size_t count, loff_t *ppos)
-{
-	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = count };
-	struct kiocb kiocb;
-	ssize_t ret;
-
-	init_sync_kiocb(&kiocb, file);
-	kiocb.ki_pos = *ppos;
-	kiocb.ki_nbytes = count;
-	kiocb.ki_left = count;
-
-	ret = ntfs_file_aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
-	if (-EIOCBQUEUED == ret)
-		ret = wait_on_sync_kiocb(&kiocb);
-	
-	*ppos = kiocb.ki_pos;
-	return ret;
 }
 
 /*
@@ -1245,8 +1199,8 @@ const struct inode_operations ntfs_file_inode_operations = {
 
 const struct file_operations ntfs_file_operations = {
 	.llseek = generic_file_llseek,
-	.read		= ntfs_file_read,
-	.write		= ntfs_file_write,
+	.read		= do_sync_read,
+	.write		= do_sync_write,
 	.aio_read		= ntfs_file_aio_read,
 	.aio_write		= ntfs_file_aio_write,
 	.unlocked_ioctl = ntfs_ioctl,
