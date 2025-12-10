@@ -302,9 +302,6 @@ static int ntfs_rename(struct inode *old_dir,
 		      1024);
 	static_assert(PATH_MAX >= 4 * 1024);
 
-	if (flags & ~RENAME_NOREPLACE)
-		return -EINVAL;
-
 	old_inode = d_inode(old_dentry);
 	new_inode = d_inode(new_dentry);
 

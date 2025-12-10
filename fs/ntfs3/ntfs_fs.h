@@ -945,82 +945,170 @@ static inline size_t bitmap_size(size_t bits)
 	return QuadAlign((bits + 7) >> 3);
 }
 
-#define _100ns2seconds 10000000ULL
-#define SecondsToStartOf1970 0x00000002B6109100ULL
-#define NTFS_TIME_GRAN 100
+#define _100NS_PER_SECOND    10000000ULL
+#define _100NS_TO_1970_OFFSET 0x00000002B6109100ULL
+#define NTFS_TIME_GRAN        100
+#define INVALID_TIME          0ULL
+
+/* 时间溢出保护宏定义 */
+#ifndef CONFIG_ARM64
+  /* 32位系统: time_t为32位有符号整数 */
+  #define MAX_UNIX_TIME_SECONDS  0x7FFFFFFFLL  /* 2038-01-19 03:14:07 */
+  #define MIN_UNIX_TIME_SECONDS  (-0x7FFFFFFFLL-1) /* 1901-12-13 20:45:52 */
+  
+  /* 检查时间是否在32位time_t安全范围内 */
+  #define IS_32BIT_TIME_SAFE(sec) ((sec) >= MIN_UNIX_TIME_SECONDS && \
+                                   (sec) <= MAX_UNIX_TIME_SECONDS)
+#else
+  /* 64位系统: time_t为64位有符号整数，范围更大 */
+  #define IS_32BIT_TIME_SAFE(sec) (1) /* 总是安全 */
+#endif
+
+/*
+ * kernel2nt_fast - 快速将内核时间转换为NTFS时间
+ * 在32位系统上自动处理2038年问题
+ */
+static inline __le64 kernel2nt(const struct timespec *ts)
+{
+    u64 result;
+    
+    /* 参数检查 */
+    if (unlikely(!ts)) {
+        return cpu_to_le64(_100NS_TO_1970_OFFSET * _100NS_PER_SECOND);
+    }
+    
+#ifndef CONFIG_ARM64
+    /* 32位系统特殊处理 */
+    if (unlikely(ts->tv_sec < MIN_UNIX_TIME_SECONDS)) {
+        /* 早于1901年的时间，设为NTFS起始时间(1601年) */
+        return cpu_to_le64(0);
+    }
+    
+    if (unlikely(ts->tv_sec > MAX_UNIX_TIME_SECONDS)) {
+        /* 超过2038年，使用最大安全时间 */
+        struct timespec safe_ts = {
+            .tv_sec = MAX_UNIX_TIME_SECONDS,
+            .tv_nsec = 999999999
+        };
+        /* 递归调用自身（安全，因为已检查边界） */
+        return kernel2nt_fast(&safe_ts);
+    }
+#endif
+    
+    /* 安全计算（此时tv_sec在安全范围内） */
+    if (ts->tv_sec < 0) {
+        /* 负时间（但早于1901年的已在32位分支中处理） */
+        result = _100NS_TO_1970_OFFSET * _100NS_PER_SECOND;
+    } else {
+        result = (u64)ts->tv_sec + _100NS_TO_1970_OFFSET;
+        result = mul_u64_u32_shr(result, _100NS_PER_SECOND, 0);
+        
+        if (likely(ts->tv_nsec >= 0 && ts->tv_nsec < NSEC_PER_SEC)) {
+            result += (u32)ts->tv_nsec / NTFS_TIME_GRAN;
+        }
+    }
+    
+    return cpu_to_le64(result);
+}
+
+/*
+ * nt2kernel_fast - 快速将NTFS时间转换为内核时间
+ * 自动适应32/64位系统
+ */
+static inline void nt2kernel(const __le64 tm, struct timespec *ts)
+{
+    u64 nt_time = le64_to_cpu(tm);
+    
+    /* 处理无效时间 */
+    if (unlikely(nt_time == 0 || nt_time < _100NS_TO_1970_OFFSET)) {
+        ts->tv_sec = 0;
+        ts->tv_nsec = 0;
+        return;
+    }
+    
+    /* 减去1601到1970的时间偏移 */
+    nt_time -= _100NS_TO_1970_OFFSET;
+    
+    /* 分离秒和100纳秒部分 */
+    u64 seconds = div_u64_rem(nt_time, _100NS_PER_SECOND, &nt_time);
+    u32 nsec_100 = (u32)nt_time;
+    
+#ifndef CONFIG_ARM64
+    /* 32位系统：需要检查并限制时间范围 */
+    if (unlikely(seconds > (u64)MAX_UNIX_TIME_SECONDS)) {
+        /* 超过2038年，使用最大安全值 */
+        ts->tv_sec = MAX_UNIX_TIME_SECONDS;
+        ts->tv_nsec = 999999999;
+    } else if (unlikely((s64)seconds < MIN_UNIX_TIME_SECONDS)) {
+        /* 早于1901年，设为0时间 */
+        ts->tv_sec = 0;
+        ts->tv_nsec = 0;
+    } else {
+        /* 在安全范围内，直接赋值 */
+        ts->tv_sec = (time_t)seconds;
+        ts->tv_nsec = (long)(nsec_100 * NTFS_TIME_GRAN);
+    }
+#else
+    /* 64位系统：直接赋值 */
+    ts->tv_sec = (time_t)seconds;
+    ts->tv_nsec = (long)(nsec_100 * NTFS_TIME_GRAN);
+#endif
+    
+    /* 确保纳秒在有效范围内 */
+    if (unlikely(ts->tv_nsec >= NSEC_PER_SEC)) {
+        ts->tv_sec++;
+        ts->tv_nsec -= NSEC_PER_SEC;
+    }
+    
+    /* 额外检查：确保最终时间在32位安全范围内（仅调试用） */
+#ifdef DEBUG_TIME_CONVERSION
+    if (!IS_32BIT_TIME_SAFE(ts->tv_sec)) {
+        pr_warn("nt2kernel_fast: 转换后的时间超出32位安全范围: %lld\n", 
+                (long long)ts->tv_sec);
+    }
+#endif
+}
 
 /*
  * ntfs_current_time - 获取当前时间并调整为文件系统粒度
+ * 兼容32/64位系统
  */
 static inline struct timespec ntfs_current_time(struct inode *inode)
 {
     struct timespec now;
     
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
-    // 3.17+ 使用current_kernel_time
     now = current_kernel_time();
 #else
-    // 3.10及以下版本使用getnstimeofday
     struct timeval tv;
     do_gettimeofday(&tv);
     now.tv_sec = tv.tv_sec;
     now.tv_nsec = tv.tv_usec * 1000;
 #endif
     
-    // 根据文件系统时间粒度调整精度
-    if (inode->i_sb->s_time_gran > 1) {
-        now.tv_nsec -= now.tv_nsec % inode->i_sb->s_time_gran;
+    /* 根据文件系统时间粒度调整精度 */
+    unsigned int gran = inode->i_sb->s_time_gran;
+    if (gran > 1 && gran <= NSEC_PER_SEC) {
+        u32 remainder = now.tv_nsec % gran;
+        now.tv_nsec -= remainder;
     }
     
-    // 确保纳秒在有效范围内
-    if (now.tv_nsec >= NSEC_PER_SEC) {
+    /* 确保纳秒在有效范围内 */
+    if (unlikely(now.tv_nsec >= NSEC_PER_SEC)) {
         now.tv_sec++;
         now.tv_nsec -= NSEC_PER_SEC;
     }
     
+#ifndef CONFIG_ARM64
+    /* 32位系统：确保当前时间不超出2038年 */
+    if (unlikely(now.tv_sec > MAX_UNIX_TIME_SECONDS)) {
+        now.tv_sec = MAX_UNIX_TIME_SECONDS;
+        now.tv_nsec = 999999999;
+        pr_warn_once("ntfs_current_time: 系统时间超过2038年，已截断\n");
+    }
+#endif
+    
     return now;
-}
-
-/*
- * 简化的转换函数（不检查溢出，适用于内部使用）
- */
-static inline __le64 kernel2nt(const struct timespec *ts)
-{
-    u64 result;
-    
-    // 直接计算，假设时间在合理范围内
-    result = (u64)ts->tv_sec + SecondsToStartOf1970;
-    result *= _100ns2seconds;
-    result += (u32)ts->tv_nsec / NTFS_TIME_GRAN;
-    
-    return cpu_to_le64(result);
-}
-
-static inline void nt2kernel(const __le64 tm, struct timespec *ts)
-{
-    u64 t = le64_to_cpu(tm);
-    u64 sec64;
-    u32 nsec100;
-    
-    if (t == 0) {
-        ts->tv_sec = 0;
-        ts->tv_nsec = 0;
-        return;
-    }
-    
-    t -= _100ns2seconds * SecondsToStartOf1970;
-    sec64 = t / _100ns2seconds;
-    nsec100 = do_div(t, _100ns2seconds);
-    
-    // 直接赋值，可能会有溢出风险
-    ts->tv_sec = (time_t)sec64;
-    ts->tv_nsec = (long)(nsec100 * NTFS_TIME_GRAN);
-    
-    // 简单调整纳秒范围
-    if (ts->tv_nsec >= NSEC_PER_SEC) {
-        ts->tv_sec++;
-        ts->tv_nsec -= NSEC_PER_SEC;
-    }
 }
 
 static inline struct ntfs_sb_info *ntfs_sb(struct super_block *sb)
