@@ -699,6 +699,7 @@ static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
 	return ovl_do_remove(dentry, true);
 }
 
+<<<<<<< HEAD
 /*
  * 为 Linux 3.10 内核适配的 ovl_rename 函数
  * 原始 ovl_rename2 中依赖 RENAME_* flags 的逻辑已被简化或移除
@@ -712,6 +713,11 @@ static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
 >>>>>>> parent of 7a71358b (update dir)
 static int ovl_rename(struct inode *olddir, struct dentry *old,
 		      struct inode *newdir, struct dentry *new)
+=======
+static int ovl_rename2(struct inode *olddir, struct dentry *old,
+		       struct inode *newdir, struct dentry *new,
+		       unsigned int flags)
+>>>>>>> parent of abcc0200 (update dir)
 {
 	int err;
 	enum ovl_path_type old_type;
@@ -724,11 +730,19 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	bool old_opaque;
 	bool new_opaque;
 	bool new_create = false;
+	bool cleanup_whiteout = false;
+	bool overwrite = !(flags & RENAME_EXCHANGE);
 	bool is_dir = S_ISDIR(old->d_inode->i_mode);
 	bool new_is_dir = false;
 	struct dentry *opaquedir = NULL;
 	const struct cred *old_cred = NULL;
 	struct cred *override_cred = NULL;
+
+	err = -EINVAL;
+	if (flags & ~(RENAME_EXCHANGE | RENAME_NOREPLACE))
+		goto out;
+
+	flags &= ~RENAME_NOREPLACE;
 
 	err = ovl_check_sticky(old);
 	if (err)
@@ -750,7 +764,7 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 
 		new_type = ovl_path_type(new);
 		err = -EXDEV;
-		if (OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir)
+		if (!overwrite && OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir)
 			goto out;
 
 		err = 0;
@@ -782,6 +796,11 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	err = ovl_copy_up(new->d_parent);
 	if (err)
 		goto out_drop_write;
+	if (!overwrite) {
+		err = ovl_copy_up(new);
+		if (err)
+			goto out_drop_write;
+	}
 
 	old_opaque = !OVL_TYPE_PURE_UPPER(old_type);
 	new_opaque = !OVL_TYPE_PURE_UPPER(new_type);
@@ -800,12 +819,31 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		old_cred = override_creds(override_cred);
 	}
 
+<<<<<<< HEAD
 	if (OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir) {
+=======
+	if (overwrite && OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir) {
+>>>>>>> parent of abcc0200 (update dir)
 		opaquedir = ovl_check_empty_and_clear(new);
 		err = PTR_ERR(opaquedir);
 		if (IS_ERR(opaquedir)) {
 			opaquedir = NULL;
 			goto out_revert_creds;
+		}
+	}
+
+	if (overwrite) {
+		if (old_opaque) {
+			if (new->d_inode || !new_opaque) {
+				/* Whiteout source */
+				flags |= RENAME_WHITEOUT;
+			} else {
+				/* Switch whiteouts */
+				flags |= RENAME_EXCHANGE;
+			}
+		} else if (is_dir && !new->d_inode && new_opaque) {
+			flags |= RENAME_EXCHANGE;
+			cleanup_whiteout = true;
 		}
 	}
 
@@ -847,19 +885,23 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		if (err)
 			goto out_dput;
 	}
+	if (!overwrite && new_is_dir && old_opaque && !new_opaque) {
+		err = ovl_set_opaque(newdentry);
+		if (err)
+			goto out_dput;
+	}
 
 <<<<<<< HEAD
 	err = vfs_rename(old_upperdir->d_inode, olddentry,
 			 new_upperdir->d_inode, newdentry);
 =======
 	if (old_opaque || new_opaque) {
-		/*
-		 * 3.10 内核没有 ovl_do_rename，直接使用 vfs_rename
-		 * 也没有 flags 参数
-		 */
-		err = vfs_rename(old_upperdir->d_inode, olddentry,
-				 new_upperdir->d_inode, newdentry);
+		err = ovl_do_rename(old_upperdir->d_inode, olddentry,
+				    new_upperdir->d_inode, newdentry,
+				    flags);
 	} else {
+		/* No debug for the plain case */
+		BUG_ON(flags & ~RENAME_EXCHANGE);
 		err = vfs_rename(old_upperdir->d_inode, olddentry,
 				 new_upperdir->d_inode, newdentry);
 	}
@@ -868,6 +910,8 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	if (err) {
 		if (is_dir && !old_opaque && new_opaque)
 			ovl_remove_opaque(olddentry);
+		if (!overwrite && new_is_dir && old_opaque && !new_opaque)
+			ovl_remove_opaque(newdentry);
 		goto out_dput;
 	}
 
@@ -888,9 +932,17 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 
 	if (is_dir && old_opaque && !new_opaque)
 		ovl_remove_opaque(olddentry);
+	if (!overwrite && new_is_dir && !old_opaque && new_opaque)
+		ovl_remove_opaque(newdentry);
 
-	if (old_opaque != new_opaque)
+	if (old_opaque != new_opaque) {
 		ovl_dentry_set_opaque(old, new_opaque);
+		if (!overwrite)
+			ovl_dentry_set_opaque(new, old_opaque);
+	}
+
+	if (cleanup_whiteout)
+		ovl_cleanup(old_upperdir->d_inode, newdentry);
 
 	ovl_dentry_version_inc(old->d_parent);
 	ovl_dentry_version_inc(new->d_parent);
@@ -911,14 +963,13 @@ out:
 	return err;
 }
 
-/* 更新 inode_operations 结构体 */
 const struct inode_operations ovl_dir_inode_operations = {
 	.lookup		= ovl_lookup,
 	.mkdir		= ovl_mkdir,
 	.symlink	= ovl_symlink,
 	.unlink		= ovl_unlink,
 	.rmdir		= ovl_rmdir,
-	.rename		= ovl_rename,  /* 改为 .rename */
+	.rename2	= ovl_rename2,
 	.link		= ovl_link,
 	.setattr	= ovl_setattr,
 	.create		= ovl_create,
