@@ -42,7 +42,7 @@ jobs:
         # 例如：make ARCH=arm64 CC=clang -j$(nproc)
         export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
         export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        # make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- MTK_PLATFORM="mt6795" -j8
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- MTK_PLATFORM="mt6795" -j8
 
     # 可选：上传构建产物
     - name: Upload Build Artifacts
