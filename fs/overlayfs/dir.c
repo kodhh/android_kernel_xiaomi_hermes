@@ -777,6 +777,9 @@ static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
  * 为 Linux 3.10 内核适配的 ovl_rename 函数
  * 原始 ovl_rename2 中依赖 RENAME_* flags 的逻辑已被简化或移除
  */
+/*
+ * 为 Linux 3.10 内核适配的 ovl_rename 函数
+ */
 static int ovl_rename(struct inode *olddir, struct dentry *old,
 		      struct inode *newdir, struct dentry *new)
 {
@@ -853,23 +856,12 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 	old_opaque = !OVL_TYPE_PURE_UPPER(old_type);
 	new_opaque = !OVL_TYPE_PURE_UPPER(new_type);
 
-	/*
-	 * 3.10 内核没有 RENAME_EXCHANGE，普通 rename 总是 overwrite = true
-	 * 所以这里简化为始终按覆盖模式处理
-	 */
 	if (old_opaque || new_opaque) {
 		err = -ENOMEM;
 		override_cred = prepare_creds();
 		if (!override_cred)
 			goto out_drop_write;
 
-		/*
-		 * CAP_SYS_ADMIN for setting xattr on whiteout, opaque dir
-		 * CAP_DAC_OVERRIDE for create in workdir
-		 * CAP_FOWNER for removing whiteout from sticky dir
-		 * CAP_FSETID for chmod of opaque dir
-		 * CAP_CHOWN for chown of opaque dir
-		 */
 		cap_raise(override_cred->cap_effective, CAP_SYS_ADMIN);
 		cap_raise(override_cred->cap_effective, CAP_DAC_OVERRIDE);
 		cap_raise(override_cred->cap_effective, CAP_FOWNER);
@@ -878,7 +870,6 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		old_cred = override_creds(override_cred);
 	}
 
-	/* 检查目标是否是非空目录，如果是则先清理 */
 	if (OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir) {
 		opaquedir = ovl_check_empty_and_clear(new);
 		err = PTR_ERR(opaquedir);
@@ -927,9 +918,6 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 			goto out_dput;
 	}
 
-	/*
-	 * 3.10 内核直接使用 vfs_rename
-	 */
 	err = vfs_rename(old_upperdir->d_inode, olddentry,
 			 new_upperdir->d_inode, newdentry);
 
@@ -937,6 +925,21 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 		if (is_dir && !old_opaque && new_opaque)
 			ovl_remove_opaque(olddentry);
 		goto out_dput;
+	}
+
+	/*
+	 * 如果源文件来自下层，需要在原位置创建 whiteout
+	 */
+	if (OVL_TYPE_MERGE_OR_LOWER(old_type)) {
+		struct dentry *workdir = ovl_workdir(old);
+		
+		if (!WARN_ON(!workdir)) {
+			err = ovl_whiteout(workdir, old);
+			if (err) {
+				pr_err("overlayfs: failed to create whiteout during rename\n");
+				/* 不因为 whiteout 失败而回滚整个 rename */
+			}
+		}
 	}
 
 	if (is_dir && old_opaque && !new_opaque)
