@@ -19,7 +19,7 @@ void ovl_cleanup(struct inode *wdir, struct dentry *wdentry)
 	int err;
 
 	dget(wdentry);
-	if (!S_ISDIR(wdentry->d_inode->i_mode))
+	if (S_ISDIR(wdentry->d_inode->i_mode))
 		err = ovl_do_rmdir(wdir, wdentry);
 	else
 		err = ovl_do_unlink(wdir, wdentry);
@@ -219,6 +219,7 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 	struct path upperpath;
 	struct dentry *upper;
 	struct dentry *opaquedir;
+	struct dentry *temp;
 	struct kstat stat;
 	int err;
 
@@ -264,7 +265,30 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 	if (err)
 		goto out_cleanup;
 
-	err = ovl_do_rename(wdir, opaquedir, udir, upper, RENAME_EXCHANGE);
+	/*
+	 * 3.10 内核不支持 RENAME_EXCHANGE，使用临时名称三步交换
+	 */
+	temp = ovl_lookup_temp(workdir, dentry);
+	if (IS_ERR(temp)) {
+		err = PTR_ERR(temp);
+		goto out_cleanup;
+	}
+
+	err = ovl_do_rename(wdir, upper, wdir, temp, 0);
+	if (err) {
+		dput(temp);
+		goto out_cleanup;
+	}
+
+	err = ovl_do_rename(wdir, opaquedir, udir, upper, 0);
+	if (err) {
+		ovl_do_rename(wdir, temp, wdir, upper, 0);
+		dput(temp);
+		goto out_cleanup;
+	}
+
+	err = ovl_do_rename(wdir, temp, wdir, opaquedir, 0);
+	dput(temp);
 	if (err)
 		goto out_cleanup;
 
@@ -348,12 +372,36 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 		goto out_dput2;
 
 	if (S_ISDIR(stat->mode)) {
+		struct dentry *temp;
+
 		err = ovl_set_opaque(newdentry);
 		if (err)
 			goto out_cleanup;
 
-		err = ovl_do_rename(wdir, newdentry, udir, upper,
-				    RENAME_EXCHANGE);
+		/*
+		 * 3.10 内核不支持 RENAME_EXCHANGE，使用临时名称三步交换
+		 */
+		temp = ovl_lookup_temp(workdir, dentry);
+		if (IS_ERR(temp)) {
+			err = PTR_ERR(temp);
+			goto out_cleanup;
+		}
+
+		err = ovl_do_rename(wdir, upper, wdir, temp, 0);
+		if (err) {
+			dput(temp);
+			goto out_cleanup;
+		}
+
+		err = ovl_do_rename(wdir, newdentry, udir, upper, 0);
+		if (err) {
+			ovl_do_rename(wdir, temp, wdir, upper, 0);
+			dput(temp);
+			goto out_cleanup;
+		}
+
+		err = ovl_do_rename(wdir, temp, wdir, newdentry, 0);
+		dput(temp);
 		if (err)
 			goto out_cleanup;
 
@@ -558,23 +606,49 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 		if (err)
 			goto kill_whiteout;
 	} else {
-		int flags = 0;
-
-		if (opaquedir)
-			upper = opaquedir;
 		err = -ESTALE;
 		if (upper->d_parent != upperdir)
 			goto kill_whiteout;
 
-		if (is_dir)
-			flags |= RENAME_EXCHANGE;
+		if (is_dir) {
+			struct dentry *temp;
 
-		err = ovl_do_rename(wdir, whiteout, udir, upper, flags);
-		if (err)
-			goto kill_whiteout;
+			if (opaquedir)
+				upper = opaquedir;
 
-		if (is_dir)
+			/*
+			 * 3.10 内核不支持 RENAME_EXCHANGE，使用临时名称三步交换
+			 */
+			temp = ovl_lookup_temp(workdir, dentry);
+			if (IS_ERR(temp)) {
+				err = PTR_ERR(temp);
+				goto kill_whiteout;
+			}
+
+			err = ovl_do_rename(wdir, upper, wdir, temp, 0);
+			if (err) {
+				dput(temp);
+				goto kill_whiteout;
+			}
+
+			err = ovl_do_rename(wdir, whiteout, udir, upper, 0);
+			if (err) {
+				ovl_do_rename(wdir, temp, wdir, upper, 0);
+				dput(temp);
+				goto kill_whiteout;
+			}
+
+			err = ovl_do_rename(wdir, temp, wdir, whiteout, 0);
+			dput(temp);
+			if (err)
+				goto kill_whiteout;
+
 			ovl_cleanup(wdir, upper);
+		} else {
+			err = ovl_do_rename(wdir, whiteout, udir, upper, 0);
+			if (err)
+				goto kill_whiteout;
+		}
 	}
 	ovl_dentry_version_inc(dentry->d_parent);
 out_d_drop:
@@ -703,7 +777,6 @@ static int ovl_rmdir(struct inode *dir, struct dentry *dentry)
  * 为 Linux 3.10 内核适配的 ovl_rename 函数
  * 原始 ovl_rename2 中依赖 RENAME_* flags 的逻辑已被简化或移除
  */
-
 static int ovl_rename(struct inode *olddir, struct dentry *old,
 		      struct inode *newdir, struct dentry *new)
 {
@@ -854,17 +927,11 @@ static int ovl_rename(struct inode *olddir, struct dentry *old,
 			goto out_dput;
 	}
 
-	if (old_opaque || new_opaque) {
-		/*
-		 * 3.10 内核没有 ovl_do_rename，直接使用 vfs_rename
-		 * 也没有 flags 参数
-		 */
-		err = vfs_rename(old_upperdir->d_inode, olddentry,
-				 new_upperdir->d_inode, newdentry);
-	} else {
-		err = vfs_rename(old_upperdir->d_inode, olddentry,
-				 new_upperdir->d_inode, newdentry);
-	}
+	/*
+	 * 3.10 内核直接使用 vfs_rename
+	 */
+	err = vfs_rename(old_upperdir->d_inode, olddentry,
+			 new_upperdir->d_inode, newdentry);
 
 	if (err) {
 		if (is_dir && !old_opaque && new_opaque)
@@ -897,14 +964,13 @@ out:
 	return err;
 }
 
-/* 更新 inode_operations 结构体 */
 const struct inode_operations ovl_dir_inode_operations = {
 	.lookup		= ovl_lookup,
 	.mkdir		= ovl_mkdir,
 	.symlink	= ovl_symlink,
 	.unlink		= ovl_unlink,
 	.rmdir		= ovl_rmdir,
-	.rename		= ovl_rename,  /* 改为 .rename */
+	.rename		= ovl_rename,
 	.link		= ovl_link,
 	.setattr	= ovl_setattr,
 	.create		= ovl_create,
