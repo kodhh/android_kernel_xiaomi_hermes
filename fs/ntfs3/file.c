@@ -531,7 +531,8 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo, end);
+		/* Linux 3.10 兼容：使用 truncate_inode_pages_range */
+		truncate_inode_pages_range(inode->i_mapping, vbo, end);
 
 		ni_lock(ni);
 		err = attr_punch_hole(ni, vbo, len);
@@ -560,7 +561,8 @@ static long ntfs_fallocate(struct file *file, int mode, loff_t vbo, loff_t len)
 		if (err)
 			goto out;
 
-		truncate_pagecache(inode, vbo, end);
+		/* Linux 3.10 兼容：使用 truncate_inode_pages_range */
+		truncate_inode_pages_range(inode->i_mapping, vbo, end);
 
 		ni_lock(ni);
 		err = attr_collapse_range(ni, vbo, len);
@@ -722,49 +724,42 @@ out:
 static ssize_t ntfs_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
                                   unsigned long nr_segs, loff_t pos)
 {
-    ssize_t err;
-    struct file *file = iocb->ki_filp;
-    struct inode *inode = file->f_mapping->host;
-    struct ntfs_inode *ni = ntfs_i(inode);
-    struct iov_iter iter;
-    size_t count, total_len;
+	ssize_t err;
+	struct file *file = iocb->ki_filp;
+	struct inode *inode = file->f_mapping->host;
+	struct ntfs_inode *ni = ntfs_i(inode);
 
-    /* 3. 原有的各种不支持状态检查 */
-    if (is_encrypted(ni)) {
-        ntfs_inode_warn(inode, "encrypted i/o not supported");
-        return -EOPNOTSUPP;
-    }
+	/* 原有的各种不支持状态检查 */
+	if (is_encrypted(ni)) {
+		ntfs_inode_warn(inode, "encrypted i/o not supported");
+		return -EOPNOTSUPP;
+	}
 
-    if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
-        ntfs_inode_warn(inode, "direct i/o + compressed not supported");
-        return -EOPNOTSUPP;
-    }
+	if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
+		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
+		return -EOPNOTSUPP;
+	}
 
 #ifndef CONFIG_NTFS3_LZX_XPRESS
-    if (ni->ni_flags & NI_FLAG_COMPRESSED_MASK) {
-        ntfs_inode_warn(inode,
-            "activate CONFIG_NTFS3_LZX_XPRESS to read external compressed files");
-        return -EOPNOTSUPP;
-    }
+	if (ni->ni_flags & NI_FLAG_COMPRESSED_MASK) {
+		ntfs_inode_warn(inode,
+			"activate CONFIG_NTFS3_LZX_XPRESS to read external compressed files");
+		return -EOPNOTSUPP;
+	}
 #endif
 
-    if (is_dedup(ni)) {
-        ntfs_inode_warn(inode, "read deduplicated not supported");
-        return -EOPNOTSUPP;
-    }
+	if (is_dedup(ni)) {
+		ntfs_inode_warn(inode, "read deduplicated not supported");
+		return -EOPNOTSUPP;
+	}
 
-    /* 1. 根据3.10内核参数构造 iov_iter */
-    total_len = iov_length(iov, nr_segs);
-    iov_iter_init(&iter, iov, nr_segs, total_len, 0);
-    count = iov_iter_count(&iter);
+	/* 更新 kiocb 中的读取位置 */
+	iocb->ki_pos = pos;
 
-    /* 2. 更新 kiocb 中的读取位置 */
-    iocb->ki_pos = pos;
+	/* 调用3.10内核对应的通用读取函数 */
+	err = generic_file_aio_read(iocb, iov, nr_segs, pos);
 
-    /* 4. 调用3.10内核对应的通用读取函数 */
-    err = count ? generic_file_aio_read(iocb, iov, nr_segs, pos) : 0;
-
-    return err;
+	return err;
 }
 
 /* returns array of locked pages */
@@ -1038,8 +1033,6 @@ static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	struct iov_iter iter;
 	size_t count, total_len;
 
-	printk(KERN_ERR "ntfs3: aio_write start: pos=%lld\n", pos);
-
 	/* 状态检查 */
 	if (is_encrypted(ni)) {
 		ntfs_inode_warn(inode, "encrypted i/o not supported");
@@ -1056,6 +1049,9 @@ static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		return -EOPNOTSUPP;
 	}
 
+	/* 获取 inode 锁，防止并发写入导致的数据损坏 */
+	mutex_lock(&inode->i_mutex);
+
 	total_len = iov_length(iov, nr_segs);
 	iov_iter_init(&iter, iov, nr_segs, total_len, 0);
 	iocb->ki_pos = pos;
@@ -1063,39 +1059,37 @@ static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	count = iov_iter_count(&iter);
 	ret = generic_write_checks(file, &iocb->ki_pos, &count, 0);
 	if (ret < 0)
-		goto out;
+		goto out_unlock;
 	
+	if (count == 0) {
+		ret = 0;
+		goto out_unlock;
+	}
 	ret = count;
-	if (ret <= 0)
-		goto out;
 
 	iov_iter_truncate(&iter, count);
 
 	if (WARN_ON(ni->ni_flags & NI_FLAG_COMPRESSED_MASK)) {
 		ret = -EOPNOTSUPP;
-		goto out;
+		goto out_unlock;
 	}
 
-	printk(KERN_ERR "ntfs3: aio_write: calling ntfs_extend\n");
 	ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
-	if (ret) {
-		printk(KERN_ERR "ntfs3: ntfs_extend failed: %zd\n", ret);
-		goto out;
-	}
+	if (ret)
+		goto out_unlock;
 
-	printk(KERN_ERR "ntfs3: aio_write: calling write function\n");
 	if (is_compressed(ni)) {
 		ret = ntfs_compress_write(iocb, &iter);
 	} else {
 		ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
 	}
-	printk(KERN_ERR "ntfs3: aio_write: write result=%zd\n", ret);
 
-out:
+out_unlock:
+	mutex_unlock(&inode->i_mutex);
+
 	if (ret > 0) {
 		generic_write_sync(file, iocb->ki_pos - ret, ret);
 	}
-	printk(KERN_ERR "ntfs3: aio_write end: ret=%zd\n", ret);
 	return ret;
 }
 
