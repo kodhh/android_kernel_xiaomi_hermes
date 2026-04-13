@@ -23,13 +23,6 @@
 #include "ntfs.h"
 #include "ntfs_fs.h"
 
-/* Because kfree isn't assignment-compatible with void(void*) ;-/ */
-void kfree_link(void *p)
-{
-	kfree(p);
-}
-EXPORT_SYMBOL(kfree_link);
-
 /*
  * ntfs_read_mft
  *
@@ -832,6 +825,8 @@ static ssize_t ntfs_direct_IO(int rw, struct kiocb *iocb,
 
 		/* 在 3.10 中，使用 get_user_pages */
 		mm = current->mm;
+		if (!mm)
+			goto fix_error;
 		down_read(&mm->mmap_sem);
 		/* get_user_pages 在 3.10 中的参数：
 		 * struct task_struct *tsk, struct mm_struct *mm,
@@ -840,7 +835,7 @@ static ssize_t ntfs_direct_IO(int rw, struct kiocb *iocb,
 		 * struct vm_area_struct **vmas
 		 */
 		npages = get_user_pages(current, mm, uaddr, 1,
-					wr ? 1 : 0, 0, &page, NULL);
+					wr ? 1 : 0, 1, &page, NULL);
 		up_read(&mm->mmap_sem);
 
 		if (npages <= 0)
