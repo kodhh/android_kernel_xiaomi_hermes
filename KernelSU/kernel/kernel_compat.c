@@ -139,3 +139,10 @@ long ksu_strncpy_from_user_nofault(char *dst, const void __user *unsafe_addr,
 {
 	return strncpy_from_user_nofault(dst, unsafe_addr, count);
 }
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0)
+__weak void ext4_unregister_sysfs(struct super_block *sb)
+{
+	pr_info("%s: feature not implemented!\n", __func__);
+}
+#endif
