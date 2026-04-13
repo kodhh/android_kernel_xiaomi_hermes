@@ -856,34 +856,18 @@ int ntfs_acl_chmod(struct inode *inode)
 #else
     /* Linux 3.10 到 4.7 版本：手动处理旧的posix_acl_chmod API */
     
-    /* 1. 获取文件的ACL */
-    acl = ntfs_get_acl(inode, ACL_TYPE_ACCESS);
-    if (IS_ERR(acl)) {
+    acl = ntfs_get_acl_ex(inode, ACL_TYPE_ACCESS, 1);
+    if (IS_ERR(acl) || !acl) {
         err = PTR_ERR(acl);
         goto out;
     }
     
-    if (acl) {
-        /* 2. 克隆ACL以便修改 */
-        struct posix_acl *clone;
+    // posix_acl_chmod 内部会克隆并替换 acl
+    err = posix_acl_chmod(&acl, GFP_KERNEL, inode->i_mode);
+    if (err)
+        goto out_release;
         
-        clone = posix_acl_clone(acl, GFP_KERNEL);
-        if (!clone) {
-            err = -ENOMEM;
-            goto out_release;
-        }
-        
-        /* 3. 修改克隆的ACL */
-        err = posix_acl_chmod(&clone, GFP_KERNEL, inode->i_mode);
-        if (err) {
-            posix_acl_release(clone);
-            goto out_release;
-        }
-        
-        /* 4. 设置新的ACL */
-        err = ntfs_set_acl(inode, clone, ACL_TYPE_ACCESS);
-        posix_acl_release(clone);
-    }
+    err = ntfs_set_acl_ex(inode, acl, ACL_TYPE_ACCESS, 1);
     
 out_release:
     posix_acl_release(acl);

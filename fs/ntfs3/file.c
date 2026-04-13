@@ -1030,85 +1030,73 @@ out:
 static ssize_t ntfs_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
                                    unsigned long nr_segs, loff_t pos)
 {
-    struct file *file = iocb->ki_filp;
-    struct address_space *mapping = file->f_mapping;
-    struct inode *inode = mapping->host;
-    ssize_t ret;
-    struct ntfs_inode *ni = ntfs_i(inode);
-    struct iov_iter iter;
-    size_t count, total_len;
+	struct file *file = iocb->ki_filp;
+	struct address_space *mapping = file->f_mapping;
+	struct inode *inode = mapping->host;
+	ssize_t ret;
+	struct ntfs_inode *ni = ntfs_i(inode);
+	struct iov_iter iter;
+	size_t count, total_len;
 
-    /* 2. 原有的状态检查逻辑 */
-    if (is_encrypted(ni)) {
-        ntfs_inode_warn(inode, "encrypted i/o not supported");
-        return -EOPNOTSUPP;
-    }
+	printk(KERN_ERR "ntfs3: aio_write start: pos=%lld\n", pos);
 
-    if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
-        ntfs_inode_warn(inode, "direct i/o + compressed not supported");
-        return -EOPNOTSUPP;
-    }
+	/* 状态检查 */
+	if (is_encrypted(ni)) {
+		ntfs_inode_warn(inode, "encrypted i/o not supported");
+		return -EOPNOTSUPP;
+	}
 
-    if (is_dedup(ni)) {
-        ntfs_inode_warn(inode, "write into deduplicated not supported");
-        return -EOPNOTSUPP;
-    }
+	if (is_compressed(ni) && (file->f_flags & O_DIRECT)) {
+		ntfs_inode_warn(inode, "direct i/o + compressed not supported");
+		return -EOPNOTSUPP;
+	}
 
-    /* 3. 上锁逻辑（3.10内核没有 IOCB_NOWAIT） */
-    if (!inode_trylock(inode)) {
-        inode_lock(inode);
-    }
+	if (is_dedup(ni)) {
+		ntfs_inode_warn(inode, "write into deduplicated not supported");
+		return -EOPNOTSUPP;
+	}
 
-    /* 1. 正确初始化 iov_iter (3.10版本) */
-    total_len = iov_length(iov, nr_segs);
-    iov_iter_init(&iter, iov, nr_segs, total_len, 0); /* written=0 */
-    
-    /* 2. 更新 kiocb 中的读取位置 */
-    iocb->ki_pos = pos;
+	total_len = iov_length(iov, nr_segs);
+	iov_iter_init(&iter, iov, nr_segs, total_len, 0);
+	iocb->ki_pos = pos;
 
-    /* 4. 调用3.10版本的generic_write_checks */
-    count = iov_iter_count(&iter); // 从迭代器获取总长度
-    ret = generic_write_checks(file, &iocb->ki_pos, &count, 0); // isblk=0
-    if (ret < 0)                  // 函数错误返回负值
-        goto out;
-    // 函数成功时，`count` 被更新为允许写入的长度
-    ret = count;
-    if (ret <= 0)
-        goto out;
+	count = iov_iter_count(&iter);
+	ret = generic_write_checks(file, &iocb->ki_pos, &count, 0);
+	if (ret < 0)
+		goto out;
+	
+	ret = count;
+	if (ret <= 0)
+		goto out;
 
-    /* 5. 【关键】同步截断迭代器长度 */
-    iov_iter_truncate(&iter, count);
+	iov_iter_truncate(&iter, count);
 
-    /* 6. 检查压缩标志（不应出现的情况） */
-    if (WARN_ON(ni->ni_flags & NI_FLAG_COMPRESSED_MASK)) {
-        ret = -EOPNOTSUPP;
-        goto out;
-    }
+	if (WARN_ON(ni->ni_flags & NI_FLAG_COMPRESSED_MASK)) {
+		ret = -EOPNOTSUPP;
+		goto out;
+	}
 
-    /* 7. 扩展文件 */
-    ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
-    if (ret)
-        goto out;
+	printk(KERN_ERR "ntfs3: aio_write: calling ntfs_extend\n");
+	ret = ntfs_extend(inode, iocb->ki_pos, ret, file);
+	if (ret) {
+		printk(KERN_ERR "ntfs3: ntfs_extend failed: %zd\n", ret);
+		goto out;
+	}
 
-    /* 8. 核心写入分支 */
-    if (is_compressed(ni)) {
-        /* 压缩写入：传递已截断的迭代器 */
-        ret = ntfs_compress_write(iocb, &iter);
-    } else {
-        /* 普通文件：调用3.10的通用写入函数 */
-        ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
-    }
+	printk(KERN_ERR "ntfs3: aio_write: calling write function\n");
+	if (is_compressed(ni)) {
+		ret = ntfs_compress_write(iocb, &iter);
+	} else {
+		ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
+	}
+	printk(KERN_ERR "ntfs3: aio_write: write result=%zd\n", ret);
 
 out:
-    inode_unlock(inode);
-
-    /* 9. 同步写入（使用3.10的函数） */
-    if (ret > 0) {
-    /* 使用更新后的文件位置 iocb->ki_pos，而非原始参数 pos */
-        generic_write_sync(file, iocb->ki_pos - ret, ret);
-    }
-
-    return ret;
+	if (ret > 0) {
+		generic_write_sync(file, iocb->ki_pos - ret, ret);
+	}
+	printk(KERN_ERR "ntfs3: aio_write end: ret=%zd\n", ret);
+	return ret;
 }
 
 /*

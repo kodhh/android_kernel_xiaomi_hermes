@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * Copyright (C) 2019-2021 Paragon Software GmbH, All rights reserved.
@@ -279,25 +279,26 @@ struct ntfs_sb_info {
 
 	struct ntfs_mount_options options;
 	struct ratelimit_state msg_ratelimit;
-	struct rw_semaphore	i_rwsem;
+	/* 删除了 struct rw_semaphore i_rwsem; */
 };
 
+/* 
+ * 修改为使用 3.10 内核的 inode->i_mutex
+ * 原 4.9+ 内核使用 inode->i_rwsem，但 3.10 只有 i_mutex
+ */
 static inline void inode_lock(struct inode *inode)
 {
-	struct ntfs_sb_info *sbi = inode->i_sb->s_fs_info;
-	down_write(&sbi->i_rwsem);
+	mutex_lock(&inode->i_mutex);
 }
 
 static inline void inode_unlock(struct inode *inode)
 {
-	struct ntfs_sb_info *sbi = inode->i_sb->s_fs_info;
-	up_write(&sbi->i_rwsem);
+	mutex_unlock(&inode->i_mutex);
 }
 
 static inline int inode_trylock(struct inode *inode)
 {
-	struct ntfs_sb_info *sbi = inode->i_sb->s_fs_info;
-	return down_write_trylock(&sbi->i_rwsem);
+	return mutex_trylock(&inode->i_mutex);
 }
 
 /*
@@ -945,137 +946,82 @@ static inline size_t bitmap_size(size_t bits)
 	return QuadAlign((bits + 7) >> 3);
 }
 
-#define _100NS_PER_SECOND    10000000ULL
-#define _100NS_TO_1970_OFFSET 0x00000002B6109100ULL
-#define NTFS_TIME_GRAN        100
-#define INVALID_TIME          0ULL
+/* ========================================================================
+ * 时间转换相关定义和函数
+ * ========================================================================
+ */
 
-/* 时间溢出保护宏定义 */
-#ifndef CONFIG_ARM64
-  /* 32位系统: time_t为32位有符号整数 */
-  #define MAX_UNIX_TIME_SECONDS  0x7FFFFFFFLL  /* 2038-01-19 03:14:07 */
-  #define MIN_UNIX_TIME_SECONDS  (-0x7FFFFFFFLL-1) /* 1901-12-13 20:45:52 */
-  
-  /* 检查时间是否在32位time_t安全范围内 */
-  #define IS_32BIT_TIME_SAFE(sec) ((sec) >= MIN_UNIX_TIME_SECONDS && \
-                                   (sec) <= MAX_UNIX_TIME_SECONDS)
-#else
-  /* 64位系统: time_t为64位有符号整数，范围更大 */
-  #define IS_32BIT_TIME_SAFE(sec) (1) /* 总是安全 */
-#endif
+#define _100NS_PER_SECOND    10000000ULL
+/* 1601-01-01 到 1970-01-01 的天数换算：
+ * 从 1601 到 1970 共 134774 天（包含闰年）
+ * 134774 * 24 * 3600 = 11,644,473,600 秒
+ * 11,644,473,600 * 10,000,000 = 116,444,736,000,000,000 (即 0x019DB1DED53E8000)
+ */
+#define SECONDS_TO_START_OF_1970  11644473600ULL
+#define NTFS_EPOCH_OFFSET         (SECONDS_TO_START_OF_1970 * _100NS_PER_SECOND)
+#define NTFS_TIME_GRAN            100
 
 /*
- * kernel2nt_fast - 快速将内核时间转换为NTFS时间
- * 在32位系统上自动处理2038年问题
+ * kernel2nt - Unix时间 -> NTFS时间
+ * Unix: 1970-01-01 开始的秒数 + 纳秒
+ * NTFS: 1601-01-01 开始的 100ns 单位数
  */
 static inline __le64 kernel2nt(const struct timespec *ts)
 {
     u64 result;
     
-    /* 参数检查 */
     if (unlikely(!ts)) {
-        return cpu_to_le64(_100NS_TO_1970_OFFSET * _100NS_PER_SECOND);
-    }
-    
-#ifndef CONFIG_ARM64
-    /* 32位系统特殊处理 */
-    if (unlikely(ts->tv_sec < MIN_UNIX_TIME_SECONDS)) {
-        /* 早于1901年的时间，设为NTFS起始时间(1601年) */
         return cpu_to_le64(0);
     }
     
-    if (unlikely(ts->tv_sec > MAX_UNIX_TIME_SECONDS)) {
-        /* 超过2038年，使用最大安全时间 */
-        struct timespec safe_ts = {
-            .tv_sec = MAX_UNIX_TIME_SECONDS,
-            .tv_nsec = 999999999
-        };
-        /* 递归调用自身（安全，因为已检查边界） */
-        return kernel2nt_fast(&safe_ts);
-    }
-#endif
+    /* 
+     * 正确公式：
+     * NTFS_time = (Unix_sec + 11644473600) * 10,000,000 + nsec/100
+     */
+    result = (u64)ts->tv_sec + SECONDS_TO_START_OF_1970;
+    result = result * _100NS_PER_SECOND;
     
-    /* 安全计算（此时tv_sec在安全范围内） */
-    if (ts->tv_sec < 0) {
-        /* 负时间（但早于1901年的已在32位分支中处理） */
-        result = _100NS_TO_1970_OFFSET * _100NS_PER_SECOND;
-    } else {
-        result = (u64)ts->tv_sec + _100NS_TO_1970_OFFSET;
-        result = mul_u64_u32_shr(result, _100NS_PER_SECOND, 0);
-        
-        if (likely(ts->tv_nsec >= 0 && ts->tv_nsec < NSEC_PER_SEC)) {
-            result += (u32)ts->tv_nsec / NTFS_TIME_GRAN;
-        }
-    }
+    if (likely(ts->tv_nsec >= 0 && ts->tv_nsec < NSEC_PER_SEC))
+        result += (u32)ts->tv_nsec / NTFS_TIME_GRAN;
     
     return cpu_to_le64(result);
 }
 
 /*
- * nt2kernel_fast - 快速将NTFS时间转换为内核时间
- * 自动适应32/64位系统
+ * nt2kernel - NTFS时间 -> Unix时间
  */
 static inline void nt2kernel(const __le64 tm, struct timespec *ts)
 {
     u64 nt_time = le64_to_cpu(tm);
     
     /* 处理无效时间 */
-    if (unlikely(nt_time == 0 || nt_time < _100NS_TO_1970_OFFSET)) {
+    if (unlikely(nt_time == 0 || nt_time < NTFS_EPOCH_OFFSET)) {
         ts->tv_sec = 0;
         ts->tv_nsec = 0;
         return;
     }
     
-    /* 减去1601到1970的时间偏移 */
-    nt_time -= _100NS_TO_1970_OFFSET;
+    /* 减去 1601 到 1970 的偏移（100ns 单位） */
+    nt_time -= NTFS_EPOCH_OFFSET;
     
-    /* 分离秒和100纳秒部分 */
-    u64 seconds = div_u64_rem(nt_time, _100NS_PER_SECOND, &nt_time);
-    u32 nsec_100 = (u32)nt_time;
-    
-#ifndef CONFIG_ARM64
-    /* 32位系统：需要检查并限制时间范围 */
-    if (unlikely(seconds > (u64)MAX_UNIX_TIME_SECONDS)) {
-        /* 超过2038年，使用最大安全值 */
-        ts->tv_sec = MAX_UNIX_TIME_SECONDS;
-        ts->tv_nsec = 999999999;
-    } else if (unlikely((s64)seconds < MIN_UNIX_TIME_SECONDS)) {
-        /* 早于1901年，设为0时间 */
-        ts->tv_sec = 0;
-        ts->tv_nsec = 0;
-    } else {
-        /* 在安全范围内，直接赋值 */
-        ts->tv_sec = (time_t)seconds;
-        ts->tv_nsec = (long)(nsec_100 * NTFS_TIME_GRAN);
-    }
-#else
-    /* 64位系统：直接赋值 */
-    ts->tv_sec = (time_t)seconds;
-    ts->tv_nsec = (long)(nsec_100 * NTFS_TIME_GRAN);
-#endif
+    /* 分离秒和纳秒 */
+    ts->tv_sec = (time_t)(nt_time / _100NS_PER_SECOND);
+    ts->tv_nsec = (long)((nt_time % _100NS_PER_SECOND) * NTFS_TIME_GRAN);
     
     /* 确保纳秒在有效范围内 */
     if (unlikely(ts->tv_nsec >= NSEC_PER_SEC)) {
         ts->tv_sec++;
         ts->tv_nsec -= NSEC_PER_SEC;
     }
-    
-    /* 额外检查：确保最终时间在32位安全范围内（仅调试用） */
-#ifdef DEBUG_TIME_CONVERSION
-    if (!IS_32BIT_TIME_SAFE(ts->tv_sec)) {
-        pr_warn("nt2kernel_fast: 转换后的时间超出32位安全范围: %lld\n", 
-                (long long)ts->tv_sec);
-    }
-#endif
 }
 
 /*
- * ntfs_current_time - 获取当前时间并调整为文件系统粒度
- * 兼容32/64位系统
+ * ntfs_current_time - 获取当前时间
  */
 static inline struct timespec ntfs_current_time(struct inode *inode)
 {
     struct timespec now;
+    unsigned int gran;
     
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
     now = current_kernel_time();
@@ -1086,30 +1032,23 @@ static inline struct timespec ntfs_current_time(struct inode *inode)
     now.tv_nsec = tv.tv_usec * 1000;
 #endif
     
-    /* 根据文件系统时间粒度调整精度 */
-    unsigned int gran = inode->i_sb->s_time_gran;
+    gran = inode->i_sb->s_time_gran;
     if (gran > 1 && gran <= NSEC_PER_SEC) {
-        u32 remainder = now.tv_nsec % gran;
-        now.tv_nsec -= remainder;
+        now.tv_nsec -= now.tv_nsec % gran;
     }
     
-    /* 确保纳秒在有效范围内 */
     if (unlikely(now.tv_nsec >= NSEC_PER_SEC)) {
         now.tv_sec++;
         now.tv_nsec -= NSEC_PER_SEC;
     }
     
-#ifndef CONFIG_ARM64
-    /* 32位系统：确保当前时间不超出2038年 */
-    if (unlikely(now.tv_sec > MAX_UNIX_TIME_SECONDS)) {
-        now.tv_sec = MAX_UNIX_TIME_SECONDS;
-        now.tv_nsec = 999999999;
-        pr_warn_once("ntfs_current_time: 系统时间超过2038年，已截断\n");
-    }
-#endif
-    
     return now;
 }
+
+/* ========================================================================
+ * 其他内联函数
+ * ========================================================================
+ */
 
 static inline struct ntfs_sb_info *ntfs_sb(struct super_block *sb)
 {

@@ -2046,50 +2046,114 @@ out:
 	return err;
 }
 
-int ntfs_readlink(struct dentry *dentry, char __user *user_buffer, int buflen)
+/*
+ * ntfs_symlink_filler - 填充符号链接的 page cache
+ */
+static int ntfs_symlink_filler(struct inode *inode, struct page *page)
 {
-    struct inode *inode = d_inode(dentry);
-    char *kernel_buffer;
-    int err;
+	char *buffer;
+	int error;
 
-    // 1. 参数检查
-    if (buflen <= 0)
-        return -EINVAL;
+	buffer = kmap(page);
+	error = ntfs_readlink_hlp(inode, buffer, PAGE_SIZE - 1);
+	if (error < 0)
+		goto error;
+	
+	buffer[error] = '\0';
+	SetPageUptodate(page);
+	kunmap(page);
+	unlock_page(page);
+	return 0;
 
-    // 2. 在内核空间分配临时缓冲区
-    kernel_buffer = kmalloc(PAGE_SIZE, GFP_NOFS);
-    if (!kernel_buffer)
-        return -ENOMEM;
+error:
+	SetPageError(page);
+	kunmap(page);
+	unlock_page(page);
+	return -EIO;
+}
 
-    // 3. 调用核心逻辑函数读取链接目标
-    // 注意：3.10 版本的 ntfs_readlink_hlp 只有 3 个参数
-    err = ntfs_readlink_hlp(inode, kernel_buffer, PAGE_SIZE);
-    if (err < 0)
-        goto out_free;
+/*
+ * ntfs_follow_link - 解析符号链接（3.10 内核 API）
+ */
+static void *ntfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+{
+	struct inode *inode = d_inode(dentry);
+	struct page *page;
+	void *err;
 
-    // 4. 检查用户缓冲区是否足够大
-    if (err > buflen) {
-        err = -ENAMETOOLONG; // 用户缓冲区太小
-        goto out_free;
-    }
+	page = read_cache_page(&inode->i_data, 0,
+			       (filler_t *)ntfs_symlink_filler, inode);
+	if (IS_ERR(page)) {
+		err = page;
+		goto read_failed;
+	}
+	nd_set_link(nd, kmap(page));
+	return page;
 
-    // 5. 将结果从内核缓冲区复制到用户空间
-    if (copy_to_user(user_buffer, kernel_buffer, err)) {
-        err = -EFAULT; // 复制失败
-        goto out_free;
-    }
+read_failed:
+	nd_set_link(nd, err);
+	return NULL;
+}
 
-    // 6. 成功：返回复制的字节数（不含终止符）
-    // 注意：ntfs_readlink_hlp 返回的是字符串长度（不包括终止符）
-    // 所以直接使用 err 作为返回值即可
+/*
+ * ntfs_put_link - 释放符号链接资源（3.10 内核 API）
+ */
+static void ntfs_put_link(struct dentry *dentry, struct nameidata *nd, void *cookie)
+{
+	struct page *page = cookie;
+
+	if (page) {
+		kunmap(page);
+		page_cache_release(page);
+	}
+}
+
+/*
+ * ntfs_readlink - 用户空间的 readlink 系统调用（3.10 内核 API）
+ */
+static int ntfs_readlink(struct dentry *dentry, char __user *user_buffer, int buflen)
+{
+	struct inode *inode = d_inode(dentry);
+	char *kernel_buffer;
+	int err;
+
+	if (buflen <= 0)
+		return -EINVAL;
+
+	/* 分配缓冲区，预留一个字节给 '\0' */
+	kernel_buffer = kmalloc(PAGE_SIZE, GFP_NOFS);
+	if (!kernel_buffer)
+		return -ENOMEM;
+
+	/* 读取链接内容，预留一个字节防止溢出 */
+	err = ntfs_readlink_hlp(inode, kernel_buffer, PAGE_SIZE - 1);
+	if (err < 0)
+		goto out_free;
+
+	/* 强制终止字符串 */
+	kernel_buffer[err] = '\0';
+
+	/* 检查用户缓冲区是否足够大 */
+	if (err > buflen) {
+		err = -ENAMETOOLONG;
+		goto out_free;
+	}
+
+	/* 复制到用户空间 */
+	if (copy_to_user(user_buffer, kernel_buffer, err)) {
+		err = -EFAULT;
+		goto out_free;
+	}
 
 out_free:
-    kfree(kernel_buffer);
-    return err;
+	kfree(kernel_buffer);
+	return err;
 }
 
 const struct inode_operations ntfs_link_inode_operations = {
-	.readlink = ntfs_readlink,
+	.readlink	= ntfs_readlink,
+	.follow_link	= ntfs_follow_link,
+	.put_link	= ntfs_put_link,
 	.setattr = ntfs3_setattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,

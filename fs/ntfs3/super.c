@@ -240,6 +240,7 @@ static const match_table_t ntfs_tokens = {
 	{ Opt_noatime, "noatime" },
 	{ Opt_showmeta, "showmeta" },
 	{ Opt_nls, "nls=%s" },
+	{ Opt_nls, "iocharset=%s" },    // <-- 添加这一行，支持 iocharset 别名
 	{ Opt_prealloc, "prealloc" },
 	{ Opt_no_acs_rules, "no_acs_rules" },
 	{ Opt_err, NULL },
