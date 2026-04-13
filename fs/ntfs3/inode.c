@@ -1143,13 +1143,13 @@ int inode_write_data(struct inode *inode, const void *data, size_t bytes)
 }
 
 /*
- * number of bytes to for REPARSE_DATA_BUFFER(IO_REPARSE_TAG_SYMLINK)
- * for unicode string of 'uni_len' length
+ * Number of bytes for REPARSE_DATA_BUFFER(IO_REPARSE_TAG_SYMLINK)
+ * for unicode string of @uni_len length.
  */
-static inline u32 ntfs_reparse_bytes(u32 uni_len)
+static inline u32 ntfs_reparse_bytes(u32 uni_len, bool is_absolute)
 {
-	/* header + unicode string + decorated unicode string */
-	return sizeof(short) * (2 * uni_len + 4) +
+	/* 绝对路径需要额外的 4 个字符用于 \??\ 前缀 */
+	return sizeof(short) * (2 * uni_len + (is_absolute ? 4 : 0)) +
 	       offsetof(struct REPARSE_DATA_BUFFER,
 			SymbolicLinkReparseBuffer.PathBuffer);
 }
@@ -1162,8 +1162,13 @@ ntfs_create_reparse_buffer(struct ntfs_sb_info *sbi, const char *symname,
 	struct REPARSE_DATA_BUFFER *rp;
 	__le16 *rp_name;
 	typeof(rp->SymbolicLinkReparseBuffer) *rs;
+	bool is_absolute;
 
-	rp = ntfs_zalloc(ntfs_reparse_bytes(2 * size + 2));
+	/* 判断是否为 Windows 绝对路径 (如 C:\... 或 I:\...) */
+	is_absolute = (strlen(symname) > 1 && symname[1] == ':');
+
+	/* 根据路径类型分配不同大小的缓冲区 */
+	rp = ntfs_zalloc(ntfs_reparse_bytes(2 * size + 2, is_absolute));
 	if (!rp)
 		return ERR_PTR(-ENOMEM);
 
@@ -1178,7 +1183,7 @@ ntfs_create_reparse_buffer(struct ntfs_sb_info *sbi, const char *symname,
 		goto out;
 
 	/* err = the length of unicode name of symlink */
-	*nsize = ntfs_reparse_bytes(err);
+	*nsize = ntfs_reparse_bytes(err, is_absolute);
 
 	if (*nsize > sbi->reparse.max_size) {
 		err = -EFBIG;
@@ -1198,23 +1203,27 @@ ntfs_create_reparse_buffer(struct ntfs_sb_info *sbi, const char *symname,
 
 	/* PrintName + SubstituteName */
 	rs->SubstituteNameOffset = cpu_to_le16(sizeof(short) * err);
-	rs->SubstituteNameLength = cpu_to_le16(sizeof(short) * err + 8);
+	rs->SubstituteNameLength = cpu_to_le16(sizeof(short) * err + (is_absolute ? 8 : 0));
 	rs->PrintNameLength = rs->SubstituteNameOffset;
 
 	/*
-	 * TODO: use relative path if possible to allow windows to parse this path
-	 * 0-absolute path 1- relative path (SYMLINK_FLAG_RELATIVE)
+	 * Flags:
+	 * 0 = absolute path (with \??\ prefix)
+	 * 1 = relative path (SYMLINK_FLAG_RELATIVE)
 	 */
-	rs->Flags = 0;
+	rs->Flags = cpu_to_le32(is_absolute ? 0 : 1);
 
-	memmove(rp_name + err + 4, rp_name, sizeof(short) * err);
+	/* 移动数据，为前缀腾出空间 */
+	memmove(rp_name + err + (is_absolute ? 4 : 0), rp_name, sizeof(short) * err);
 
-	/* decorate SubstituteName */
-	rp_name += err;
-	rp_name[0] = cpu_to_le16('\\');
-	rp_name[1] = cpu_to_le16('?');
-	rp_name[2] = cpu_to_le16('?');
-	rp_name[3] = cpu_to_le16('\\');
+	/* 绝对路径需要添加 \??\ 前缀 */
+	if (is_absolute) {
+		rp_name += err;
+		rp_name[0] = cpu_to_le16('\\');
+		rp_name[1] = cpu_to_le16('?');
+		rp_name[2] = cpu_to_le16('?');
+		rp_name[3] = cpu_to_le16('\\');
+	}
 
 	return rp;
 out:

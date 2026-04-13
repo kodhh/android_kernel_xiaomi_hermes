@@ -306,6 +306,9 @@ static inline int ntfs_filldir(struct ntfs_sb_info *sbi, struct ntfs_inode *ni,
 	if (sbi->options.nohidden && (fname->dup.fa & FILE_ATTRIBUTE_HIDDEN))
 		return 0;
 
+	if (fname->name_len + sizeof(struct NTFS_DE) > le16_to_cpu(e->size))
+		return 0;
+
 	name_len = ntfs_utf16_to_nls(sbi, (struct le_str *)&fname->name_len,
 				     name, PATH_MAX);
 	if (name_len <= 0) {
