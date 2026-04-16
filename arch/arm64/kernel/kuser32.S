@@ -20,15 +20,12 @@
  *
  * AArch32 user helpers.
  *
- * Each segment is 32-byte aligned and will be moved to the top of the high
- * vector page.  New segments (if ever needed) must be added in front of
- * existing ones.  This mechanism should be used only for things that are
- * really small and justified, and not be abused freely.
+ * These helpers are provided for compatibility with AArch32 binaries that
+ * still need them. They are installed at a fixed address by
+ * aarch32_setup_additional_pages().
  *
  * See Documentation/arm/kernel_user_helpers.txt for formal definitions.
  */
-
-#include <asm/unistd.h>
 
 	.align	5
 	.globl	__kuser_helper_start

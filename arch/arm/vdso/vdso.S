@@ -1,4 +1,6 @@
 /*
+ * Adapted from arm64 version.
+ *
  * Copyright (C) 2012 ARM Limited
  *
  * This program is free software; you can redistribute it and/or modify
@@ -12,33 +14,21 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Author: Will Deacon <will.deacon@arm.com>
  */
-#ifndef __ASM_VDSO_H
-#define __ASM_VDSO_H
 
-#ifdef __KERNEL__
+#include <linux/init.h>
+#include <linux/linkage.h>
+#include <linux/const.h>
+#include <asm/page.h>
 
-/*
- * Default link address for the vDSO.
- * Since we randomise the VDSO mapping, there's little point in trying
- * to prelink this.
- */
-#define VDSO_LBASE	0x0
+	.globl vdso_start, vdso_end
+	.section .data..ro_after_init
+	.balign PAGE_SIZE
+vdso_start:
+	.incbin "arch/arm/vdso/vdso.so"
+	.balign PAGE_SIZE
+vdso_end:
 
-#ifndef __ASSEMBLY__
-
-#include <generated/vdso-offsets.h>
-#ifdef CONFIG_VDSO32
-#include <generated/vdso32-offsets.h>
-#endif
-
-#define VDSO_SYMBOL(base, name)						   \
-({									   \
-	(void *)(vdso_offset_##name - VDSO_LBASE + (unsigned long)(base)); \
-})
-
-#endif /* !__ASSEMBLY__ */
-
-#endif /* __KERNEL__ */
-
-#endif /* __ASM_VDSO_H */
+	.previous
