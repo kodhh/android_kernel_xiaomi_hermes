@@ -348,7 +348,7 @@ struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
  */
 void update_vsyscall(struct timekeeper *tk)
 {
-	u32 use_syscall = strcmp(tk->clock->name, "arch_sys_counter");
+	u32 use_syscall = strcmp(tk->clock->name, "mt6795-gpt");
 
 	++vdso_data->tb_seq_count;
 	smp_wmb();
@@ -368,8 +368,8 @@ void update_vsyscall(struct timekeeper *tk)
 		vdso_data->xtime_clock_sec	= tk->xtime_sec;
 		vdso_data->xtime_clock_snsec	= tk->xtime_nsec;
 		vdso_data->cs_mono_mult		= tk->mult;
-		vdso_data->cs_raw_mult		= tk->mult;  /* 3.10 中 mult 是统一的 */
-		vdso_data->cs_shift		= tk->shift;
+		vdso_data->cs_raw_mult		= tk->clock->mult;
+		/* tkr_mono.shift == tkr_raw.shift */
 		vdso_data->btm_sec		= btm.tv_sec;
 		vdso_data->btm_nsec		= btm.tv_nsec;
 	}
