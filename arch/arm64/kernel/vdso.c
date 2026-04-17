@@ -38,6 +38,19 @@
 #include <asm/vdso.h>
 #include <asm/vdso_datapage.h>
 
+/* 3.10 Backport compatibility macros */
+#ifndef __ro_after_init
+#define __ro_after_init __read_mostly
+#endif
+
+#ifndef __pa_symbol
+#define __pa_symbol(x)  __pa(RELOC_HIDE((unsigned long)(x), 0))
+#endif
+
+#ifndef sym_to_pfn
+#define sym_to_pfn(x)   __phys_to_pfn(__pa_symbol(x))
+#endif
+
 struct vdso_mappings {
 	unsigned long num_code_pages;
 	struct vm_special_mapping data_mapping;
@@ -312,35 +325,51 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 }
 
 /*
+ * We define AT_SYSINFO_EHDR, so we need these function stubs to keep
+ * Linux happy.
+ */
+int in_gate_area_no_mm(unsigned long addr)
+{
+	return 0;
+}
+
+int in_gate_area(struct mm_struct *mm, unsigned long addr)
+{
+	return 0;
+}
+
+struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
+{
+		return NULL;
+}
+
+/*
  * Update the vDSO data page to keep in sync with kernel timekeeping.
  */
 void update_vsyscall(struct timekeeper *tk)
 {
-	u32 use_syscall = strcmp(tk->tkr_mono.clock->name, "arch_sys_counter");
+	u32 use_syscall = strcmp(tk->clock->name, "arch_sys_counter");
 
 	++vdso_data->tb_seq_count;
 	smp_wmb();
 
 	vdso_data->use_syscall			= use_syscall;
 	vdso_data->xtime_coarse_sec		= tk->xtime_sec;
-	vdso_data->xtime_coarse_nsec		= tk->tkr_mono.xtime_nsec >>
-							tk->tkr_mono.shift;
+	vdso_data->xtime_coarse_nsec		= tk->xtime_nsec >> tk->shift;
 	vdso_data->wtm_clock_sec		= tk->wall_to_monotonic.tv_sec;
 	vdso_data->wtm_clock_nsec		= tk->wall_to_monotonic.tv_nsec;
 
 	if (!use_syscall) {
 		struct timespec btm = ktime_to_timespec(tk->offs_boot);
 
-		/* tkr_mono.cycle_last == tkr_raw.cycle_last */
-		vdso_data->cs_cycle_last	= tk->tkr_mono.cycle_last;
-		vdso_data->raw_time_sec         = tk->raw_sec;
-		vdso_data->raw_time_nsec        = tk->tkr_raw.xtime_nsec;
+		vdso_data->cs_cycle_last	= tk->cycle_last;
+		vdso_data->raw_time_sec         = tk->raw_time.tv_sec;
+		vdso_data->raw_time_nsec        = tk->raw_time.tv_nsec;
 		vdso_data->xtime_clock_sec	= tk->xtime_sec;
-		vdso_data->xtime_clock_snsec	= tk->tkr_mono.xtime_nsec;
-		vdso_data->cs_mono_mult		= tk->tkr_mono.mult;
-		vdso_data->cs_raw_mult		= tk->tkr_raw.mult;
-		/* tkr_mono.shift == tkr_raw.shift */
-		vdso_data->cs_shift		= tk->tkr_mono.shift;
+		vdso_data->xtime_clock_snsec	= tk->xtime_nsec;
+		vdso_data->cs_mono_mult		= tk->mult;
+		vdso_data->cs_raw_mult		= tk->mult;  /* 3.10 中 mult 是统一的 */
+		vdso_data->cs_shift		= tk->shift;
 		vdso_data->btm_sec		= btm.tv_sec;
 		vdso_data->btm_nsec		= btm.tv_nsec;
 	}

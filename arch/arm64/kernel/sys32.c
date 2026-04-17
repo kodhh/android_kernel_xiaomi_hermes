@@ -39,6 +39,14 @@ asmlinkage long compat_sys_sync_file_range2_wrapper(void);
 asmlinkage long compat_sys_fallocate_wrapper(void);
 asmlinkage long compat_sys_mmap2_wrapper(void);
 
+// 在sys32.c的开头，其他声明之后添加
+asmlinkage long compat_sys_lseek(unsigned int fd, off_t offset, unsigned int whence);
+asmlinkage long compat_sys_sigpending(old_sigset_t __user *set);
+asmlinkage long compat_sys_sigprocmask(int how, old_sigset_t __user *set, old_sigset_t __user *oset);
+asmlinkage long sys_stat64(const char __user *filename, struct stat64 __user *statbuf);
+asmlinkage long sys_lstat64(const char __user *filename, struct stat64 __user *statbuf);
+asmlinkage long sys_fstat64(unsigned int fd, struct stat64 __user *statbuf);
+
 #undef __SYSCALL
 #define __SYSCALL(nr, sym)	[nr] = sym,
 
