@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-22.04  # 若在Windows上编译，通常需改为 windows-latest
     env:
       GCC_PATH: /prebuilt/gcc
+      GCC32_PATH: /prebuilt/gcc32
 
     steps:
     - name: Checkout code
@@ -35,7 +36,7 @@ jobs:
         # 例如：make ARCH=arm64 CC=clang defconfig
         export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
         export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-  MTK_PLATFORM="mt6795" hermes_defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-gcc  MTK_PLATFORM="mt6795" hermes_defconfig
 
     - name: Build Kernel with Clang
       run: |
@@ -43,7 +44,7 @@ jobs:
         # 例如：make ARCH=arm64 CC=clang -j$(nproc)
         export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
         export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- MTK_PLATFORM="mt6795" -j8
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-gcc MTK_PLATFORM="mt6795" -j8
 
     # 可选：上传构建产物
     - name: Upload Build Artifacts
