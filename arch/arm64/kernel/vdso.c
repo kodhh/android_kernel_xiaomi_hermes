@@ -368,7 +368,7 @@ void update_vsyscall(struct timekeeper *tk)
 		vdso_data->xtime_clock_sec	= tk->xtime_sec;
 		vdso_data->xtime_clock_snsec	= tk->xtime_nsec;
 		vdso_data->cs_mono_mult		= tk->mult;
-		vdso_data->cs_raw_mult		= 1;
+		vdso_data->cs_raw_mult		= tk->clock->mult;
 		vdso_data->cs_shift		= tk->shift;
 		vdso_data->btm_sec		= btm.tv_sec;
 		vdso_data->btm_nsec		= btm.tv_nsec;
