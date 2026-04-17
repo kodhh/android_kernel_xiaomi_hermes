@@ -348,7 +348,7 @@ struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
  */
 void update_vsyscall(struct timekeeper *tk)
 {
-	u32 use_syscall = strcmp(tk->clock->name, "mt6795-gpt");
+	u32 use_syscall = strcmp(tk->clock->name, "arch_sys_counter");
 
 	++vdso_data->tb_seq_count;
 	smp_wmb();
