@@ -503,6 +503,28 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 	return mapping->i_mmap_writable != 0;
 }
 
+static inline int mapping_deny_writable(struct address_space *mapping)
+{
+	int ret = 0;
+	
+	mutex_lock(&mapping->i_mmap_mutex);
+	if (mapping->i_mmap_writable > 0) {
+		mapping->i_mmap_writable--;
+	} else {
+		ret = -EBUSY;
+	}
+	mutex_unlock(&mapping->i_mmap_mutex);
+	
+	return ret;
+}
+
+static inline void mapping_allow_writable(struct address_space *mapping)
+{
+	mutex_lock(&mapping->i_mmap_mutex);
+	mapping->i_mmap_writable++;
+	mutex_unlock(&mapping->i_mmap_mutex);
+}
+
 /*
  * Use sequence counter to get consistent i_size on 32-bit processors.
  */
