@@ -54,6 +54,6 @@ static inline const struct vdso_data *__get_datapage(void)
 }
 
 /* We can only guarantee 56 bits of precision. */
-#define ARCH_CLOCK_FIXED_MASK GENMASK_ULL(32, 0)
+#define ARCH_CLOCK_FIXED_MASK GENMASK_ULL(31, 0)
 
 #endif /* __VDSO_DATAPAGE_H */
