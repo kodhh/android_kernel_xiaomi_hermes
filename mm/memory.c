@@ -3933,7 +3933,7 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 
 #if !defined(__HAVE_ARCH_GATE_AREA)
 
-#if defined(AT_SYSINFO_EHDR)
+#if 0
 static struct vm_area_struct gate_vma;
 
 static int __init gate_vma_init(void)
@@ -3951,7 +3951,7 @@ __initcall(gate_vma_init);
 
 struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
 {
-#ifdef AT_SYSINFO_EHDR
+#if 0
 	return &gate_vma;
 #else
 	return NULL;
@@ -3960,7 +3960,7 @@ struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
 
 int in_gate_area_no_mm(unsigned long addr)
 {
-#ifdef AT_SYSINFO_EHDR
+#if 0
 	if ((addr >= FIXADDR_USER_START) && (addr < FIXADDR_USER_END))
 		return 1;
 #endif
