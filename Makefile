@@ -602,7 +602,6 @@ endif
 
 KBUILD_CFLAGS += -ftree-vectorize \
                  --param=early-inlining-insns=14 \
-                 --param=inline-heuristics-hint-percent=600 \
                  --param=inline-min-speedup=15 \
                  --param=max-inline-insns-auto=30 \
                  --param=max-inline-insns-single=200
