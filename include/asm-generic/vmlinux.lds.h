@@ -438,16 +438,14 @@
  * conflicting section names, and must pull in .text.[0-9a-zA-Z_]* */
 #define TEXT_TEXT							\
 		ALIGN_FUNCTION();					\
-		*(.text.hot)						\
-		*(.text)						\
+		*(.text.hot .text .text.unlikely)		\
 		*(.ref.text)						\
 	DEV_KEEP(init.text)						\
 	DEV_KEEP(exit.text)						\
 	CPU_KEEP(init.text)						\
 	CPU_KEEP(exit.text)						\
 	MEM_KEEP(init.text)						\
-	MEM_KEEP(exit.text)						\
-		*(.text.unlikely)
+	MEM_KEEP(exit.text)
 
 
 /* sched.text is aling to function alignment to secure we have same
