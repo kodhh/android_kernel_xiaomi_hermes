@@ -600,11 +600,6 @@ else
 KBUILD_CFLAGS	+= -O2
 endif
 
-KBUILD_CFLAGS += --param=early-inlining-insns=14 \
-                 --param=inline-min-speedup=15 \
-                 --param=max-inline-insns-auto=30 \
-                 --param=max-inline-insns-single=200
-
 include $(srctree)/arch/$(SRCARCH)/Makefile
 
 ifdef CONFIG_READABLE_ASM
