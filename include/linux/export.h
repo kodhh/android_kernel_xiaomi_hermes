@@ -1,5 +1,6 @@
 #ifndef _LINUX_EXPORT_H
 #define _LINUX_EXPORT_H
+
 /*
  * Export symbols from the kernel to modules.  Forked from module.h
  * to reduce the amount of pointless cruft we feed to gcc when only
@@ -46,7 +47,7 @@ extern struct module __this_module;
 	extern void *__crc_##sym __attribute__((weak));		\
 	static const unsigned long __kcrctab_##sym		\
 	__used							\
-	__attribute__((section("___kcrctab" sec "+" #sym), unused))	\
+	__attribute__((section("___kcrctab" sec "+" #sym), used))	\
 	= (unsigned long) &__crc_##sym;
 #else
 #define __CRC_SYMBOL(sym, sec)
@@ -61,7 +62,7 @@ extern struct module __this_module;
 	= VMLINUX_SYMBOL_STR(sym);				\
 	static const struct kernel_symbol __ksymtab_##sym	\
 	__used							\
-	__attribute__((section("___ksymtab" sec "+" #sym), unused))	\
+	__attribute__((section("___ksymtab" sec "+" #sym), used))	\
 	= { (unsigned long)&sym, __kstrtab_##sym }
 
 #define EXPORT_SYMBOL(sym)					\

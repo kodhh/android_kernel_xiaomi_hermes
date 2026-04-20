@@ -165,7 +165,8 @@ extern bool initcall_debug;
 
 #ifndef __ASSEMBLY__
 
-/* initcalls are now grouped by functionality into separate 
+/*
+ * initcalls are now grouped by functionality into separate
  * subsections. Ordering inside the subsections is determined
  * by link order. 
  * For backwards compatibility, initcall() puts the call in 
@@ -173,6 +174,11 @@ extern bool initcall_debug;
  *
  * The `id' arg to __define_initcall() is needed so that multiple initcalls
  * can point at the same handler without causing duplicate-symbol build errors.
+ *
+ * Initcalls are run by placing pointers in initcall sections that the
+ * kernel iterates at runtime. The linker can do dead code / data elimination
+ * and remove that completely, so the initcall sections have to be marked
+ * as KEEP() in the linker script.
  */
 
 #define __define_initcall(fn, id) \
@@ -213,15 +219,15 @@ extern bool initcall_debug;
 
 #define __initcall(fn) device_initcall(fn)
 
-#define __exitcall(fn) \
+#define __exitcall(fn)						\
 	static exitcall_t __exitcall_##fn __exit_call = fn
 
-#define console_initcall(fn) \
-	static initcall_t __initcall_##fn \
+#define console_initcall(fn)					\
+	static initcall_t __initcall_##fn			\
 	__used __section(.con_initcall.init) = fn
 
-#define security_initcall(fn) \
-	static initcall_t __initcall_##fn \
+#define security_initcall(fn)					\
+	static initcall_t __initcall_##fn			\
 	__used __section(.security_initcall.init) = fn
 
 struct obs_kernel_param {
