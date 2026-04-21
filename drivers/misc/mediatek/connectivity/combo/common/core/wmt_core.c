@@ -2405,83 +2405,91 @@ VOID wmt_core_set_coredump_state(ENUM_DRV_STS state)
 #if CFG_WMT_LTE_COEX_HANDLING
 static INT32 opfunc_idc_msg_handling(P_WMT_OP pWmtOp)
 {
-	MTK_WCN_BOOL fgFail;
-	UINT32 u4Res;
-	UINT8 host_lte_btwf_coex_cmd[] = { 0x01, 0x10, 0x00, 0x00, 0x00 };
-	UINT8 host_lte_btwf_coex_evt[] = { 0x02, 0x10, 0x01, 0x00, 0x00 };
-	UINT8 *pTxBuf = NULL;
-	UINT8 msg_local_buffer[1300] = { 0 };
-	UINT8 evtbuf[8] = { 0 };
-	INT32 iRet = -1;
-	UINT16 msg_len = 0;
-	UINT32 total_len = 0;
-	UINT32 index = 0;
+        MTK_WCN_BOOL fgFail;
+        UINT32 u4Res;
+        UINT8 host_lte_btwf_coex_cmd[] = { 0x01, 0x10, 0x00, 0x00, 0x00 };
+        UINT8 host_lte_btwf_coex_evt[] = { 0x02, 0x10, 0x01, 0x00, 0x00 };
+        UINT8 *pTxBuf = NULL;
+        UINT8 *msg_local_buffer = NULL;
+        UINT8 evtbuf[8] = { 0 };
+        INT32 iRet = -1;
+        UINT16 msg_len = 0;
+        UINT32 total_len = 0;
+        UINT32 index = 0;
 
-	pTxBuf = (UINT8 *) pWmtOp->au4OpData[0];
-	if (NULL == pTxBuf) {
-		WMT_ERR_FUNC("idc msg buffer is NULL\n");
-		return -1;
-	} else {
-		iRet = wmt_lib_idc_lock_aquire();
-		if (iRet) {
-			WMT_ERR_FUNC("--->lock idc_lock failed, ret=%d\n", iRet);
-			return iRet;
-		}
+        /* 使用标准内核内存分配函数 */
+        msg_local_buffer = kmalloc(1300, GFP_KERNEL);
+        if (!msg_local_buffer) {
+                WMT_ERR_FUNC("failed to allocate msg_local_buffer\n");
+                return -1;
+        }
+        memset(msg_local_buffer, 0, 1300);
 
-		osal_memcpy(&msg_len, &pTxBuf[0], osal_sizeof(msg_len));
-		if (msg_len > 1200) {
-			wmt_lib_idc_lock_release();
-			WMT_ERR_FUNC("abnormal idc msg len:%d\n", msg_len);
-			return -2;
-		}
-		msg_len += 1;	/*flag byte */
+        pTxBuf = (UINT8 *) pWmtOp->au4OpData[0];
+        if (NULL == pTxBuf) {
+                WMT_ERR_FUNC("idc msg buffer is NULL\n");
+                kfree(msg_local_buffer);
+                return -1;
+        } else {
+                iRet = wmt_lib_idc_lock_aquire();
+                if (iRet) {
+                        WMT_ERR_FUNC("--->lock idc_lock failed, ret=%d\n", iRet);
+                        kfree(msg_local_buffer);
+                        return iRet;
+                }
 
-		osal_memcpy(&host_lte_btwf_coex_cmd[2], &msg_len, 2);
-		host_lte_btwf_coex_cmd[4] = (pWmtOp->au4OpData[1] & 0x00ff);
-		osal_memcpy(&msg_local_buffer[0], &host_lte_btwf_coex_cmd[0],
-			    osal_sizeof(host_lte_btwf_coex_cmd));
-		osal_memcpy(&msg_local_buffer[osal_sizeof(host_lte_btwf_coex_cmd)],
-			    &pTxBuf[osal_sizeof(msg_len)], msg_len - 1);
+                osal_memcpy(&msg_len, &pTxBuf[0], osal_sizeof(msg_len));
+                if (msg_len > 1200) {
+                        wmt_lib_idc_lock_release();
+                        WMT_ERR_FUNC("abnormal idc msg len:%d\n", msg_len);
+                        kfree(msg_local_buffer);
+                        return -2;
+                }
+                msg_len += 1;   /*flag byte */
 
-		wmt_lib_idc_lock_release();
+                osal_memcpy(&host_lte_btwf_coex_cmd[2], &msg_len, 2);
+                host_lte_btwf_coex_cmd[4] = (pWmtOp->au4OpData[1] & 0x00ff);
+                osal_memcpy(&msg_local_buffer[0], &host_lte_btwf_coex_cmd[0],
+                            osal_sizeof(host_lte_btwf_coex_cmd));
+                osal_memcpy(&msg_local_buffer[osal_sizeof(host_lte_btwf_coex_cmd)],
+                            &pTxBuf[osal_sizeof(msg_len)], msg_len - 1);
 
-		total_len = osal_sizeof(host_lte_btwf_coex_cmd) + msg_len - 1;
+                wmt_lib_idc_lock_release();
 
-		WMT_DBG_FUNC("wmt_core:idc msg payload len form lte(%d),wmt msg total len(%d)\n",msg_len-1,total_len);
-		WMT_DBG_FUNC("wmt_core:idc msg payload:\n");
-		for (index = 0; index < total_len; index++) {
-			WMT_DBG_FUNC("0x%02x ",msg_local_buffer[index]);
-		}
-	}
+                total_len = osal_sizeof(host_lte_btwf_coex_cmd) + msg_len - 1;
 
-	do {
-		fgFail = MTK_WCN_BOOL_TRUE;
+                WMT_DBG_FUNC("wmt_core:idc msg payload len form lte(%d),wmt msg total len(%d)\n",msg_len-1,total_len);
+                WMT_DBG_FUNC("wmt_core:idc msg payload:\n");
+                for (index = 0; index < total_len; index++) {
+                        WMT_DBG_FUNC("0x%02x ",msg_local_buffer[index]);
+                }
+        }
 
-		/* read A die chipid by wmt cmd */
-		iRet =
-		    wmt_core_tx((PUINT8) &msg_local_buffer[0], total_len, &u4Res,
-				MTK_WCN_BOOL_FALSE);
-		if (iRet || (u4Res != total_len)) {
-			WMT_ERR_FUNC("wmt_core:send lte idc msg to connsys fail(%d),size(%d)\n",
-				     iRet, u4Res);
-			break;
-		}
-		osal_memset(evtbuf, 0, osal_sizeof(evtbuf));
-		iRet = wmt_core_rx(evtbuf, osal_sizeof(host_lte_btwf_coex_evt), &u4Res);
-		if (iRet || (u4Res != osal_sizeof(host_lte_btwf_coex_evt))) {
-			WMT_ERR_FUNC("wmt_core:recv host_lte_btwf_coex_evt fail(%d),size(%d)\n",
-				     iRet, u4Res);
-			break;
-		}
+        do {
+                fgFail = MTK_WCN_BOOL_TRUE;
 
-		fgFail = MTK_WCN_BOOL_FALSE;
+                iRet = wmt_core_tx((PUINT8) msg_local_buffer, total_len, &u4Res,
+                                MTK_WCN_BOOL_FALSE);
+                if (iRet || (u4Res != total_len)) {
+                        WMT_ERR_FUNC("wmt_core:send lte idc msg to connsys fail(%d),size(%d)\n",
+                                     iRet, u4Res);
+                        break;
+                }
+                osal_memset(evtbuf, 0, osal_sizeof(evtbuf));
+                iRet = wmt_core_rx(evtbuf, osal_sizeof(host_lte_btwf_coex_evt), &u4Res);
+                if (iRet || (u4Res != osal_sizeof(host_lte_btwf_coex_evt))) {
+                        WMT_ERR_FUNC("wmt_core:recv host_lte_btwf_coex_evt fail(%d),size(%d)\n",
+                                     iRet, u4Res);
+                        break;
+                }
 
-	} while (0);
+                fgFail = MTK_WCN_BOOL_FALSE;
 
-	return fgFail;
+        } while (0);
+
+        kfree(msg_local_buffer);
+        return fgFail;
 }
-
-
 
 /*TEST CODE*/
 static UINT32 g_open_wmt_lte_flag = 0;
