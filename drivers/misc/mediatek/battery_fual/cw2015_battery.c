@@ -95,7 +95,7 @@ static struct workqueue_struct *cw2015_workqueue;
 #endif
 #define CW2015_DEV_NAME     "CW2015"
 static const struct i2c_device_id FG_CW2015_i2c_id[] = {{CW2015_DEV_NAME,0},{}};
-static struct i2c_board_info __initdata i2c_FG_CW2015={ I2C_BOARD_INFO("CW2015", 0x62)};
+static struct i2c_board_info i2c_FG_CW2015={ I2C_BOARD_INFO("CW2015", 0x62)};
 static struct i2c_driver FG_CW2015_i2c_driver;
 int g_cw2015_capacity = 0;
 int g_cw2015_vol = 0;
