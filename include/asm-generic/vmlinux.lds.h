@@ -487,7 +487,7 @@
 #define ENTRY_TEXT							\
 		ALIGN_FUNCTION();					\
 		VMLINUX_SYMBOL(__entry_text_start) = .;			\
-		*(.entry.text)						\
+		KEEP(*(.entry.text)) \ 						\
 		VMLINUX_SYMBOL(__entry_text_end) = .;
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
