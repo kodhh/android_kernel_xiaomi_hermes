@@ -98,8 +98,6 @@ static inline void cpu_relax(void)
 	asm volatile("yield" ::: "memory");
 }
 
-#define dmb(opt)        asm volatile("dmb sy" : : : "memory")
-
 #undef smp_rmb
 #if __LINUX_ARM_ARCH__ >= 8
 #define	smp_rmb()	dmb(ishld) /* ok on ARMv8 */
