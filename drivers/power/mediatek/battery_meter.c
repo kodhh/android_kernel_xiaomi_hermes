@@ -628,6 +628,8 @@ int force_get_tbat(kal_bool update)
 	} else {
 		bat_temperature_val = pre_bat_temperature_val;
 	}
+	if(bat_temperature_val < 10)
+		bat_temperature_val = 25;
 	return bat_temperature_val;
 #endif
 }
