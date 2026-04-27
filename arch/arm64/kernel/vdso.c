@@ -329,7 +329,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
  */
 void update_vsyscall(struct timekeeper *tk)
 {
-	u32 use_syscall = strcmp(tk->clock->name, "arch_sys_counter");
+	u32 use_syscall = strcmp(tk->clock->name, "mt6795-gpt");
 
 	++vdso_data->tb_seq_count;
 	smp_wmb();
