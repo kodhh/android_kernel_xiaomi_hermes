@@ -2051,10 +2051,13 @@ zap_buffer_unlocked:
  */
 int jbd2_journal_invalidatepage(journal_t *journal,
 				struct page *page,
-				unsigned long offset)
+				unsigned int offset,
+				unsigned int length)
 {
 	struct buffer_head *head, *bh, *next;
+	unsigned int stop = offset + length;
 	unsigned int curr_off = 0;
+	int partial_page = (offset || length < PAGE_CACHE_SIZE);
 	int may_free = 1;
 	int ret = 0;
 
@@ -2062,6 +2065,8 @@ int jbd2_journal_invalidatepage(journal_t *journal,
 		BUG();
 	if (!page_has_buffers(page))
 		return 0;
+
+	BUG_ON(stop > PAGE_CACHE_SIZE || stop < length);
 
 	/* We will potentially be playing with lists other than just the
 	 * data lists (especially for journaled data mode), so be
@@ -2072,10 +2077,22 @@ int jbd2_journal_invalidatepage(journal_t *journal,
 		unsigned int next_off = curr_off + bh->b_size;
 		next = bh->b_this_page;
 
-		if (offset <= curr_off) {
+		if (offset <= curr_off)
 			/* This block is wholly outside the truncation point */
+			partial_page = 1;
+
+		if (next_off > offset && offset <= curr_off)
+			/* This block contains the boundary point */
+			partial_page = 1;
+
+		if (next_off > offset && stop >= next_off)
+			/* This block is wholly inside the truncation point */
+			partial_page = 1;
+
+		if (partial_page) {
 			lock_buffer(bh);
-			ret = journal_unmap_buffer(journal, bh, offset > 0);
+			ret = journal_unmap_buffer(journal, bh,
+						   stop > next_off);
 			unlock_buffer(bh);
 			if (ret < 0)
 				return ret;
@@ -2086,7 +2103,7 @@ int jbd2_journal_invalidatepage(journal_t *journal,
 
 	} while (bh != head);
 
-	if (!offset) {
+	if (!partial_page) {
 		if (may_free && try_to_free_buffers(page))
 			J_ASSERT(!page_has_buffers(page));
 	}

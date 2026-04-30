@@ -30,21 +30,15 @@ jobs:
         git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git $GCC_PATH
         git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git $GCC32_PATH
 
-    - name: Configure Kernel (示例)
+    - name: Configure Kernel
       run: |
-        # 此处为示例配置命令，请替换为你的内核实际配置命令
-        # 例如：make ARCH=arm64 CC=clang defconfig
-        export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
-        export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-gcc  MTK_PLATFORM="mt6795" hermes_defconfig
+        export PATH="$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" hermes_defconfig
 
-    - name: Build Kernel with Clang
+    - name: Build Kernel
       run: |
-        # 此处为示例编译命令，请替换为你的WSL2内核实际编译命令
-        # 例如：make ARCH=arm64 CC=clang -j$(nproc)
-        export PATH="$CLANG_PATH/bin:$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
-        export LD_LIBRARY_PATH="$CLANG_PATH/lib64:$LD_LIBRARY_PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-gcc MTK_PLATFORM="mt6795" -j8
+        export PATH="$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" -j$(nproc)
 
     # 可选：上传构建产物
     - name: Upload Build Artifacts
