@@ -1620,7 +1620,7 @@ static void ext4_da_block_invalidatepages(struct mpage_da_data *mpd)
 				break;
 			BUG_ON(!PageLocked(page));
 			BUG_ON(PageWriteback(page));
-			block_invalidatepage(page, 0);
+			block_invalidatepage(page, 0, PAGE_CACHE_SIZE);
 			ClearPageUptodate(page);
 			unlock_page(page);
 		}
