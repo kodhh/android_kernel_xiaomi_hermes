@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/xattr.h>
 #include "overlayfs.h"
+#include "../internal.h"
 
 int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 {
@@ -104,7 +105,7 @@ int ovl_permission(struct inode *inode, int mask)
 			goto out_dput;
 	}
 
-	err = __inode_permission(realinode, mask);
+	err = inode_permission(realinode, mask);
 out_dput:
 	dput(alias);
 	return err;

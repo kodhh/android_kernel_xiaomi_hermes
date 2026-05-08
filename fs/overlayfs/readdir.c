@@ -177,9 +177,13 @@ static inline int ovl_dir_read(struct path *realpath,
 		return PTR_ERR(realfile);
 
 	do {
+		struct dir_context ctx = {
+			.actor = filler,
+			.pos = realfile->f_pos,
+		};
 		rdd->count = 0;
 		rdd->err = 0;
-		err = vfs_readdir(realfile, filler, rdd);
+		err = iterate_dir(realfile, &ctx);
 		if (err >= 0)
 			err = rdd->err;
 	} while (!err && rdd->count);
@@ -303,7 +307,11 @@ static int ovl_readdir(struct file *file, void *buf, filldir_t filler)
 		ovl_dir_reset(file);
 
 	if (od->is_real) {
-		res = vfs_readdir(od->realfile, filler, buf);
+		struct dir_context ctx = {
+			.actor = filler,
+			.pos = od->realfile->f_pos,
+		};
+		res = iterate_dir(od->realfile, &ctx);
 		file->f_pos = od->realfile->f_pos;
 
 		return res;

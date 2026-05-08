@@ -19,6 +19,7 @@ DECLARE_PER_CPU(struct sched_block_event, hrt_mon);
 DECLARE_PER_CPU(struct sched_block_event, sft_mon);
 
 DECLARE_PER_CPU(int, mt_timer_irq);
+#ifdef CONFIG_MT_SCHED_MONITOR
 extern void mt_trace_ISR_start(int id);
 extern void mt_trace_ISR_end(int id);
 extern void mt_trace_SoftIRQ_start(int id);
@@ -29,6 +30,18 @@ extern void mt_trace_hrt_start(void *func);
 extern void mt_trace_hrt_end(void *func);
 extern void mt_trace_sft_start(void *func);
 extern void mt_trace_sft_end(void *func);
+#else
+static inline void mt_trace_ISR_start(int id) {};
+static inline void mt_trace_ISR_end(int id) {};
+static inline void mt_trace_SoftIRQ_start(int id) {};
+static inline void mt_trace_SoftIRQ_end(int id) {};
+static inline void mt_trace_tasklet_start(void *func) {};
+static inline void mt_trace_tasklet_end(void *func) {};
+static inline void mt_trace_hrt_start(void *func) {};
+static inline void mt_trace_hrt_end(void *func) {};
+static inline void mt_trace_sft_start(void *func) {};
+static inline void mt_trace_sft_end(void *func) {};
+#endif
 
 extern void mt_save_irq_counts(void);
 extern void mt_show_last_irq_counts(void);
@@ -42,10 +55,17 @@ struct sched_stop_event {
 };
 DECLARE_PER_CPU(struct sched_stop_event, IRQ_disable_mon);
 DECLARE_PER_CPU(struct sched_stop_event, Preempt_disable_mon);
+#ifdef CONFIG_PREEMPT_MONITOR
 extern void MT_trace_irq_on(void);
 extern void MT_trace_irq_off(void);
 extern void MT_trace_preempt_on(void);
 extern void MT_trace_preempt_off(void);
+#else
+static inline void MT_trace_irq_on(void) {};
+static inline void MT_trace_irq_off(void) {};
+static inline void MT_trace_preempt_on(void) {};
+static inline void MT_trace_preempt_off(void) {};
+#endif
 /* [IRQ-disable] White List
  * Flags for special scenario*/
 DECLARE_PER_CPU(int, MT_trace_in_sched);
@@ -77,4 +97,17 @@ do { \
 
 #define mt_sched_mon_disable(sflag) do {} while (0)
 #define mt_sched_mon_restore(sflag) do {} while (0)
+#endif
+
+#ifdef CONFIG_MTPROF
+#ifdef CONFIG_PREEMPT_MONITOR
+extern void MT_trace_check_preempt_dur(void);
+#else
+static inline void MT_trace_check_preempt_dur(void) {};
+#endif
+#ifdef CONFIG_MT_RT_THROTTLE_MON
+extern void check_mt_rt_mon_info(struct task_struct *p);
+#else
+static inline void check_mt_rt_mon_info(struct task_struct *p) {};
+#endif
 #endif
