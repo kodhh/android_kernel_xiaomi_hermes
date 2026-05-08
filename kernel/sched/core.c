@@ -91,7 +91,7 @@
 #include "linux/aee.h"
 #endif
 
-#include "mt_sched_mon.h"
+#include <linux/mt_sched_mon.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
@@ -4503,6 +4503,138 @@ SYSCALL_DEFINE2(sched_getparam, pid_t, pid, struct sched_param __user *, param)
 	 */
 	retval = copy_to_user(param, &lp, sizeof(*param)) ? -EFAULT : 0;
 
+	return retval;
+
+out_unlock:
+	rcu_read_unlock();
+	return retval;
+}
+
+SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
+	        unsigned int, flags)
+{
+	struct sched_attr attr;
+	struct sched_param param;
+	struct task_struct *p;
+	int retval;
+	int policy = -1;
+
+	if (!uattr || pid < 0 || flags)
+		return -EINVAL;
+
+	if (copy_from_user(&attr, uattr, sizeof(struct sched_attr)))
+		return -EFAULT;
+
+	if (attr.size != sizeof(struct sched_attr))
+		return -EINVAL;
+
+	if (attr.sched_flags & ~(SCHED_FLAG_RESET_ON_FORK |
+				 SCHED_FLAG_KEEP_POLICY |
+				 SCHED_FLAG_KEEP_PARAMS))
+		return -EINVAL;
+
+	if (!(attr.sched_flags & SCHED_FLAG_KEEP_POLICY)) {
+		policy = attr.sched_policy;
+		if (policy != SCHED_FIFO && policy != SCHED_RR &&
+		    policy != SCHED_NORMAL && policy != SCHED_BATCH &&
+		    policy != SCHED_IDLE)
+			return -EINVAL;
+	}
+
+	if (!(attr.sched_flags & SCHED_FLAG_KEEP_PARAMS)) {
+		if (attr.sched_priority < 0 ||
+		    attr.sched_priority > MAX_USER_RT_PRIO - 1)
+			return -EINVAL;
+		if (!(attr.sched_flags & SCHED_FLAG_KEEP_POLICY) &&
+		    rt_policy(policy) != (attr.sched_priority != 0))
+			return -EINVAL;
+	}
+
+	rcu_read_lock();
+	retval = -ESRCH;
+	p = find_process_by_pid(pid);
+	if (!p)
+		goto out_unlock;
+
+	if (attr.sched_flags & SCHED_FLAG_KEEP_POLICY)
+		policy = p->policy;
+
+	if (attr.sched_flags & SCHED_FLAG_KEEP_PARAMS)
+		param.sched_priority = p->rt_priority;
+	else
+		param.sched_priority = attr.sched_priority;
+
+	/* cross-check priority type vs policy when KEEP_POLICY is set */
+	if ((attr.sched_flags & SCHED_FLAG_KEEP_PARAMS) == 0 &&
+	    (attr.sched_flags & SCHED_FLAG_KEEP_POLICY) &&
+	    rt_policy(policy) != (param.sched_priority != 0)) {
+		retval = -EINVAL;
+		goto out_unlock;
+	}
+
+	retval = security_task_setscheduler(p);
+	if (retval)
+		goto out_unlock;
+
+	retval = sched_setscheduler(p, policy, &param);
+	if (retval)
+		goto out_unlock;
+
+	/* Handle nice for SCHED_NORMAL/BATCH/IDLE */
+	if (!rt_policy(policy) && !(attr.sched_flags & SCHED_FLAG_KEEP_PARAMS)) {
+		if (attr.sched_nice < -20 || attr.sched_nice > 19) {
+			retval = -EINVAL;
+			goto out_unlock;
+		}
+		if (!can_nice(p, attr.sched_nice)) {
+			retval = -EPERM;
+			goto out_unlock;
+		}
+		set_user_nice(p, attr.sched_nice);
+	}
+
+	p->sched_reset_on_fork = !!(attr.sched_flags & SCHED_FLAG_RESET_ON_FORK);
+	retval = 0;
+
+out_unlock:
+	rcu_read_unlock();
+	return retval;
+}
+
+SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
+	        unsigned int, size, unsigned int, flags)
+{
+	struct sched_attr attr;
+	struct task_struct *p;
+	int retval;
+
+	if (!uattr || pid < 0 || size > sizeof(struct sched_attr) || flags)
+		return -EINVAL;
+
+	if (size == 0)
+		return -EINVAL;
+
+	rcu_read_lock();
+	p = find_process_by_pid(pid);
+	retval = -ESRCH;
+	if (!p)
+		goto out_unlock;
+
+	retval = security_task_getscheduler(p);
+	if (retval)
+		goto out_unlock;
+
+	attr.size = sizeof(struct sched_attr);
+	attr.sched_policy = p->policy;
+	attr.sched_flags = (p->sched_reset_on_fork ? SCHED_FLAG_RESET_ON_FORK : 0);
+	attr.sched_nice = PRIO_TO_NICE(p->static_prio);
+	attr.sched_priority = p->rt_priority;
+	attr.sched_runtime = 0;
+	attr.sched_deadline = 0;
+	attr.sched_period = 0;
+	rcu_read_unlock();
+
+	retval = copy_to_user(uattr, &attr, size) ? -EFAULT : 0;
 	return retval;
 
 out_unlock:

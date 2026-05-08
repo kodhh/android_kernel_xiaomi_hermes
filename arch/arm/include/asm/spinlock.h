@@ -129,14 +129,12 @@ static inline void arch_spin_unlock(arch_spinlock_t *lock)
 
 static inline int arch_spin_is_locked(arch_spinlock_t *lock)
 {
-	struct __raw_tickets tickets = ACCESS_ONCE(lock->tickets);
-	return tickets.owner != tickets.next;
+	return ACCESS_ONCE(lock->tickets.owner) != ACCESS_ONCE(lock->tickets.next);
 }
 
 static inline int arch_spin_is_contended(arch_spinlock_t *lock)
 {
-	struct __raw_tickets tickets = ACCESS_ONCE(lock->tickets);
-	return (tickets.next - tickets.owner) > 1;
+	return (ACCESS_ONCE(lock->tickets.next) - ACCESS_ONCE(lock->tickets.owner)) > 1;
 }
 #define arch_spin_is_contended	arch_spin_is_contended
 

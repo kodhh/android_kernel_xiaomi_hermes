@@ -1,6 +1,8 @@
 #ifndef _UAPI_LINUX_SCHED_H
 #define _UAPI_LINUX_SCHED_H
 
+#include <linux/types.h>
+
 /*
  * cloning flags:
  */
@@ -42,5 +44,24 @@
 /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
 #define SCHED_RESET_ON_FORK     0x40000000
 
+/*
+ * For the sched_setattr() and sched_getattr() syscalls
+ */
+#define SCHED_FLAG_RESET_ON_FORK	0x01
+#define SCHED_FLAG_KEEP_POLICY		0x08
+#define SCHED_FLAG_KEEP_PARAMS		0x10
+
+#define SCHED_ATTR_SIZE_VER0	48	/* sizeof first published struct */
+
+struct sched_attr {
+	__u32 size;
+	__u32 sched_policy;
+	__u64 sched_flags;
+	__s32 sched_nice;
+	__u32 sched_priority;
+	__u64 sched_runtime;
+	__u64 sched_deadline;
+	__u64 sched_period;
+};
 
 #endif /* _UAPI_LINUX_SCHED_H */
