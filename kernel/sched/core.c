@@ -4254,6 +4254,9 @@ recheck:
 			/* dump_stack(); */
 		}
 		rt_prio = mt_param.sched_priority;
+		/* Update attr->sched_priority so __setscheduler() uses the
+		 * modified (RT monitor cleared) priority */
+		((struct sched_attr *)attr)->sched_priority = rt_prio;
 	}
 
 	/*
