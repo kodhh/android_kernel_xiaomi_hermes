@@ -2238,23 +2238,6 @@ user_path_parent(int dfd, const char __user *path, struct nameidata *nd,
 }
 
 /*
- * It's inline, so penalty for filesystems that don't use sticky bit is
- * minimal.
- */
-static inline int check_sticky(struct inode *dir, struct inode *inode)
-{
-	kuid_t fsuid = current_fsuid();
-
-	if (!(dir->i_mode & S_ISVTX))
-		return 0;
-	if (uid_eq(inode->i_uid, fsuid))
-		return 0;
-	if (uid_eq(dir->i_uid, fsuid))
-		return 0;
-	return !capable_wrt_inode_uidgid(inode, CAP_FOWNER);
-}
-
-/*
  *	Check whether we can remove a link victim from directory dir, check
  *  whether the type of victim is right.
  *  1. We can't do it if dir is read-only (done in permission())
@@ -3968,7 +3951,7 @@ int vfs_rename2(struct vfsmount *mnt,
 	if (error)
 		return error;
 
-	if (!old_dir->i_op->rename)
+	if (!old_dir->i_op->rename && !old_dir->i_op->rename2)
 		return -EPERM;
 
 	old_name = fsnotify_oldname_init(old_dentry->d_name.name);
@@ -3993,8 +3976,23 @@ int vfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 }
 EXPORT_SYMBOL(vfs_rename);
 
-SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
-		int, newdfd, const char __user *, newname)
+int vfs_whiteout(struct inode *dir, struct dentry *dentry)
+{
+	int error = may_create(NULL, dir, dentry);
+	if (error)
+		return error;
+
+	if (!dir->i_op->mknod)
+		return -EPERM;
+
+	return dir->i_op->mknod(dir, dentry,
+				S_IFCHR | WHITEOUT_MODE, WHITEOUT_DEV);
+}
+EXPORT_SYMBOL(vfs_whiteout);
+
+static int do_renameat2(int olddfd, const char __user *oldname,
+			int newdfd, const char __user *newname,
+			unsigned int flags)
 {
 	struct dentry *old_dir, *new_dir;
 	struct dentry *old_dentry, *new_dentry;
@@ -4005,6 +4003,10 @@ SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
 	unsigned int lookup_flags = 0;
 	bool should_retry = false;
 	int error;
+
+	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
+		return -EINVAL;
+
 retry:
 	from = user_path_parent(olddfd, oldname, &oldnd, lookup_flags);
 	if (IS_ERR(from)) {
@@ -4037,7 +4039,8 @@ retry:
 
 	oldnd.flags &= ~LOOKUP_PARENT;
 	newnd.flags &= ~LOOKUP_PARENT;
-	newnd.flags |= LOOKUP_RENAME_TARGET;
+	if (flags & RENAME_EXCHANGE)
+		newnd.flags |= LOOKUP_RENAME_TARGET;
 
 	trap = lock_rename(new_dir, old_dir);
 
@@ -4061,21 +4064,61 @@ retry:
 	error = -EINVAL;
 	if (old_dentry == trap)
 		goto exit4;
-	new_dentry = lookup_hash(&newnd);
-	error = PTR_ERR(new_dentry);
-	if (IS_ERR(new_dentry))
-		goto exit4;
-	/* target should not be an ancestor of source */
-	error = -ENOTEMPTY;
-	if (new_dentry == trap)
-		goto exit5;
 
-	error = security_path_rename(&oldnd.path, old_dentry,
-				     &newnd.path, new_dentry);
-	if (error)
-		goto exit5;
-	error = vfs_rename2(oldnd.path.mnt, old_dir->d_inode, old_dentry,
-				   new_dir->d_inode, new_dentry);
+	if (flags & RENAME_EXCHANGE) {
+		new_dentry = lookup_hash(&newnd);
+		error = PTR_ERR(new_dentry);
+		if (IS_ERR(new_dentry))
+			goto exit4;
+		/* target should not be an ancestor of source */
+		error = -ENOTEMPTY;
+		if (new_dentry == trap)
+			goto exit5;
+
+		error = security_path_rename(&oldnd.path, old_dentry,
+					     &newnd.path, new_dentry);
+		if (error)
+			goto exit5;
+
+		if (old_dir->d_inode->i_op->rename2) {
+			error = old_dir->d_inode->i_op->rename2(old_dir->d_inode,
+					old_dentry, new_dir->d_inode,
+					new_dentry, flags);
+		} else {
+			error = -EINVAL;
+		}
+	} else {
+		new_dentry = lookup_hash(&newnd);
+		error = PTR_ERR(new_dentry);
+		if (IS_ERR(new_dentry))
+			goto exit4;
+		/* target should not be an ancestor of source */
+		error = -ENOTEMPTY;
+		if (new_dentry == trap)
+			goto exit5;
+
+		error = security_path_rename(&oldnd.path, old_dentry,
+					     &newnd.path, new_dentry);
+		if (error)
+			goto exit5;
+
+		if (old_dir->d_inode->i_op->rename2) {
+			error = old_dir->d_inode->i_op->rename2(old_dir->d_inode,
+					old_dentry, new_dir->d_inode,
+					new_dentry, flags);
+		} else {
+			if (flags & RENAME_NOREPLACE && new_dentry->d_inode)
+				error = -EEXIST;
+			else if (flags & RENAME_NOREPLACE)
+				error = vfs_rename2(oldnd.path.mnt,
+					old_dir->d_inode, old_dentry,
+					new_dir->d_inode, new_dentry);
+			else
+				error = vfs_rename2(oldnd.path.mnt,
+					old_dir->d_inode, old_dentry,
+					new_dir->d_inode, new_dentry);
+		}
+	}
 exit5:
 	dput(new_dentry);
 exit4:
@@ -4091,20 +4134,32 @@ exit2:
 exit1:
 	path_put(&oldnd.path);
 	putname(from);
+exit:
 	if (should_retry) {
 		should_retry = false;
 		lookup_flags |= LOOKUP_REVAL;
 		goto retry;
 	}
-exit:
 	return error;
+}
+
+SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
+		int, newdfd, const char __user *, newname)
+{
+	return do_renameat2(olddfd, oldname, newdfd, newname, 0);
+}
+
+SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
+		int, newdfd, const char __user *, newname,
+		unsigned int, flags)
+{
+	return do_renameat2(olddfd, oldname, newdfd, newname, flags);
 }
 
 SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newname)
 {
-	return sys_renameat(AT_FDCWD, oldname, AT_FDCWD, newname);
+	return do_renameat2(AT_FDCWD, oldname, AT_FDCWD, newname, 0);
 }
-
 int vfs_readlink(struct dentry *dentry, char __user *buffer, int buflen, const char *link)
 {
 	int len;
