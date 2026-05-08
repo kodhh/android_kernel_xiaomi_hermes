@@ -124,8 +124,19 @@ typedef void (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 /* File is opened with O_PATH; almost nothing can be done with it */
 #define FMODE_PATH		((__force fmode_t)0x4000)
 
+/* File hasn't page cache and can't be mmaped, for stackable filesystem */
+#define FMODE_NONMAPPABLE        ((__force fmode_t)0x400000)
+
+/* File page don't need to be cached, for stackable filesystem's lower file */
+#define FMODE_NONCACHEABLE     ((__force fmode_t)0x800000)
+
 /* File was opened by fanotify and shouldn't generate fanotify events */
 #define FMODE_NONOTIFY		((__force fmode_t)0x1000000)
+
+/* File can be read using splice */
+#define FMODE_SPLICE_READ       ((__force fmode_t)0x8000000)
+/* File can be written using splice */
+#define FMODE_SPLICE_WRITE      ((__force fmode_t)0x10000000)
 
 /*
  * Flag for rw_copy_check_uvector and compat_rw_copy_check_uvector
@@ -1503,14 +1514,14 @@ extern int vfs_mkdir2(struct vfsmount *, struct inode *, struct dentry *, umode_
 extern int vfs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
 extern int vfs_mknod2(struct vfsmount *, struct inode *, struct dentry *, umode_t, dev_t);
 extern int vfs_symlink(struct inode *, struct dentry *, const char *);
-extern int vfs_link(struct dentry *, struct inode *, struct dentry *);
-extern int vfs_link2(struct vfsmount *, struct dentry *, struct inode *, struct dentry *);
+extern int vfs_link(struct dentry *, struct inode *, struct dentry *, struct inode **);
+extern int vfs_link2(struct vfsmount *, struct dentry *, struct inode *, struct dentry *, struct inode **);
 extern int vfs_rmdir(struct inode *, struct dentry *);
 extern int vfs_rmdir2(struct vfsmount *, struct inode *, struct dentry *);
-extern int vfs_unlink(struct inode *, struct dentry *);
-extern int vfs_unlink2(struct vfsmount *, struct inode *, struct dentry *);
-extern int vfs_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
-extern int vfs_rename2(struct vfsmount *, struct inode *, struct dentry *, struct inode *, struct dentry *);
+extern int vfs_unlink(struct inode *, struct dentry *, struct inode **);
+extern int vfs_unlink2(struct vfsmount *, struct inode *, struct dentry *, struct inode **);
+extern int vfs_rename(struct inode *, struct dentry *, struct inode *, struct dentry *, struct inode **, unsigned int);
+extern int vfs_rename2(struct vfsmount *, struct inode *, struct dentry *, struct inode *, struct dentry *, struct inode **, unsigned int);
 extern int vfs_whiteout(struct inode *, struct dentry *);
 
 /*
@@ -2296,12 +2307,12 @@ extern void emergency_remount(void);
 #ifdef CONFIG_BLOCK
 extern sector_t bmap(struct inode *, sector_t);
 #endif
-extern int notify_change(struct dentry *, struct iattr *);
+extern int notify_change(struct dentry *, struct iattr *, struct vfsmount *);
 extern int notify_change2(struct vfsmount *, struct dentry *, struct iattr *);
+extern int __inode_permission(struct inode *, int);
 extern int inode_permission(struct inode *, int);
 extern int inode_permission2(struct vfsmount *, struct inode *, int);
 extern int generic_permission(struct inode *, int);
-extern int inode_permission2(struct vfsmount *, struct inode *, int);
 
 static inline bool execute_ok(struct inode *inode)
 {

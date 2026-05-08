@@ -73,7 +73,7 @@ int remove_file(char *path)
     if (IS_ERR(dentry)) {
         return -EACCES;
     }
-    vfs_unlink(ndpath.dentry->d_inode, dentry);
+    vfs_unlink(ndpath.dentry->d_inode, dentry, NULL);
     dput(dentry);
 
     set_fs(oldfs);
