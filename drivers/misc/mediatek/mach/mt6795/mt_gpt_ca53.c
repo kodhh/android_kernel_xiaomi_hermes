@@ -134,7 +134,7 @@ static void mt_gpt_set_mode(enum clock_event_mode mode, struct clock_event_devic
 
 static struct clocksource gpt_clocksource = {
 	.name	= "mt6795-gpt",
-	.rating	= 300,
+	.rating	= 100,
 	.read	= mt_gpt_read,
 	.mask	= CLOCKSOURCE_MASK(32),
 	.shift  = 25,

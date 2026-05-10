@@ -193,7 +193,6 @@ u64 arch_timer_read_counter(void)
 	//return arch_counter_get_cntvct();
 }
 
-#if 0
 static cycle_t arch_counter_read(struct clocksource *cs)
 {
 	return arch_counter_get_cntvct();
@@ -216,7 +215,6 @@ static struct cyclecounter cyclecounter = {
 	.read	= arch_counter_read_cc,
 	.mask	= CLOCKSOURCE_MASK(56),
 };
-#endif
 
 static struct timecounter timecounter;
 
@@ -281,13 +279,11 @@ static int __init arch_timer_register(void)
 		goto out;
 	}
 
-#if 0
 	clocksource_register_hz(&clocksource_counter, arch_timer_rate);
 	cyclecounter.mult = clocksource_counter.mult;
 	cyclecounter.shift = clocksource_counter.shift;
 	timecounter_init(&timecounter, &cyclecounter,
 			 arch_counter_get_cntpct());
-#endif
 
 	if (arch_timer_use_virtual) {
 		ppi = arch_timer_ppi[VIRT_PPI];

@@ -93,6 +93,27 @@ signing_key.x509
 x509.genkey
 
 #
+# Kernel build artifacts
+#
+/arch/*/boot/Image
+/arch/*/boot/Image.gz
+/arch/*/boot/zImage
+/arch/*/boot/*.dtb
+*.lds
+*.cpio
+*.bc
+include/generated/
+
+#
+# Generated source files from build
+#
+/security/selinux/flask.h
+/security/selinux/av_permissions.h
+/net/wireless/regdb.c
+/kernel/timeconst.h
+/kernel/hz.bc
+
+#
 # building directory
 #
 /out/
