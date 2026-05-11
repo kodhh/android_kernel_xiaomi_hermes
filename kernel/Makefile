@@ -133,6 +133,10 @@ quiet_cmd_hzfile = HZFILE  $@
       cmd_hzfile = echo "hz=$(CONFIG_HZ)" > $@
 
 targets += hz.bc
+$(objtree)/include/config/hz.h:
+	$(Q)mkdir -p $(dir $@)
+	$(Q)touch $@
+
 $(obj)/hz.bc: $(objtree)/include/config/hz.h FORCE
 	$(call if_changed,hzfile)
 

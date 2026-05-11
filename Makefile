@@ -566,6 +566,13 @@ $(KCONFIG_CONFIG) include/config/auto.conf.cmd: ;
 # we execute the config step to be sure to catch updated Kconfig files
 include/config/%.conf: $(KCONFIG_CONFIG) include/config/auto.conf.cmd
 	$(Q)$(MAKE) -f $(srctree)/Makefile silentoldconfig
+
+# Generate include/config/*.h marker files used by kernel/Makefile
+# These are normally created by silentoldconfig but can be missing
+# with O=out builds. Create empty markers for dependency tracking.
+include/config/%.h: include/config/auto.conf
+	$(Q)mkdir -p $(dir $@)
+	$(Q)touch $@
 else
 # external modules needs include/generated/autoconf.h and include/config/auto.conf
 # but do not care if they are up-to-date. Use auto.conf to trigger the test
