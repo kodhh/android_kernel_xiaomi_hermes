@@ -19,7 +19,7 @@ void ovl_cleanup(struct inode *wdir, struct dentry *wdentry)
 	int err;
 
 	dget(wdentry);
-	if (!S_ISDIR(wdentry->d_inode->i_mode))
+	if (S_ISDIR(wdentry->d_inode->i_mode))
 		err = ovl_do_rmdir(wdir, wdentry);
 	else
 		err = ovl_do_unlink(wdir, wdentry);
@@ -268,8 +268,8 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 	if (err)
 		goto out_cleanup;
 
-	ovl_cleanup_whiteouts(upper, list);
-	ovl_cleanup(wdir, upper);
+	ovl_cleanup_whiteouts(opaquedir, list);
+	ovl_cleanup(wdir, opaquedir);
 	unlock_rename(workdir, upperdir);
 
 	/* dentry's upper doesn't match now, get rid of it */
@@ -357,7 +357,7 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 		if (err)
 			goto out_cleanup;
 
-		ovl_cleanup(wdir, upper);
+		ovl_cleanup(wdir, newdentry);
 	} else {
 		err = ovl_do_rename(wdir, newdentry, udir, upper, 0);
 		if (err)
@@ -574,7 +574,7 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 			goto kill_whiteout;
 
 		if (is_dir)
-			ovl_cleanup(wdir, upper);
+			ovl_cleanup(wdir, whiteout);
 	}
 	ovl_dentry_version_inc(dentry->d_parent);
 out_d_drop:
@@ -910,7 +910,7 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 	}
 
 	if (cleanup_whiteout)
-		ovl_cleanup(old_upperdir->d_inode, newdentry);
+		ovl_cleanup(old_upperdir->d_inode, olddentry);
 
 	ovl_dentry_version_inc(old->d_parent);
 	ovl_dentry_version_inc(new->d_parent);
