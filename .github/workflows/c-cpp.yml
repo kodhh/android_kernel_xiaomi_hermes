@@ -8,8 +8,7 @@ on:
 
 jobs:
   build:
-    # 根据项目需求选择 windows-latest 或 ubuntu-latest
-    runs-on: ubuntu-22.04  # 若在Windows上编译，通常需改为 windows-latest
+    runs-on: ubuntu-22.04
     env:
       GCC_PATH: /prebuilt/gcc
       GCC32_PATH: /prebuilt/gcc32
@@ -21,9 +20,8 @@ jobs:
         submodules: recursive
         token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install Clang and Dependencies
+    - name: Install Dependencies
       run: |
-        # 在Ubuntu上安装Clang及编译依赖（示例命令，具体包名请根据你的WSL2内核需求调整）
         sudo apt-get update
         sudo apt-get install -y git gcc automake autoconf libtool make flex lzop bison gperf build-essential zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip
         sudo bash -c "mkdir /{build,prebuilt} && chown $(whoami):$(whoami) /{build,prebuilt}"
@@ -33,22 +31,21 @@ jobs:
     - name: Configure Kernel
       run: |
         export PATH="$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" hermes_defconfig
+        make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" hermes_defconfig
 
     - name: Build Kernel
       run: |
         export PATH="$GCC_PATH/bin:$GCC32_PATH/bin:$PATH"
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" -j$(nproc)
+        make O=out ARCH=arm64 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi- cc-name=gcc MTK_PLATFORM="mt6795" -j$(nproc)
 
-    # 可选：上传构建产物
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: kernel-build
-        path: arch/arm64/boot/Image.gz
+        path: out/arch/arm64/boot/Image.gz
 
-    - name: Upload Build Artifacts1
+    - name: Upload DTBs
       uses: actions/upload-artifact@v4
       with:
         name: dtbs
-        path: arch/arm64/boot/dts/hermes.dtb
+        path: out/arch/arm64/boot/dts/hermes.dtb
