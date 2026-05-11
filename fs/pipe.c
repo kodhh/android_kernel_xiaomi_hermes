@@ -927,7 +927,7 @@ int create_pipe_files(struct file **res, int flags)
 	struct inode *inode = get_pipe_inode();
 	struct file *f;
 	struct path path;
-	static struct qstr name = { .name = "" };
+	static struct qstr name = { .name = (const unsigned char *)"" };
 
 	if (!inode)
 		return -ENFILE;

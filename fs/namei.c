@@ -1812,7 +1812,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 			break;
 
 		len = hash_name(name, &this.hash);
-		this.name = name;
+		this.name = (const unsigned char *)name;
 		this.len = len;
 
 		type = LAST_NORM;
@@ -2145,9 +2145,9 @@ struct dentry *lookup_one_len2(const char *name, struct vfsmount *mnt, struct de
 
 	WARN_ON_ONCE(!mutex_is_locked(&base->d_inode->i_mutex));
 
-	this.name = name;
+	this.name = (const unsigned char *)name;
 	this.len = len;
-	this.hash = full_name_hash(name, len);
+	this.hash = full_name_hash((const unsigned char *)name, len);
 	if (!len)
 		return ERR_PTR(-EACCES);
 
@@ -2958,7 +2958,7 @@ static int do_tmpfile(int dfd, struct filename *pathname,
 		const struct open_flags *op,
 		struct file *file, int *opened)
 {
-	static const struct qstr name = QSTR_INIT("/", 1);
+	static const struct qstr name = { { { .len = 1 } }, .name = (const unsigned char *)"/" };
 	struct dentry *dentry, *child;
 	struct inode *dir;
 	int error = path_lookupat(dfd, pathname->name,

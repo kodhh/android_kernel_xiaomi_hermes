@@ -264,7 +264,7 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 		struct inode *inode;
 
 		audit_log_format(ab, " name=");
-		audit_log_untrustedstring(ab, a->u.dentry->d_name.name);
+		audit_log_untrustedstring(ab, (const char *)a->u.dentry->d_name.name);
 
 		inode = a->u.dentry->d_inode;
 		if (inode) {
@@ -283,7 +283,7 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 		if (dentry) {
 			audit_log_format(ab, " name=");
 			audit_log_untrustedstring(ab,
-					 dentry->d_name.name);
+					 (const char *)dentry->d_name.name);
 			dput(dentry);
 		}
 		audit_log_format(ab, " dev=");
@@ -343,7 +343,7 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 				if (*p)
 					audit_log_untrustedstring(ab, p);
 				else
-					audit_log_n_hex(ab, p, len);
+					audit_log_n_hex(ab, (const unsigned char *)p, len);
 				break;
 			}
 		}

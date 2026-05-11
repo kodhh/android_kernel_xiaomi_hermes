@@ -94,7 +94,7 @@ static inline int
 nls_nullsize(const struct nls_table *codepage)
 {
 	int charlen;
-	char tmp[NLS_MAX_CHARSET_SIZE];
+	unsigned char tmp[NLS_MAX_CHARSET_SIZE];
 
 	charlen = codepage->uni2char(0, tmp, NLS_MAX_CHARSET_SIZE);
 

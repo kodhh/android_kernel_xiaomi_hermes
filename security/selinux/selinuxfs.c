@@ -1043,7 +1043,7 @@ static ssize_t sel_read_bool(struct file *filep, char __user *buf,
 	ssize_t ret;
 	int cur_enforcing;
 	unsigned index = file_inode(filep)->i_ino & SEL_INO_MASK;
-	const char *name = filep->f_path.dentry->d_name.name;
+	const char *name = (const char *)filep->f_path.dentry->d_name.name;
 
 	mutex_lock(&sel_mutex);
 
@@ -1077,7 +1077,7 @@ static ssize_t sel_write_bool(struct file *filep, const char __user *buf,
 	ssize_t length;
 	int new_value;
 	unsigned index = file_inode(filep)->i_ino & SEL_INO_MASK;
-	const char *name = filep->f_path.dentry->d_name.name;
+	const char *name = (const char *)filep->f_path.dentry->d_name.name;
 
 	mutex_lock(&sel_mutex);
 

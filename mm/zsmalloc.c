@@ -713,7 +713,7 @@ static void remove_zspage(struct page *page, struct size_class *class,
 static enum fullness_group fix_fullness_group(struct size_class *class,
 						struct page *page)
 {
-	int class_idx;
+	unsigned int class_idx;
 	enum fullness_group currfg, newfg;
 
 	BUG_ON(!is_first_page(page));
@@ -1460,7 +1460,7 @@ static void obj_free(struct zs_pool *pool, struct size_class *class,
 	struct page *first_page, *f_page;
 	unsigned long f_objidx, f_offset;
 	void *vaddr;
-	int class_idx;
+	unsigned int class_idx;
 	enum fullness_group fullness;
 
 	BUG_ON(!obj);
@@ -1489,7 +1489,7 @@ void zs_free(struct zs_pool *pool, unsigned long handle)
 {
 	struct page *first_page, *f_page;
 	unsigned long obj, f_objidx;
-	int class_idx;
+	unsigned int class_idx;
 	struct size_class *class;
 	enum fullness_group fullness;
 

@@ -1244,7 +1244,7 @@ EXPORT_SYMBOL(shrink_dcache_parent);
 struct dentry *__d_alloc(struct super_block *sb, const struct qstr *name)
 {
 	struct dentry *dentry;
-	char *dname;
+	unsigned char *dname;
 
 	dentry = kmem_cache_alloc(dentry_cache, GFP_KERNEL);
 	if (!dentry)
@@ -1339,7 +1339,7 @@ struct dentry *d_alloc_name(struct dentry *parent, const char *name)
 {
 	struct qstr q;
 
-	q.name = name;
+	q.name = (const unsigned char *)name;
 	q.len = strlen(name);
 	q.hash = full_name_hash(q.name, q.len);
 	return d_alloc(parent, &q);
@@ -1435,7 +1435,7 @@ static struct dentry *__d_instantiate_unique(struct dentry *entry,
 {
 	struct dentry *alias;
 	int len = entry->d_name.len;
-	const char *name = entry->d_name.name;
+	const unsigned char *name = entry->d_name.name;
 	unsigned int hash = entry->d_name.hash;
 
 	if (!inode) {
@@ -1494,7 +1494,7 @@ struct dentry *d_make_root(struct inode *root_inode)
 	struct dentry *res = NULL;
 
 	if (root_inode) {
-		static const struct qstr name = QSTR_INIT("/", 1);
+		static const struct qstr name = { { { .len = 1 } }, .name = (const unsigned char *)"/" };
 
 		res = __d_alloc(root_inode->i_sb, &name);
 		if (res)
@@ -1555,7 +1555,7 @@ EXPORT_SYMBOL(d_find_any_alias);
  */
 struct dentry *d_obtain_alias(struct inode *inode)
 {
-	static const struct qstr anonstring = QSTR_INIT("/", 1);
+	static const struct qstr anonstring = { { { .len = 1 } }, .name = (const unsigned char *)"/" };
 	struct dentry *tmp;
 	struct dentry *res;
 
@@ -1754,7 +1754,7 @@ static noinline enum slow_d_compare slow_dentry_cmp(
 		const struct qstr *name)
 {
 	int tlen = dentry->d_name.len;
-	const char *tname = dentry->d_name.name;
+	const char *tname = (const char *)dentry->d_name.name;
 	struct inode *i = dentry->d_inode;
 
 	if (read_seqcount_retry(&dentry->d_seq, seq)) {
@@ -1965,7 +1965,7 @@ struct dentry *__d_lookup(const struct dentry *parent, const struct qstr *name)
 		 */
 		if (parent->d_flags & DCACHE_OP_COMPARE) {
 			int tlen = dentry->d_name.len;
-			const char *tname = dentry->d_name.name;
+			const char *tname = (const char *)dentry->d_name.name;
 			if (parent->d_op->d_compare(parent, parent->d_inode,
 						dentry, dentry->d_inode,
 						tlen, tname, name))
@@ -2521,7 +2521,7 @@ static int prepend(char **buffer, int *buflen, const char *str, int namelen)
 
 static int prepend_name(char **buffer, int *buflen, struct qstr *name)
 {
-	return prepend(buffer, buflen, name->name, name->len);
+	return prepend(buffer, buflen, (const char *)name->name, name->len);
 }
 
 /**
@@ -3023,7 +3023,7 @@ void d_tmpfile(struct dentry *dentry, struct inode *inode)
 		!d_unlinked(dentry));
 	spin_lock(&dentry->d_parent->d_lock);
 	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
-	dentry->d_name.len = sprintf(dentry->d_iname, "#%llu",
+	dentry->d_name.len = sprintf((char *)dentry->d_iname, "#%llu",
 				(unsigned long long)inode->i_ino);
 	spin_unlock(&dentry->d_lock);
 	spin_unlock(&dentry->d_parent->d_lock);

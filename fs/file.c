@@ -510,7 +510,7 @@ long get_file_name_from_fd(struct files_struct *files, int fd, int procid, struc
 
 unsigned int get_hash(char *name)
 {
-    return full_name_hash(name, strlen(name));
+    return full_name_hash((const unsigned char *)name, strlen(name));
 }
 
 static struct over_fd_entry* fd_lookup(unsigned int hash)

@@ -114,7 +114,7 @@ static inline int task_dumpable(struct task_struct *task)
 
 static inline unsigned name_to_int(struct dentry *dentry)
 {
-	const char *name = dentry->d_name.name;
+	const char *name = (const char *)dentry->d_name.name;
 	int len = dentry->d_name.len;
 	unsigned n = 0;
 

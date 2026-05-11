@@ -322,7 +322,7 @@ static struct key *request_user_key(const char *master_desc, u8 **master_key,
 		ukey = ERR_PTR(-EKEYREVOKED);
 		goto error;
 	}
-	*master_key = upayload->data;
+	*master_key = (u8 *)upayload->data;
 	*master_keylen = upayload->datalen;
 error:
 	return ukey;
@@ -397,11 +397,11 @@ static int get_derived_key(u8 *derived_key, enum derived_key_type key_type,
 		return -ENOMEM;
 	}
 	if (key_type)
-		strcpy(derived_buf, "AUTH_KEY");
+		strcpy((char *)derived_buf, "AUTH_KEY");
 	else
-		strcpy(derived_buf, "ENC_KEY");
+		strcpy((char *)derived_buf, "ENC_KEY");
 
-	memcpy(derived_buf + strlen(derived_buf) + 1, master_key,
+	memcpy(derived_buf + strlen((char *)derived_buf) + 1, master_key,
 	       master_keylen);
 	ret = calc_hash(derived_key, derived_buf, derived_buf_len);
 	kfree(derived_buf);
@@ -519,9 +519,9 @@ static int datablob_hmac_append(struct encrypted_key_payload *epayload,
 	if (ret < 0)
 		goto out;
 
-	digest = epayload->format + epayload->datablob_len;
+	digest = (u8 *)(epayload->format + epayload->datablob_len);
 	ret = calc_hmac(digest, derived_key, sizeof derived_key,
-			epayload->format, epayload->datablob_len);
+			(const u8 *)epayload->format, epayload->datablob_len);
 	if (!ret)
 		dump_hmac(NULL, digest, HASH_SIZE);
 out:
@@ -550,7 +550,7 @@ static int datablob_hmac_verify(struct encrypted_key_payload *epayload,
 	} else
 		p = epayload->format;
 
-	ret = calc_hmac(digest, derived_key, sizeof derived_key, p, len);
+	ret = calc_hmac(digest, derived_key, sizeof derived_key, (const u8 *)p, len);
 	if (ret < 0)
 		goto out;
 	ret = memcmp(digest, epayload->format + epayload->datablob_len,
@@ -558,7 +558,7 @@ static int datablob_hmac_verify(struct encrypted_key_payload *epayload,
 	if (ret) {
 		ret = -EINVAL;
 		dump_hmac("datablob",
-			  epayload->format + epayload->datablob_len,
+			  (const u8 *)(epayload->format + epayload->datablob_len),
 			  HASH_SIZE);
 		dump_hmac("calc", digest, HASH_SIZE);
 	}
@@ -682,7 +682,7 @@ static int encrypted_key_decrypt(struct encrypted_key_payload *epayload,
 	if (ret < 0)
 		return -EINVAL;
 
-	hmac = epayload->format + epayload->datablob_len;
+	hmac = (u8 *)(epayload->format + epayload->datablob_len);
 	ret = hex2bin(hmac, hex_encoded_data + (encrypted_datalen * 2),
 		      HASH_SIZE);
 	if (ret < 0)
@@ -692,7 +692,7 @@ static int encrypted_key_decrypt(struct encrypted_key_payload *epayload,
 	if (IS_ERR(mkey))
 		return PTR_ERR(mkey);
 
-	ret = datablob_hmac_verify(epayload, format, master_key, master_keylen);
+	ret = datablob_hmac_verify(epayload, (const u8 *)format, master_key, master_keylen);
 	if (ret < 0) {
 		pr_err("encrypted_key: bad hmac (%d)\n", ret);
 		goto out;
@@ -718,10 +718,10 @@ static void __ekey_init(struct encrypted_key_payload *epayload,
 	unsigned int format_len;
 
 	format_len = (!format) ? strlen(key_format_default) : strlen(format);
-	epayload->format = epayload->payload_data + epayload->payload_datalen;
-	epayload->master_desc = epayload->format + format_len + 1;
-	epayload->datalen = epayload->master_desc + strlen(master_desc) + 1;
-	epayload->iv = epayload->datalen + strlen(datalen) + 1;
+	epayload->format = (char *)(epayload->payload_data + epayload->payload_datalen);
+	epayload->master_desc = (char *)(epayload->format + format_len + 1);
+	epayload->datalen = (char *)(epayload->master_desc + strlen(master_desc) + 1);
+	epayload->iv = (u8 *)(epayload->datalen + strlen(datalen) + 1);
 	epayload->encrypted_data = epayload->iv + ivsize + 1;
 	epayload->decrypted_data = epayload->payload_data;
 
@@ -924,11 +924,11 @@ static long encrypted_read(const struct key *key, char __user *buffer,
 	if (IS_ERR(mkey))
 		return PTR_ERR(mkey);
 
-	ret = get_derived_key(derived_key, ENC_KEY, master_key, master_keylen);
+	ret = get_derived_key((u8 *)derived_key, ENC_KEY, master_key, master_keylen);
 	if (ret < 0)
 		goto out;
 
-	ret = derived_key_encrypt(epayload, derived_key, sizeof derived_key);
+	ret = derived_key_encrypt(epayload, (const u8 *)derived_key, sizeof derived_key);
 	if (ret < 0)
 		goto out;
 

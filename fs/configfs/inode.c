@@ -234,7 +234,7 @@ const unsigned char * configfs_get_name(struct configfs_dirent *sd)
 
 	if (sd->s_type & CONFIGFS_ITEM_ATTR) {
 		attr = sd->s_element;
-		return attr->ca_name;
+		return (const unsigned char *)attr->ca_name;
 	}
 	return NULL;
 }
@@ -273,7 +273,7 @@ void configfs_hash_and_remove(struct dentry * dir, const char * name)
 	list_for_each_entry(sd, &parent_sd->s_children, s_sibling) {
 		if (!sd->s_element)
 			continue;
-		if (!strcmp(configfs_get_name(sd), name)) {
+		if (!strcmp((const char *)configfs_get_name(sd), name)) {
 			spin_lock(&configfs_dirent_lock);
 			list_del_init(&sd->s_sibling);
 			spin_unlock(&configfs_dirent_lock);

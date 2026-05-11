@@ -456,7 +456,7 @@ static void bdi_writeout_fraction(struct backing_dev_info *bdi,
 		long *numerator, long *denominator)
 {
 	fprop_fraction_percpu(&writeout_completions, &bdi->completions,
-				numerator, denominator);
+				(unsigned long *)numerator, (unsigned long *)denominator);
 }
 
 /*

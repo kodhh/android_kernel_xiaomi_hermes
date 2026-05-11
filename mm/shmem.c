@@ -3251,7 +3251,7 @@ struct file *shmem_file_setup(const char *name, loff_t size, unsigned long flags
 		return ERR_PTR(-ENOMEM);
 
 	res = ERR_PTR(-ENOMEM);
-	this.name = name;
+	this.name = (const unsigned char *)name;
 	this.len = strlen(name);
 	this.hash = 0; /* will go */
 	sb = shm_mnt->mnt_sb;
