@@ -3885,6 +3885,10 @@ int vfs_rename2(struct vfsmount *mnt,
 			return error;
 	}
 
+	error = security_inode_rename(old_dir, old_dentry, new_dir, new_dentry);
+	if (error)
+		return error;
+
 	old_name = fsnotify_oldname_init(old_dentry->d_name.name);
 
 	dget(new_dentry);
