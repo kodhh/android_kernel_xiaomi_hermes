@@ -26,6 +26,7 @@ modules.builtin
 *.elf
 *.bin
 *.gz
+*.gz-dtb
 *.bz2
 *.lzma
 *.xz
@@ -99,6 +100,7 @@ x509.genkey
 /arch/*/boot/Image.gz
 /arch/*/boot/zImage
 /arch/*/boot/*.dtb
+/arch/*/boot/*/*.dtb
 *.lds
 *.cpio
 *.bc
