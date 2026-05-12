@@ -63,9 +63,6 @@ KBUILD_CFLAGS	+= -fno-pic
 KBUILD_CFLAGS	+= $(call cc-option, -mpc-relative-literal-loads)
 KBUILD_CFLAGS	+= -fno-asynchronous-unwind-tables
 
-ifeq ($(CONFIG_CC_STACKPROTECTOR),y)
-KBUILD_CFLAGS	+= -fstack-protector
-endif
 KBUILD_AFLAGS	+= $(lseinstr) $(vdso32)
 KBUILD_CPPFLAGS	+= -mlittle-endian
 AS		+= -EL
