@@ -67,12 +67,12 @@
  * sections to be brought in with rodata.
  */
 #ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
-#define TEXT_MAIN .text .text.[0-9a-zA-Z_]*
-#define DATA_MAIN .data .data.[0-9a-zA-Z_]* .data..L* .data..compoundliteral*
-#define SDATA_MAIN .sdata .sdata.[0-9a-zA-Z_]*
-#define RODATA_MAIN .rodata .rodata.[0-9a-zA-Z_]* .rodata..L*
-#define BSS_MAIN .bss .bss.[0-9a-zA-Z_]* .bss..compoundliteral*
-#define SBSS_MAIN .sbss .sbss.[0-9a-zA-Z_]*
+#define TEXT_MAIN .text .text.[0-9a-zA-Z_.]*
+#define DATA_MAIN .data .data.[0-9a-zA-Z_.]* .data..L* .data..compoundliteral*
+#define SDATA_MAIN .sdata .sdata.[0-9a-zA-Z_.]*
+#define RODATA_MAIN .rodata .rodata.[0-9a-zA-Z_.]* .rodata..L* .rodata.str*
+#define BSS_MAIN .bss .bss.[0-9a-zA-Z_.]* .bss..compoundliteral*
+#define SBSS_MAIN .sbss .sbss.[0-9a-zA-Z_.]*
 #else
 #define TEXT_MAIN .text
 #define DATA_MAIN .data
@@ -461,7 +461,11 @@
  */
 #define TEXT_TEXT							\
 		ALIGN_FUNCTION();					\
-		*(.text.hot TEXT_MAIN .text.fixup .text.unlikely)	\
+		*(.text.hot .text.hot.*)				\
+		*(TEXT_MAIN .text.fixup)				\
+		*(.text.unlikely .text.unlikely.*)			\
+		*(.text.startup)						\
+		*(.text.exit)						\
 		*(.ref.text)						\
 	DEV_KEEP(init.text*)						\
 	DEV_KEEP(exit.text*)						\
@@ -568,7 +572,8 @@
 	IRQCHIP_OF_MATCH_TABLE()
 
 #define INIT_TEXT							\
-	*(.init.text .init.text.*)							\
+	*(.init.text .init.text.*)					\
+	*(.text.startup)						\
 	DEV_DISCARD(init.text*)						\
 	CPU_DISCARD(init.text*)						\
 	MEM_DISCARD(init.text*)

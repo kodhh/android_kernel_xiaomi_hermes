@@ -7,6 +7,8 @@ squote  := '
 empty   :=
 space   := $(empty) $(empty)
 
+cc-name ?= gcc
+
 ###
 # Name of target with a '.' as filename prefix. foo/bar.o => foo/.bar.o
 dot-target = $(dir $@).$(notdir $@)
