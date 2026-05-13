@@ -885,10 +885,9 @@ static void rbio_orig_end_io(struct btrfs_raid_bio *rbio, int err)
  * end io function used by finish_rmw.  When we finally
  * get here, we've written a full stripe
  */
-static void raid_write_end_io(struct bio *bio)
+static void raid_write_end_io(struct bio *bio, int err)
 {
 	struct btrfs_raid_bio *rbio = bio->bi_private;
-	int err = bio_err(bio);
 
 	if (err)
 		fail_bio_stripe(rbio, bio);
@@ -1450,7 +1449,7 @@ static void set_bio_pages_uptodate(struct bio *bio)
  * This will usually kick off finish_rmw once all the bios are read in, but it
  * may trigger parity reconstruction if we had any errors along the way
  */
-static void raid_rmw_end_io(struct bio *bio)
+static void raid_rmw_end_io(struct bio *bio, int err)
 {
 	struct btrfs_raid_bio *rbio = bio->bi_private;
 
@@ -1996,7 +1995,7 @@ cleanup_io:
  * This is called only for stripes we've read from disk to
  * reconstruct the parity.
  */
-static void raid_recover_end_io(struct bio *bio)
+static void raid_recover_end_io(struct bio *bio, int err)
 {
 	struct btrfs_raid_bio *rbio = bio->bi_private;
 
@@ -2300,10 +2299,9 @@ static int alloc_rbio_essential_pages(struct btrfs_raid_bio *rbio)
  * end io function used by finish_rmw.  When we finally
  * get here, we've written a full stripe
  */
-static void raid_write_parity_end_io(struct bio *bio)
+static void raid_write_parity_end_io(struct bio *bio, int err)
 {
 	struct btrfs_raid_bio *rbio = bio->bi_private;
-	int err = bio_err(bio);
 
 	if (!bio_flagged(bio, BIO_UPTODATE))
 		fail_bio_stripe(rbio, bio);
@@ -2559,7 +2557,7 @@ cleanup:
  * This will usually kick off finish_rmw once all the bios are read in, but it
  * may trigger parity reconstruction if we had any errors along the way
  */
-static void raid56_parity_scrub_end_io(struct bio *bio)
+static void raid56_parity_scrub_end_io(struct bio *bio, int err)
 {
 	struct btrfs_raid_bio *rbio = bio->bi_private;
 

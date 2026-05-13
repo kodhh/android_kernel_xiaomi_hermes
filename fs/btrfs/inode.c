@@ -420,9 +420,10 @@ static noinline void compress_file_range(struct inode *inode,
 	int i;
 	int will_compress;
 	int compress_type = root->fs_info->compress_type;
+	int redirty = 0;
+
 	if (root->fs_info->compress_level)
 		compress_type |= (root->fs_info->compress_level << 4);
-	int redirty = 0;
 
 	/* if this is a small write inside eof, kick off a defrag */
 	if ((end - start + 1) < 16 * 1024 &&
