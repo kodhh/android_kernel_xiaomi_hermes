@@ -939,26 +939,32 @@ static inline void *alloc_rsttbl_from_idx(struct RESTART_TABLE **tbl, u32 vbo)
 	/*
 	 * need to walk through the list looking for the predecessor of our entry
 	 */
-	for (;;) {
-		/* Remember the entry just found */
-		u32 last_off = off;
-		__le32 *last_e = e;
+	{
+		u32 max_iter = le16_to_cpu(rt->total) + 1;
 
-		/* should never run of entries. */
+		for (; max_iter; max_iter--) {
+			/* Remember the entry just found */
+			u32 last_off = off;
+			__le32 *last_e = e;
 
-		/* Lookup up the next entry the list */
-		off = le32_to_cpu(*last_e);
-		e = Add2Ptr(rt, off);
+			/* should never run of entries. */
 
-		/* If this is our match we are done */
-		if (off == vbo) {
-			*last_e = *e;
+			/* Lookup up the next entry the list */
+			off = le32_to_cpu(*last_e);
+			e = Add2Ptr(rt, off);
 
-			/* If this was the last entry, we update that the table as well */
-			if (le32_to_cpu(rt->last_free) == off)
-				rt->last_free = cpu_to_le32(last_off);
-			break;
+			/* If this is our match we are done */
+			if (off == vbo) {
+				*last_e = *e;
+
+				/* If this was the last entry, we update that the table as well */
+				if (le32_to_cpu(rt->last_free) == off)
+					rt->last_free = cpu_to_le32(last_off);
+				break;
+			}
 		}
+		if (!max_iter)
+			return NULL;
 	}
 
 skip_looking:
@@ -2191,8 +2197,10 @@ file_is_valid:
 
 			if (!page) {
 				page = ntfs_malloc(log->page_size);
-				if (!page)
-					return -ENOMEM;
+				if (!page) {
+					err = -ENOMEM;
+					goto out;
+				}
 			}
 
 			/*
@@ -3288,6 +3296,9 @@ skip_load_parent:
 
 	case UpdateResidentValue:
 		nsize = aoff + dlen;
+
+		if (nsize < aoff)
+			goto dirty_vol;
 
 		if (!check_if_attr(rec, lrh))
 			goto dirty_vol;
