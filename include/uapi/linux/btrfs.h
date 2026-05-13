@@ -156,6 +156,7 @@ struct btrfs_ioctl_dev_replace_status_params {
 #define BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR			0
 #define BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED		1
 #define BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED		2
+#define BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS		3
 struct btrfs_ioctl_dev_replace_args {
 	__u64 cmd;	/* in */
 	__u64 result;	/* out */
@@ -166,6 +167,29 @@ struct btrfs_ioctl_dev_replace_args {
 	};	/* in/out */
 
 	__u64 spare[64];
+};
+
+struct btrfs_ioctl_feature_flags {
+	__u64 compat_flags;
+	__u64 compat_ro_flags;
+	__u64 incompat_flags;
+};
+
+struct btrfs_ioctl_same_extent_info {
+	__s64 fd;
+	__u64 logical_offset;
+	__u64 bytes_deduped;
+	__s32 status;
+	__u32 reserved;
+};
+
+struct btrfs_ioctl_same_args {
+	__u64 logical_offset;
+	__u64 length;
+	__u16 dest_count;
+	__u16 reserved1;
+	__u32 reserved2;
+	struct btrfs_ioctl_same_extent_info info[0];
 };
 
 struct btrfs_ioctl_dev_info_args {
@@ -181,7 +205,11 @@ struct btrfs_ioctl_fs_info_args {
 	__u64 max_id;				/* out */
 	__u64 num_devices;			/* out */
 	__u8 fsid[BTRFS_FSID_SIZE];		/* out */
-	__u64 reserved[124];			/* pad to 1k */
+	__u32 nodesize;				/* out */
+	__u32 sectorsize;			/* out */
+	__u32 clone_alignment;			/* out */
+	__u32 reserved32;
+	__u64 reserved[122];			/* pad to 1k */
 };
 
 /* balance control ioctl modes */
@@ -194,7 +222,13 @@ struct btrfs_ioctl_fs_info_args {
  */
 struct btrfs_balance_args {
 	__u64 profiles;
-	__u64 usage;
+	union {
+		__le64 usage;
+		struct {
+			__le32 usage_min;
+			__le32 usage_max;
+		};
+	};
 	__u64 devid;
 	__u64 pstart;
 	__u64 pend;
@@ -205,7 +239,27 @@ struct btrfs_balance_args {
 
 	__u64 flags;
 
-	__u64 unused[8];
+	/*
+	 * BTRFS_BALANCE_ARGS_LIMIT with value 'limit'
+	 * BTRFS_BALANCE_ARGS_LIMIT_RANGE - the extend version can use minimum
+	 * and maximum
+	 */
+	union {
+		__u64 limit;
+		struct {
+			__u32 limit_min;
+			__u32 limit_max;
+		};
+	};
+
+	/*
+	 * Process chunks that cross stripes_min..stripes_max devices,
+	 * BTRFS_BALANCE_ARGS_STRIPES_RANGE
+	 */
+	__le32 stripes_min;
+	__le32 stripes_max;
+
+	__u64 unused[6];
 } __attribute__ ((__packed__));
 
 /* report balance progress to userspace */
@@ -293,6 +347,12 @@ struct btrfs_ioctl_search_header {
 struct btrfs_ioctl_search_args {
 	struct btrfs_ioctl_search_key key;
 	char buf[BTRFS_SEARCH_ARGS_BUFSIZE];
+};
+
+struct btrfs_ioctl_search_args_v2 {
+	struct btrfs_ioctl_search_key key;
+	__u64 buf_size;
+	__u64 buf[0];
 };
 
 struct btrfs_ioctl_clone_range_args {
@@ -482,6 +542,8 @@ struct btrfs_ioctl_send_args {
 				struct btrfs_ioctl_defrag_range_args)
 #define BTRFS_IOC_TREE_SEARCH _IOWR(BTRFS_IOCTL_MAGIC, 17, \
 				   struct btrfs_ioctl_search_args)
+#define BTRFS_IOC_TREE_SEARCH_V2 _IOWR(BTRFS_IOCTL_MAGIC, 17, \
+				   struct btrfs_ioctl_search_args_v2)
 #define BTRFS_IOC_INO_LOOKUP _IOWR(BTRFS_IOCTL_MAGIC, 18, \
 				   struct btrfs_ioctl_ino_lookup_args)
 #define BTRFS_IOC_DEFAULT_SUBVOL _IOW(BTRFS_IOCTL_MAGIC, 19, u64)
@@ -530,6 +592,7 @@ struct btrfs_ioctl_send_args {
 			       struct btrfs_ioctl_quota_rescan_args)
 #define BTRFS_IOC_QUOTA_RESCAN_STATUS _IOR(BTRFS_IOCTL_MAGIC, 45, \
 			       struct btrfs_ioctl_quota_rescan_args)
+#define BTRFS_IOC_QUOTA_RESCAN_WAIT _IO(BTRFS_IOCTL_MAGIC, 46)
 #define BTRFS_IOC_GET_FSLABEL _IOR(BTRFS_IOCTL_MAGIC, 49, \
 				   char[BTRFS_LABEL_SIZE])
 #define BTRFS_IOC_SET_FSLABEL _IOW(BTRFS_IOCTL_MAGIC, 50, \
@@ -538,5 +601,13 @@ struct btrfs_ioctl_send_args {
 				      struct btrfs_ioctl_get_dev_stats)
 #define BTRFS_IOC_DEV_REPLACE _IOWR(BTRFS_IOCTL_MAGIC, 53, \
 				    struct btrfs_ioctl_dev_replace_args)
+#define BTRFS_IOC_FILE_EXTENT_SAME _IOWR(BTRFS_IOCTL_MAGIC, 54, \
+					 struct btrfs_ioctl_same_args)
+#define BTRFS_IOC_GET_FEATURES _IOR(BTRFS_IOCTL_MAGIC, 57, \
+				    struct btrfs_ioctl_feature_flags)
+#define BTRFS_IOC_SET_FEATURES _IOW(BTRFS_IOCTL_MAGIC, 57, \
+				    struct btrfs_ioctl_feature_flags[2])
+#define BTRFS_IOC_GET_SUPPORTED_FEATURES _IOR(BTRFS_IOCTL_MAGIC, 57, \
+				    struct btrfs_ioctl_feature_flags[3])
 
 #endif /* _UAPI_LINUX_BTRFS_H */
