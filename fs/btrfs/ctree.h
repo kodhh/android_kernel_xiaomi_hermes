@@ -712,8 +712,9 @@ enum btrfs_compression_type {
 	BTRFS_COMPRESS_NONE  = 0,
 	BTRFS_COMPRESS_ZLIB  = 1,
 	BTRFS_COMPRESS_LZO   = 2,
-	BTRFS_COMPRESS_TYPES = 2,
-	BTRFS_COMPRESS_LAST  = 3,
+	BTRFS_COMPRESS_ZSTD  = 3,
+	BTRFS_COMPRESS_TYPES = 3,
+	BTRFS_COMPRESS_LAST  = 4,
 };
 
 struct btrfs_inode_item {
@@ -1487,6 +1488,7 @@ struct btrfs_fs_info {
 	 */
 	unsigned long pending_changes;
 	unsigned long compress_type:4;
+	unsigned long compress_level:8;
 	int commit_interval;
 	/*
 	 * It is a suggestive number, the read side is safe even it gets a

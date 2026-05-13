@@ -47,7 +47,7 @@ static void zlib_free_workspace(struct list_head *ws)
 	kfree(workspace);
 }
 
-static struct list_head *zlib_alloc_workspace(void)
+static struct list_head *zlib_alloc_workspace(unsigned int level)
 {
 	struct workspace *workspace;
 	int workspacesize;
@@ -409,4 +409,5 @@ const struct btrfs_compress_op btrfs_zlib_compress = {
 	.compress_pages		= zlib_compress_pages,
 	.decompress_biovec	= zlib_decompress_biovec,
 	.decompress		= zlib_decompress,
+	.set_level		= NULL,
 };

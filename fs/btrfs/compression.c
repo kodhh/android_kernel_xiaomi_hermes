@@ -753,6 +753,7 @@ static struct {
 static const struct btrfs_compress_op * const btrfs_compress_op[] = {
 	&btrfs_zlib_compress,
 	&btrfs_lzo_compress,
+	&btrfs_zstd_compress,
 };
 
 void __init btrfs_init_compress(void)
@@ -775,7 +776,7 @@ static struct list_head *find_workspace(int type)
 {
 	struct list_head *workspace;
 	int cpus = num_online_cpus();
-	int idx = type - 1;
+	int idx = (type & 0xF) - 1;
 
 	struct list_head *idle_ws	= &btrfs_comp_ws[idx].idle_ws;
 	spinlock_t *ws_lock		= &btrfs_comp_ws[idx].ws_lock;
@@ -789,6 +790,8 @@ again:
 		list_del(workspace);
 		(*num_ws)--;
 		spin_unlock(ws_lock);
+		if (btrfs_compress_op[idx]->set_level)
+			btrfs_compress_op[idx]->set_level(workspace, type);
 		return workspace;
 
 	}
@@ -805,7 +808,7 @@ again:
 	atomic_inc(alloc_ws);
 	spin_unlock(ws_lock);
 
-	workspace = btrfs_compress_op[idx]->alloc_workspace();
+	workspace = btrfs_compress_op[idx]->alloc_workspace(type);
 	if (IS_ERR(workspace)) {
 		atomic_dec(alloc_ws);
 		wake_up(ws_wait);

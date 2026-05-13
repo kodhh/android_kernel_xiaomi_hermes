@@ -46,7 +46,7 @@ static void lzo_free_workspace(struct list_head *ws)
 	kfree(workspace);
 }
 
-static struct list_head *lzo_alloc_workspace(void)
+static struct list_head *lzo_alloc_workspace(unsigned int level)
 {
 	struct workspace *workspace;
 
@@ -440,4 +440,5 @@ const struct btrfs_compress_op btrfs_lzo_compress = {
 	.compress_pages		= lzo_compress_pages,
 	.decompress_biovec	= lzo_decompress_biovec,
 	.decompress		= lzo_decompress,
+	.set_level		= NULL,
 };
