@@ -404,6 +404,7 @@ static int ntfs_readdir(struct file *file, struct dir_context *ctx)
 	name = __getname();
 	if (!name)
 		return -ENOMEM;
+	memset(name, 0, PATH_MAX);
 
 	if (!ni->mi_loaded && ni->attr_list.size) {
 		/*

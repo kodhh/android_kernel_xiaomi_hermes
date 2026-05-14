@@ -1358,7 +1358,10 @@ int ntfs_get_bh(struct ntfs_sb_info *sbi, const struct runs_tree *run, u64 vbo,
 				}
 				if (buffer_locked(bh))
 					__wait_on_buffer(bh);
-				set_buffer_uptodate(bh);
+				if (!buffer_uptodate(bh)) {
+					memset(bh->b_data, 0, blocksize);
+					set_buffer_uptodate(bh);
+				}
 			} else {
 				bh = ntfs_bread(sb, block);
 				if (!bh) {

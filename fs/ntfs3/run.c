@@ -923,6 +923,10 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 		if (size_size > 8)
 			return -EINVAL;
 
+		/* Check buffer before reading size_size bytes */
+		if (run_buf + size_size > run_last)
+			return -EINVAL;
+
 		len = run_unpack_s64(run_buf, size_size, 0);
 		/* skip size_size */
 		run_buf += size_size;
@@ -935,6 +939,10 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 		else if (offset_size <= 8) {
 			s64 dlcn;
 
+			/* Check buffer before reading offset_size bytes */
+			if (run_buf + offset_size > run_last)
+				return -EINVAL;
+
 			/* initial value of dlcn is -1 or 0 */
 			dlcn = (run_buf[offset_size - 1] & 0x80) ? (s64)-1 : 0;
 			dlcn = run_unpack_s64(run_buf, offset_size, dlcn);
@@ -943,11 +951,15 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 
 			if (!dlcn)
 				return -EINVAL;
+			if (dlcn > 0 && prev_lcn + (u64)dlcn < prev_lcn)
+				return -EINVAL;
 			lcn = prev_lcn + dlcn;
 			prev_lcn = lcn;
 		} else
 			return -EINVAL;
 
+		if (vcn64 + len < vcn64)
+			return -EINVAL;
 		next_vcn = vcn64 + len;
 		/* check boundary */
 		if (next_vcn > evcn + 1)
@@ -964,7 +976,8 @@ int run_unpack(struct runs_tree *run, struct ntfs_sb_info *sbi, CLST ino,
 			return -EOPNOTSUPP;
 		}
 #endif
-		if (lcn != SPARSE_LCN64 && lcn + len > sbi->used.bitmap.nbits) {
+		if (lcn != SPARSE_LCN64 &&
+		    (lcn + len < lcn || lcn + len > sbi->used.bitmap.nbits)) {
 			/* lcn range is out of volume */
 			return -EINVAL;
 		}

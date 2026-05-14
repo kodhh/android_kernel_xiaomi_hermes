@@ -179,6 +179,10 @@ static ssize_t ntfs_list_ea(struct ntfs_inode *ni, char *buffer,
 	for (ret = 0, off = 0; off < size; off += unpacked_ea_size(ea)) {
 		ea = Add2Ptr(ea_all, off);
 
+		if (off + sizeof(struct EA_FULL) > size ||
+		    off + le32_to_cpu(ea->size) > size)
+			break;
+
 		if (buffer) {
 			if (ret + ea->name_len + 1 > bytes_per_buffer) {
 				err = -ERANGE;
@@ -493,6 +497,7 @@ static struct posix_acl *ntfs_get_acl_ex(
 	buf = __getname();
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
+	memset(buf, 0, PATH_MAX);
 
 	/* Possible values of 'type' was already checked above */
 	if (type == ACL_TYPE_ACCESS) {

@@ -62,6 +62,13 @@ static inline u64 mul_u32_u32(u32 a, u32 b)
 }
 #endif
 
+/*
+ * Zeroed variant of __getname to avoid uninitialized memory (CVE-2025-68365)
+ */
+#ifndef __getname_z
+#define __getname_z()	({ void *__p = __getname(); if (__p) memset(__p, 0, PATH_MAX); __p; })
+#endif
+
 #if defined(CONFIG_ARCH_SUPPORTS_INT128) && defined(__SIZEOF_INT128__)
 
 #ifndef mul_u64_u32_shr

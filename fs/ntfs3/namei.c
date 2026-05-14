@@ -85,6 +85,7 @@ static struct dentry *ntfs_lookup(struct inode *dir, struct dentry *dentry,
 	if (!uni)
 		inode = ERR_PTR(-ENOMEM);
 	else {
+		memset(uni, 0, PATH_MAX);
 		err = ntfs_nls_to_utf16(ni->mi.sbi, dentry->d_name.name,
 					dentry->d_name.len, uni, NTFS_NAME_LEN,
 					UTF16_HOST_ENDIAN);
@@ -339,6 +340,7 @@ static int ntfs_rename(struct inode *old_dir,
 		err = -ENOMEM;
 		goto out;
 	}
+	memset(old_de, 0, PATH_MAX);
 
 	err = fill_name_de(sbi, old_de, &old_dentry->d_name, NULL);
 	if (err < 0)
@@ -517,6 +519,7 @@ static int ntfs_atomic_open(struct inode *dir, struct dentry *dentry,
 
 	if (!uni)
 		return -ENOMEM;
+	memset(uni, 0, PATH_MAX);
 
 	err = ntfs_nls_to_utf16(ni->mi.sbi, dentry->d_name.name,
 				dentry->d_name.len, uni, NTFS_NAME_LEN,

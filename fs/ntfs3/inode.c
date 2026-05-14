@@ -368,6 +368,9 @@ next_attr:
 attr_unpack_run:
 	roff = le16_to_cpu(attr->nres.run_off);
 
+	if (roff > asize)
+		goto out;
+
 	t64 = le64_to_cpu(attr->nres.svcn);
 	err = run_unpack_ex(run, sbi, ino, t64, le64_to_cpu(attr->nres.evcn),
 			    t64, Add2Ptr(attr, roff), asize - roff);
@@ -1329,6 +1332,7 @@ struct inode *ntfs_create_inode(
 		err = -ENOMEM;
 		goto out1;
 	}
+	memset(new_de, 0, PATH_MAX);
 
 	/*mark rw ntfs as dirty. it will be cleared at umount*/
 	ntfs_set_state(sbi, NTFS_DIRTY_DIRTY);
@@ -1728,6 +1732,7 @@ int ntfs_link_inode(struct inode *inode, struct dentry *dentry)
 	new_de = __getname();
 	if (!new_de)
 		return -ENOMEM;
+	memset(new_de, 0, PATH_MAX);
 
 	/*mark rw ntfs as dirty. it will be cleared at umount*/
 	ntfs_set_state(ni->mi.sbi, NTFS_DIRTY_DIRTY);
@@ -1812,6 +1817,7 @@ int ntfs_unlink_inode(struct inode *dir, const struct dentry *dentry)
 		err = -ENOMEM;
 		goto out1;
 	}
+	memset(uni, 0, PATH_MAX);
 
 	/* Convert input string to unicode */
 	err = ntfs_nls_to_utf16(sbi, name->name, name->len, uni, NTFS_NAME_LEN,
