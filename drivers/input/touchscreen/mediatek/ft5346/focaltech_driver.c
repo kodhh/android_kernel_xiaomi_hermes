@@ -227,7 +227,7 @@ static int ctp_proc_read(struct file *file, char *buffer, size_t count, loff_t *
 }
 
 static const struct file_operations ctp_proc_fops = {
-	.read = ctp_proc_read,
+	.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))ctp_proc_read,
 };
 #endif
 
@@ -280,7 +280,7 @@ static int ctp_lockdown_proc_read(struct file *file, char *buffer, size_t count,
 }
 
 static const struct file_operations ctp_lockdown_proc_fops = {
-	.read = ctp_lockdown_proc_read,
+	.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))ctp_lockdown_proc_read,
 };
 #endif
 
@@ -467,7 +467,7 @@ static int tpd_touchinfo(struct touch_info *cinfo, struct touch_info *pinfo,stru
 	//mutex_lock(&i2c_access);
 
 	reg = 0x00;
-	fts_i2c_Read(i2c_client, &reg, 1, data, 64);
+	fts_i2c_Read(i2c_client, (char *)&reg, 1, data, 64);
 	//mutex_unlock(&i2c_access);
 	
 	/*get the number of the touch points*/

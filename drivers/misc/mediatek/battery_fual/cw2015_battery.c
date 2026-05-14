@@ -1805,7 +1805,7 @@ static void __exit cw_bat_exit(void)
 	FG_CW2015_LOG("%s: \n", __func__); 
 #endif
 	printk("cw_bat_exit\n");
-	i2c_del_driver(&i2c_FG_CW2015);
+	i2c_del_driver((struct i2c_driver *)&i2c_FG_CW2015);
 }
 
 module_init(cw_bat_init);

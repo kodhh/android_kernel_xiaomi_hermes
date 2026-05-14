@@ -1387,12 +1387,11 @@ static U32 mt_i2c_functionality(struct i2c_adapter *adap)
 static struct i2c_algorithm mt_i2c_algorithm = {
 #ifdef USE_I2C_MTK_EXT
 #ifdef COMPATIBLE_WITH_AOSP
-	.master_xfer = standard_i2c_transfer,
+	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))standard_i2c_transfer,
 #else
-	.master_xfer = mtk_i2c_transfer,
-#endif
+	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))mtk_i2c_transfer,
 #else
-	.master_xfer = standard_i2c_transfer,
+	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))standard_i2c_transfer,
 #endif
 	.smbus_xfer = NULL,
 	.functionality = mt_i2c_functionality,

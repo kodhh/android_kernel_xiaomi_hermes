@@ -58,8 +58,8 @@ static struct kobj_attribute _name##_attr = {	\
 		.name = #_name,			\
 		.mode = 0644,			\
 	},					\
-	.show	= _name##_show,			\
-	.store	= _name##_store,		\
+	.show	= (ssize_t (*)(struct kobject *, struct kobj_attribute *, char *))_name##_show,			\
+	.store	= (ssize_t (*)(struct kobject *, struct kobj_attribute *, const char *, size_t))_name##_store,		\
 }
 
 #define __ATTR_OF(_name)	(&_name##_attr.attr)

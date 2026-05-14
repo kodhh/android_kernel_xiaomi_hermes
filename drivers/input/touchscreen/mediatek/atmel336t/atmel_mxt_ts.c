@@ -2374,11 +2374,11 @@ static void mxt_proc_T115_messages(struct mxt_data *data, u8 *msg)
 }
 
 /*
-T100: ×ø±êÐÅÏ¢µÄmessage
-T6: Ð¾Æ¬×´Ì¬ÐÅÏ¢:¸´Î», Ð£×¼
-T9: TÏµÁÐÐ¾Æ¬Ã»ÓÐT9
-T25: Ð¾Æ¬×Ô¼ìÓ²¼þÓÐÃ»ÓÐ¶ÌÂ·,µçÑ¹ÊÇ·ñÕý³£
-T19: Î´Ê¹ÓÃ
+T100: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½message
+T6: Ð¾Æ¬×´Ì¬ï¿½ï¿½Ï¢:ï¿½ï¿½Î», Ð£×¼
+T9: TÏµï¿½ï¿½Ð¾Æ¬Ã»ï¿½ï¿½T9
+T25: Ð¾Æ¬ï¿½Ô¼ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Ã»ï¿½Ð¶ï¿½Â·,ï¿½ï¿½Ñ¹ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½
+T19: Î´Ê¹ï¿½ï¿½
 */
 static int mxt_proc_message(struct mxt_data *data, u8 *message)
 {
@@ -3878,7 +3878,7 @@ static int mxt_read_info_block(struct mxt_data *data)
 		 data->info->build, data->info->object_num);
 
 	/* Parse object table information */
-	error = mxt_parse_object_table(data, buf + MXT_OBJECT_START);
+	error = mxt_parse_object_table(data, (struct mxt_object *)(buf + MXT_OBJECT_START));
 	if (error) {
 		dev_err(&client->dev, "Error %d parsing object table\n", error);
 		mxt_free_object_table(data);
@@ -5661,7 +5661,7 @@ static int ctp_proc_read(struct file *file, char *buffer, size_t count, loff_t *
 }
 
 static const struct file_operations ctp_proc_fops = {
-	.read = ctp_proc_read,
+	.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))ctp_proc_read,
 };
 #endif
 

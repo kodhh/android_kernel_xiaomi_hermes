@@ -1616,7 +1616,7 @@ static int mxt_set_reset(void *pl_dev, int por)
 
 	if (por) {
 		dev_info(dev, "mxt set reset #3 (POR)\n");
-		ret = board_por_reset(data, pdata);
+		ret = board_por_reset(data, (struct mxt_data *)pdata);
 	}
 
 	if (ret) {
@@ -2926,7 +2926,7 @@ static int mxt_plugin_init(struct mxt_data *data)
 		pl->pi->set_obj_cfg = mxt_set_obj_cfg;
 		pl->pi->get_obj_cfg = mxt_get_obj_cfg;
 		pl->pi->get_diagnostic_data = mxt_get_diagnostic_data;
-		pl->pi->reset = mxt_set_reset;
+		pl->pi->reset = (int (*)(void *))mxt_set_reset;
 		pl->pi->emu_plugin_hook_t6 = emu_mxt_plugin_hook_t6;
 		pl->pi->active_thread = mxt_plugin_active_thread;
 		if (pl->pi->init(pl->pi) != 0) {

@@ -2700,9 +2700,9 @@ int ddp_dsi_set_lcm_utils(DISP_MODULE_ENUM module, LCM_DRIVER *lcm_drv)
 		}
 	}
 
-	utils->set_gpio_out = mt_set_gpio_out;
-	utils->set_gpio_mode = mt_set_gpio_mode;
-	utils->set_gpio_dir = mt_set_gpio_dir;
+	utils->set_gpio_out = (int (*)(unsigned int, unsigned int))mt_set_gpio_out;
+	utils->set_gpio_mode = (int (*)(unsigned int, unsigned int))mt_set_gpio_mode;
+	utils->set_gpio_dir = (int (*)(unsigned int, unsigned int))mt_set_gpio_dir;
 	utils->set_gpio_pull_enable = (int (*)(unsigned int, unsigned char))mt_set_gpio_pull_enable;
 
 	lcm_drv->set_util_funcs(utils);
@@ -2732,7 +2732,7 @@ void DSI_ChangeClk(DISP_MODULE_ENUM module, UINT32 clk)
 	}
 }
 
-int ddp_dsi_init(DISP_MODULE_ENUM module, cmdqRecHandle cmdq)
+int ddp_dsi_init(DISP_MODULE_ENUM module, void *cmdq)
 {
 	DSI_STATUS ret = DSI_STATUS_OK;
 	int i = 0;
@@ -3041,7 +3041,7 @@ done:
 int g_lcm_x = 0;
 int g_lcm_y = 0;
 
-int ddp_dsi_start(DISP_MODULE_ENUM module, cmdqRecHandle cmdq)
+int ddp_dsi_start(DISP_MODULE_ENUM module, void *cmdq)
 {
 	g_lcm_x = disp_helper_get_option(DISP_HELPER_OPTION_FAKE_LCM_X);
 	g_lcm_y = disp_helper_get_option(DISP_HELPER_OPTION_FAKE_LCM_Y);
@@ -3432,9 +3432,9 @@ int ddp_dsi_ioctl(DISP_MODULE_ENUM module, void *cmdq_handle, unsigned int ioctl
 						      DSI_DUAL_EN, 0);
 
 					if (_dsi_context[0].swap_port || _dsi_context[1].swap_port)
-						DSI_set_cmdq_V2(DISP_MODULE_DSI1, cmdq_handle, cmd, count, &level, 1);
+						DSI_set_cmdq_V2(DISP_MODULE_DSI1, cmdq_handle, cmd, count, (unsigned char *)&level, 1);
 					else
-						DSI_set_cmdq_V2(DISP_MODULE_DSI0, cmdq_handle, cmd, count, &level, 1);
+						DSI_set_cmdq_V2(DISP_MODULE_DSI0, cmdq_handle, cmd, count, (unsigned char *)&level, 1);
 
 					DSI_OUTREGBIT(cmdq_handle, DSI_START_REG, DSI_REG[0]->DSI_START, DSI_START, 0);
 					DSI_OUTREGBIT(cmdq_handle, DSI_START_REG, DSI_REG[1]->DSI_START, DSI_START, 0);
@@ -3482,7 +3482,7 @@ int ddp_dsi_ioctl(DISP_MODULE_ENUM module, void *cmdq_handle, unsigned int ioctl
 
 /* static int mutex_id_for_latest_trigger = 0; */
 
-int ddp_dsi_trigger(DISP_MODULE_ENUM module, cmdqRecHandle cmdq)
+int ddp_dsi_trigger(DISP_MODULE_ENUM module, void *cmdq)
 {
 	int i = 0;
 	unsigned int data_array[16];
@@ -3902,7 +3902,7 @@ int ddp_dsi_build_cmdq(DISP_MODULE_ENUM module, void *cmdq_trigger_handle, CMDQ_
 			/* read data */
 			if (hSlot) {
 				/* read from slot */
-				cmdqBackupReadSlot(hSlot, i, &read_data0);
+				cmdqBackupReadSlot(hSlot, i, (uint32_t *)&read_data0);
 			} else {
 				/* read from dsi , support only one cmd read */
 				if (i == 0)

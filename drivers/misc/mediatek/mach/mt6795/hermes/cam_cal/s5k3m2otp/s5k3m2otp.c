@@ -673,7 +673,7 @@ static int CAM_CAL_i2c_probe(struct i2c_client *client, const struct i2c_device_
 int i4RetValue = 0;
     CAM_CALDB("[S5K3M2CAM_CAL] Attach I2C \n");
 //    spin_lock_init(&g_CAM_CALLock);
-	I2CDMABuf_va = (u8 *)dma_alloc_coherent(&(g_stCAM_CAL_Device.dev), 512, &I2CDMABuf_pa, GFP_KERNEL);
+	I2CDMABuf_va = (u8 *)dma_alloc_coherent(&(g_stCAM_CAL_Device.dev), 512, (dma_addr_t *)&I2CDMABuf_pa, GFP_KERNEL);
 	
     if(!I2CDMABuf_va)
 	{

@@ -271,7 +271,7 @@ DAL_STATUS DAL_Clean(void)
 		input->dirty = 1;
 		input->fmt = DAL_FORMAT;
 
-		ret = primary_display_config_input_multiple(&primary_input);
+		ret = primary_display_config_input_multiple(primary_input);
 
 		/* DAL disable, switch UI layer to default layer 3 */
 		DAL_LOG("[DDP]* isAEEEnabled from 1 to 0, %d\n", dal_clean_cnt++);
@@ -346,7 +346,7 @@ DAL_STATUS DAL_Printf(const char *fmt, ...)
 		input->dirty = 1;
 		input->fmt = DAL_FORMAT;
 
-		ret = primary_display_config_input_multiple(&primary_input);
+		ret = primary_display_config_input_multiple(primary_input);
 	}
 	va_start(args, fmt);
 	i = vsprintf(dal_print_buffer, fmt, args);

@@ -362,7 +362,7 @@ int ovl2mem_input_config(ovl2mem_in_config *input)
 		/* /DISPMSG("[primary], i:%d, layer:%d, layer_en:%d, dirty:%d -0x%x\n",
 			i, input[i].layer, input[i].layer_en, input[i].dirty, input[i].addr); */
 		if (input[i].dirty)
-			ret = _convert_disp_input_to_ovl(&(data_config->ovl_config[input[i].layer]), &input[i]);
+			ret = _convert_disp_input_to_ovl(&(data_config->ovl_config[input[i].layer]), (primary_disp_input_config *)&input[i]);
 
 		data_config->ovl_dirty = 1;
 		dprec_logger_done(DPREC_LOGGER_PRIMARY_CONFIG, input->src_x, input->src_y);
@@ -459,7 +459,7 @@ int ovl2mem_trigger(int blocking, void *callback, unsigned int userdata)
 
 	/* /cmdqRecDumpCommand(pgc->cmdq_handle_config); */
 
-	cmdqRecFlushAsyncCallback(pgc->cmdq_handle_config, ovl2mem_callback, atomic_read(&g_trigger_ticket));
+	cmdqRecFlushAsyncCallback(pgc->cmdq_handle_config, (CmdqAsyncFlushCB)ovl2mem_callback, atomic_read(&g_trigger_ticket));
 
 	cmdqRecReset(pgc->cmdq_handle_config);
 

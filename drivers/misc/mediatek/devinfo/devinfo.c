@@ -284,7 +284,7 @@ static int __init devinfo_parse_dt(unsigned long node, const char *uname, int de
 	if (depth != 1 || (strcmp(uname, "chosen") != 0 && strcmp(uname, "chosen@0") != 0))
 		return 0;
 
-	tags = (struct devinfo_tag *) of_get_flat_dt_prop(node, "atag,devinfo", &size);
+	tags = (struct devinfo_tag *) of_get_flat_dt_prop(node, "atag,devinfo", (unsigned long *)&size);
 	if (tags) {
 		g_devinfo_data_size = tags->data_size;
 		for (i = 0; i < g_devinfo_data_size; i++)

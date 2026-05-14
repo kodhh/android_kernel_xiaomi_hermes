@@ -43,7 +43,7 @@ LCM_PARAMS *_get_lcm_params_by_handle(disp_lcm_handle *plcm)
 LCM_PARAMS *_get_lcm_driver_by_handle(disp_lcm_handle *plcm)
 {
 	if (plcm) {
-		return plcm->drv;
+		return (LCM_PARAMS *)plcm->drv;
 	} else {
 		DISPERR("WARNING, invalid lcm handle:%p\n", plcm);
 		return NULL;

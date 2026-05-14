@@ -1670,7 +1670,7 @@ int fts_ctpm_fw_upgrade(struct i2c_client *client, u8 *pbt_buf,
 	auc_i2c_write_buf[0] = 0xcc;
 	fts_i2c_Read(client, auc_i2c_write_buf, 1, reg_val, 1);
 	if (reg_val[0] != bt_ecc) {
-		printk(&client->dev, "[FTS]--ecc error! FW=%02x bt_ecc=%02x\n",
+		printk((void *)&client->dev, "[FTS]--ecc error! FW=%02x bt_ecc=%02x\n",
 					reg_val[0],bt_ecc);
 		return -EIO;
 	}
@@ -1894,7 +1894,7 @@ static ssize_t fts_tprwreg_store(struct device *dev,
 	retval = strict_strtoul(valbuf, 16, &wmreg);
 
 	if (0 != retval) {
-		printk(&client->dev, "%s() - ERROR: Could not convert the "\
+		printk((void *)&client->dev, "%s() - ERROR: Could not convert the "\
 						"given input to a number." \
 						"The given input was: \"%s\"\n",
 						__func__, buf);
@@ -1905,7 +1905,7 @@ static ssize_t fts_tprwreg_store(struct device *dev,
 		/*read register*/
 		regaddr = wmreg;
 		if (fts_read_reg(client, regaddr, &regvalue) < 0)
-			printk(&client->dev, "Could not read the register(0x%02x)\n",
+			printk((void *)&client->dev, "Could not read the register(0x%02x)\n",
 						regaddr);
 		else
 			printk("the register(0x%02x) is 0x%02x\n",
@@ -1914,10 +1914,10 @@ static ssize_t fts_tprwreg_store(struct device *dev,
 		regaddr = wmreg >> 8;
 		regvalue = wmreg;
 		if (fts_write_reg(client, regaddr, regvalue) < 0)
-			printk(&client->dev, "Could not write the register(0x%02x)\n",
+			printk((void *)&client->dev, "Could not write the register(0x%02x)\n",
 							regaddr);
 		else
-			printk(&client->dev, "Write 0x%02x into register(0x%02x) successful\n",
+			printk((void *)&client->dev, "Write 0x%02x into register(0x%02x) successful\n",
 							regvalue, regaddr);
 	}
 
@@ -2059,7 +2059,7 @@ static struct attribute_group fts_attribute_group = {
 int fts_create_sysfs(struct i2c_client *client)
 {
 	int err;
-	I2CDMABuf_va = (u8 *)dma_alloc_coherent(&tpd->dev->dev, FTS_DMA_BUF_SIZE, &I2CDMABuf_pa, GFP_KERNEL);
+	I2CDMABuf_va = (u8 *)dma_alloc_coherent(&tpd->dev->dev, FTS_DMA_BUF_SIZE, (dma_addr_t *)&I2CDMABuf_pa, GFP_KERNEL);
 	
 	if(!I2CDMABuf_va)
 	{
@@ -2248,8 +2248,8 @@ static int ft5x0x_debug_read(struct file *filp,
 	return num_read_chars;
 }
 static const struct file_operations ft5x0x_proc_fops = {
-		.write = ft5x0x_debug_write,
-		.read = ft5x0x_debug_read,
+		.write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))ft5x0x_debug_write,
+		.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))ft5x0x_debug_read,
 };
 int ft5x0x_create_apk_debug_channel(struct i2c_client * client)
 {

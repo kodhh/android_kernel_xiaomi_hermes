@@ -127,7 +127,7 @@ static void process_dbg_opt(const char *opt)
 		unsigned long addr = 0;
 		unsigned int val = 0;
 		kstrtoul(p, 16, &addr);
-		kstrtoul(p + 1, 16, &val);
+		kstrtoul(p + 1, 16, (unsigned long *)&val);
 
 		if (is_reg_addr_valid(1, addr) == 1) {
 			unsigned int regVal;
@@ -403,7 +403,7 @@ static ssize_t debug_write(struct file *file, const char __user *ubuf, size_t co
 static const struct file_operations debug_fops = {
 	.read = debug_read,
 	.write = debug_write,
-	.open = debug_open,
+	.open = (int (*)(struct inode *, struct file *))debug_open,
 };
 
 static ssize_t debug_dump_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)

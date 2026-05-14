@@ -325,7 +325,7 @@ static struct file_operations atf_log_fops = {
     .read       = atf_log_read,
     .open       = atf_log_open,
     .release    = atf_log_release,
-    .write      = atf_log_write,
+    .write      = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))atf_log_write,
 };
 
 static struct miscdevice atf_log_dev = {

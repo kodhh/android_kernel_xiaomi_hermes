@@ -584,7 +584,7 @@ static ssize_t wp_test_suit_store(struct device_driver *driver, const char *buf,
 	unsigned int num;
 	int ret;
 
-	ret = kstrtoul(p, 10, &num);
+	ret = kstrtoul(p, 10, (unsigned long *)&num);
 	if (ret)
 		return ret;
 

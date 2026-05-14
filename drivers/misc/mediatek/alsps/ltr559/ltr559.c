@@ -218,7 +218,7 @@ static struct sensor_init_info ltr559_init_info = {
 static struct i2c_driver ltr559_i2c_driver = {	
 	.probe      = ltr559_i2c_probe,
 	.remove     = ltr559_i2c_remove,
-	.detect     = ltr559_i2c_detect,
+	.detect     = (int (*)(struct i2c_client *, struct i2c_board_info *))ltr559_i2c_detect,
 	.suspend    = ltr559_i2c_suspend,
 	.resume     = ltr559_i2c_resume,
 	.id_table   = ltr559_i2c_id,
@@ -602,7 +602,7 @@ static int ltr559_create_attr(struct driver_attribute *driver)
 
 	for(idx = 0; idx < num; idx++)
 	{
-		if(err = driver_create_file(driver, ltr559_attr_list[idx]))
+		if(err = driver_create_file((struct device_driver *)driver, ltr559_attr_list[idx]))
 		{            
 			APS_ERR("driver_create_file (%s) = %d\n", ltr559_attr_list[idx]->attr.name, err);
 			break;
@@ -2017,7 +2017,7 @@ static struct file_operations ltr559_fops = {
 	//.owner = THIS_MODULE,
 	.open = ltr559_open,
 	.release = ltr559_release,
-	.unlocked_ioctl = ltr559_unlocked_ioctl,
+	.unlocked_ioctl = (long (*)(struct file *, unsigned int, unsigned long))ltr559_unlocked_ioctl,
 };
 /*----------------------------------------------------------------------------*/
 static struct miscdevice ltr559_device = {
@@ -2590,7 +2590,7 @@ static int ltr559_i2c_probe(struct i2c_client *client, const struct i2c_device_i
 
 	/* Register sysfs attribute */
 	//if(err = ltr559_create_attr(&ltr559_alsps_driver.driver))
-	if((err = ltr559_create_attr(&(ltr559_init_info.platform_diver_addr->driver))))
+	if((err = ltr559_create_attr((struct driver_attribute *)&(ltr559_init_info.platform_diver_addr->driver))))
 	{
 		printk(KERN_ERR "create attribute err = %d\n", err);
 		goto exit_create_attr_failed;
@@ -2806,7 +2806,7 @@ static int __init ltr559_init(void)
 	i2c_register_board_info(hw->i2c_num, &i2c_ltr559, 1);
 	
 #if defined(MTK_AUTO_DETECT_ALSPS)	
-   	alsps_driver_add(&ltr559_init_info);// hwmsen_alsps_add(&stk3x1x_init_info);
+   	alsps_driver_add((struct alsps_init_info *)&ltr559_init_info);// hwmsen_alsps_add(&stk3x1x_init_info);
 #else
 	if(platform_driver_register(&ltr559_alsps_driver))
 	{

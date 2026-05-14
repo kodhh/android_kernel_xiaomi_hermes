@@ -32,7 +32,7 @@ static void step_c_work_func(struct work_struct *work)
 	nt = time.tv_sec*1000000000LL+time.tv_nsec;
 	
     	//add wake lock to make sure data can be read before system suspend
-	err = cxt->step_c_data.get_data(&value,&status);
+	err = cxt->step_c_data.get_data((u64 *)&value, &status);
 
 	if(err)
 	{

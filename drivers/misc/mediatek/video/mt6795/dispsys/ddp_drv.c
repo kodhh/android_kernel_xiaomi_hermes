@@ -623,12 +623,12 @@ static int disp_probe(struct platform_device *pdev)
 	/* init M4U callback */
 
 	DDPMSG("register m4u callback\n");
-	m4u_register_fault_callback(M4U_PORT_DISP_OVL0, disp_m4u_callback, 0);
-	m4u_register_fault_callback(M4U_PORT_DISP_RDMA0, disp_m4u_callback, 0);
-	m4u_register_fault_callback(M4U_PORT_DISP_WDMA0, disp_m4u_callback, 0);
-	m4u_register_fault_callback(M4U_PORT_DISP_OVL1, disp_m4u_callback, 0);
-	m4u_register_fault_callback(M4U_PORT_DISP_RDMA1, disp_m4u_callback, 0);
-	m4u_register_fault_callback(M4U_PORT_DISP_WDMA1, disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_OVL0, (m4u_fault_callback_t *)disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_RDMA0, (m4u_fault_callback_t *)disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_WDMA0, (m4u_fault_callback_t *)disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_OVL1, (m4u_fault_callback_t *)disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_RDMA1, (m4u_fault_callback_t *)disp_m4u_callback, 0);
+	m4u_register_fault_callback(M4U_PORT_DISP_WDMA1, (m4u_fault_callback_t *)disp_m4u_callback, 0);
 
 
 	DDPMSG("dispsys probe done.\n");

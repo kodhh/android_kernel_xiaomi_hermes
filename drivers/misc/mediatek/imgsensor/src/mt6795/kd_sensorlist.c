@@ -2902,7 +2902,7 @@ static long CAMERA_HW_Ioctl_Compat(struct file *filp, unsigned int cmd, unsigned
     PK_DBG("[CAMERA SENSOR] unlocked_ioctl\n");
 	ret = filp->f_op->unlocked_ioctl(filp, KDIMGSENSORIOC_X_GETRESOLUTION2, (unsigned long)data);
 
-	err = compat_put_acdk_sensor_resolution_info_struct(data32, data);
+	err = compat_put_acdk_sensor_resolution_info_struct(data32, (ACDK_SENSOR_RESOLUTION_INFO_STRUCT __user *)data);
 	if (err != 0)
 	    PK_ERR("[CAMERA SENSOR] compat_get_Acdk_sensor_resolution_info_struct failed\n");
 	return ret;
@@ -3847,15 +3847,15 @@ static struct platform_device camerahw2_platform_device = {
 
 static  struct file_operations fcamera_proc_fops = {
     .read = CAMERA_HW_DumpReg_To_Proc,
-    .write = CAMERA_HW_Reg_Debug
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))CAMERA_HW_Reg_Debug
 };
 static  struct file_operations fcamera_proc_fops2 = {
     .read = CAMERA_HW_DumpReg_To_Proc2,
-    .write = CAMERA_HW_Reg_Debug2
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))CAMERA_HW_Reg_Debug2
 };
 static  struct file_operations fcamera_proc_fops3 = {
     .read = CAMERA_HW_DumpReg_To_Proc3,
-    .write = CAMERA_HW_Reg_Debug3
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))CAMERA_HW_Reg_Debug3
 };
 
 /* Camera information */

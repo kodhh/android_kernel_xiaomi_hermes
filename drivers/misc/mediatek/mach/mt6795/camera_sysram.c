@@ -1391,12 +1391,12 @@ static int SYSRAM_WriteFlag(
 *
 ********************************************************************************/
 static const struct file_operations fsysram_proc_fops = { 
-	.read = SYSRAM_DumpLayoutToProc,
+	.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))SYSRAM_DumpLayoutToProc,
 	.write = NULL,
 };
 static const struct file_operations fsysram_flag_proc_fops = { 
-	.read = SYSRAM_ReadFlag,
-	.write = SYSRAM_WriteFlag,
+	.read = (ssize_t (*)(struct file *, char __user *, size_t, loff_t *))SYSRAM_ReadFlag,
+	.write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))SYSRAM_WriteFlag,
 };
 //-----------------------------------------------------------------------------
 static int __init SYSRAM_Init(void)

@@ -2609,7 +2609,7 @@ static int LSM6DS3_acc_operate(void* self, uint32_t command, void* buff_in, int 
 static int ECS_SaveData(int buf[CALIBRATION_DATA_SIZE])
 {
 #if DEBUG
-	struct bmi160_acc_i2c_data *data = obj_i2c_data;
+	struct bmi160_acc_i2c_data *data = (struct bmi160_acc_i2c_data *)obj_i2c_data;
 #endif
 
 	mutex_lock(&st_sensor_data_mutex);

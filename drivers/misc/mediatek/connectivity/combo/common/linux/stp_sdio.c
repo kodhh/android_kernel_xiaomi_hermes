@@ -2768,9 +2768,9 @@ static INT32 stp_sdio_rw_retry(ENUM_STP_SDIO_HIF_TYPE_T type, UINT32 retry_limit
 		switch (type) {
 		case HIF_TYPE_READB:
 			if (retry_flag)
-				ret = mtk_wcn_hif_sdio_readb(clt_ctx, CSR, pData);
+				ret = mtk_wcn_hif_sdio_readb(clt_ctx, CSR, (PUINT8)pData);
 			else
-				ret = mtk_wcn_hif_sdio_readb(clt_ctx, offset, pData);
+				ret = mtk_wcn_hif_sdio_readb(clt_ctx, offset, (PUINT8)pData);
 			break;
 		case HIF_TYPE_READL:
 			if (retry_flag)

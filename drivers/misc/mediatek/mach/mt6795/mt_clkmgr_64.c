@@ -4219,7 +4219,7 @@ static const struct file_operations pll_test_proc_fops = {
     .owner = THIS_MODULE,
     .open  = proc_pll_test_open, 
     .read  = seq_read,
-    .write = pll_test_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))pll_test_write,
 };
 
 //for pll_fsel
@@ -4231,7 +4231,7 @@ static const struct file_operations pll_fsel_proc_fops = {
     .owner = THIS_MODULE,
     .open  = proc_pll_fsel_open, 
     .read  = seq_read,
-    .write = pll_fsel_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))pll_fsel_write,
 };
 
 #ifdef CONFIG_CLKMGR_STAT
@@ -4256,7 +4256,7 @@ static const struct file_operations subsys_test_proc_fops = {
     .owner = THIS_MODULE,
     .open  = proc_subsys_test_open, 
     .read  = seq_read,
-    .write = subsys_test_write
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))subsys_test_write
 };
 
 #ifdef CONFIG_CLKMGR_STAT
@@ -4305,7 +4305,7 @@ static const struct file_operations clk_test_proc_fops = {
     .owner = THIS_MODULE,
     .open  = proc_clk_test_open,
     .read  = seq_read,
-    .write = clk_test_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))clk_test_write,
 };
 
 #ifdef CONFIG_CLKMGR_STAT
@@ -4330,7 +4330,7 @@ static const struct file_operations clk_force_on_proc_fops = {
     .owner = THIS_MODULE,
     .open  = proc_clk_force_on_open,
     .read  = seq_read,
-    .write = clk_force_on_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))clk_force_on_write,
 };
 
 //for slp_check_pm_mtcmos_pll

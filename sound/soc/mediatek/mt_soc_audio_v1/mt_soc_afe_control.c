@@ -3262,7 +3262,7 @@ void Auddrv_AWB_Interrupt_Handler(void)
         }
         if (temp != NULL)
         {
-            temp = temp->next;
+            temp = (substreamList *)temp->next;
         }
     }
 

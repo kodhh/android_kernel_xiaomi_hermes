@@ -1011,7 +1011,7 @@ static int __init dt_scan_dram_info(unsigned long node, const char *uname, int d
 
 	if (node) {
 		/* orig_dram_info */
-		dram_info = (const struct dram_info *)of_get_flat_dt_prop(node, "orig_dram_info", NULL);
+		dram_info = (dram_info_t)of_get_flat_dt_prop(node, "orig_dram_info", NULL);
 		if (dram_info == NULL)
 			return 0;
 

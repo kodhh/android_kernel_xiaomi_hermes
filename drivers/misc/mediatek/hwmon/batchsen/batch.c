@@ -130,7 +130,7 @@ static int get_fifo_data(struct batch_context *obj)
 		else if(fifo_len>=0)
 		{
 			#ifdef CONFIG_PM_WAKELOCKS
-			__pm_stay_awake(&(batch_context_obj->read_data_wake_lock));
+			__pm_stay_awake((struct wakeup_source *)&(batch_context_obj->read_data_wake_lock));
 			#else
 			wake_lock(&(batch_context_obj->read_data_wake_lock));
 			#endif
@@ -696,7 +696,7 @@ static long batch_unlocked_ioctl(struct file *fp, unsigned int cmd, unsigned lon
             if (batch_context_obj->numOfDataLeft == 0)
             {
 		#ifdef CONFIG_PM_WAKELOCKS
-                __pm_relax(&(batch_context_obj->read_data_wake_lock));
+                __pm_relax((struct wakeup_source *)&(batch_context_obj->read_data_wake_lock));
 		#else
                 wake_unlock(&(batch_context_obj->read_data_wake_lock));
 		#endif
@@ -1041,7 +1041,7 @@ static int batch_probe(struct platform_device *pdev)
 	register_early_suspend(&batch_context_obj->early_drv);
 
 	#ifdef CONFIG_PM_WAKELOCKS
-	wakeup_source_init(&(batch_context_obj->read_data_wake_lock),"read_data_wake_lock");
+	wakeup_source_init((struct wakeup_source *)&(batch_context_obj->read_data_wake_lock),"read_data_wake_lock");
 	#else
 	wake_lock_init(&(batch_context_obj->read_data_wake_lock),WAKE_LOCK_SUSPEND,"read_data_wake_lock");
 	#endif

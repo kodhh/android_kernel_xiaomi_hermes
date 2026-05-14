@@ -2217,7 +2217,7 @@ int __parse_tag_videolfb_extra(struct device_node *node)
 		return -1;
 	fb_base_l = of_read_number(prop, 1);
 
-	prop = of_get_property(node, "atag,videolfb-lcmname", &size);
+	prop = of_get_property(node, "atag,videolfb-lcmname", (int *)&size);
 	if (!prop)
 		return -1;
 	if (size >= sizeof(mtkfb_lcm_name)) {
@@ -2236,7 +2236,7 @@ int __parse_tag_videolfb(struct device_node *node)
 	struct tag_videolfb *videolfb_tag = NULL;
 	unsigned long size = 0;
 
-	videolfb_tag = (struct tag_videolfb *)of_get_property(node, "atag,videolfb", &size);
+	videolfb_tag = (struct tag_videolfb *)of_get_property(node, "atag,videolfb", (int *)&size);
 	if (videolfb_tag) {
 		memset((void *)mtkfb_lcm_name, 0, sizeof(mtkfb_lcm_name));
 		strcpy((char *)mtkfb_lcm_name, videolfb_tag->lcmname);
@@ -2343,7 +2343,7 @@ static int mtkfb_probe(struct device *dev)
 
 	DISPMSG("mtkfb_probe: fb_pa = %pa\n", &fb_base);
 
-	disp_hal_allocate_framebuffer(fb_base, (fb_base + vramsize - 1), (unsigned int *)&fbdev->fb_va_base, &fb_pa);
+	disp_hal_allocate_framebuffer(fb_base, (fb_base + vramsize - 1), (unsigned long *)&fbdev->fb_va_base, &fb_pa);
 	fbdev->fb_pa_base = fb_base;
 
 	primary_display_set_frame_buffer_address(fbdev->fb_va_base, fb_pa);

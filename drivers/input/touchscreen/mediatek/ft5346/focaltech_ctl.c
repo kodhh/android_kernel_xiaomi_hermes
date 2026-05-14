@@ -189,7 +189,7 @@ static const struct file_operations ft_rw_iic_drv_fops = {
     .owner          = THIS_MODULE,
     .open           = ft_rw_iic_drv_open,
     .release        = ft_rw_iic_drv_release,
-    .unlocked_ioctl = ft_rw_iic_drv_ioctl,
+    .unlocked_ioctl = (long (*)(struct file *, unsigned int, unsigned long))ft_rw_iic_drv_ioctl,
 };
 
 

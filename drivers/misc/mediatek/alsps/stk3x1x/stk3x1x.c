@@ -5534,7 +5534,7 @@ static int __init stk3x1x_init(void)
 	APS_FUN();
 	
 #if defined(MTK_AUTO_DETECT_ALSPS)	
-   	alsps_driver_add(&stk3x1x_init_info);// hwmsen_alsps_add(&stk3x1x_init_info);
+   	alsps_driver_add((struct alsps_init_info *)&stk3x1x_init_info);// hwmsen_alsps_add(&stk3x1x_init_info);
 #else	
 	if((retval = platform_driver_register(&stk3x1x_alsps_driver)))
 	{

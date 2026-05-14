@@ -1652,7 +1652,7 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 
 				    dev_sunny = (struct devinfo_struct*)kmalloc(sizeof(struct devinfo_struct), GFP_KERNEL);
 				    dev_sunny->device_type = "Camera";
-				    dev_sunny->device_vendor = &Module_information1;//"Sunny";
+				    dev_sunny->device_vendor = (char *)&Module_information1;//"Sunny";
 				    dev_sunny->device_ic = "OV5670";
 				    dev_sunny->device_version = DEVINFO_NULL;
 				    dev_sunny->device_module = DEVINFO_NULL;
@@ -1716,7 +1716,7 @@ static kal_uint32 get_imgsensor_id(UINT32 *sensor_id)
 
 		    dev_sunny = (struct devinfo_struct*)kmalloc(sizeof(struct devinfo_struct), GFP_KERNEL);
 		    dev_sunny->device_type = "Camera";
-		    dev_sunny->device_vendor = &Module_information1;//"Sunny_flt";
+		    dev_sunny->device_vendor = (char *)&Module_information1;//"Sunny_flt";
 		    dev_sunny->device_ic = "OV5670";
 		    dev_sunny->device_version = DEVINFO_NULL;
 		    dev_sunny->device_module = DEVINFO_NULL;

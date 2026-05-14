@@ -1010,9 +1010,9 @@ static int set_memory_buffer(disp_session_input_config *input)
 			if (input->config[i].src_phy_addr) {
 				dst_mva = input->config[i].src_phy_addr;
 			} else {
-				disp_sync_query_buf_info(session_id, layer_id,
-							 (unsigned int)input->config[i].next_buff_idx, &dst_mva,
-							 &dst_size);
+			disp_sync_query_buf_info(session_id, layer_id,
+						 (unsigned int)input->config[i].next_buff_idx, (unsigned long *)&dst_mva,
+						 &dst_size);
 			}
 
 			if (dst_mva == 0)
@@ -1042,7 +1042,7 @@ static int set_memory_buffer(disp_session_input_config *input)
 						     &ovl2mem_in_cached_config[layer_id], dst_mva);
 		/* /disp_sync_put_cached_layer_info(session_id, layer_id, &input->config[i], get_ovl2mem_ticket()); */
 		mtkfb_update_buf_ticket(session_id, layer_id, input->config[i].next_buff_idx, get_ovl2mem_ticket());
-		_sync_convert_fb_layer_to_disp_input(input->session_id, &(input->config[i]), &input_params[layer_id],
+		_sync_convert_fb_layer_to_disp_input(input->session_id, &(input->config[i]), (primary_disp_input_config *)&input_params[layer_id],
 						     dst_mva);
 		input_params[layer_id].dirty = 1;
 
@@ -1060,7 +1060,7 @@ static int set_memory_buffer(disp_session_input_config *input)
 		}
 	}
 
-	ovl2mem_input_config(&input_params);
+	ovl2mem_input_config(input_params);
 
 	return 0;
 
@@ -1209,9 +1209,9 @@ static int set_primary_buffer(disp_session_input_config *input)
 			if (input->config[i].src_phy_addr) {
 				dst_mva = input->config[i].src_phy_addr;
 			} else {
-				disp_sync_query_buf_info(session_id, layer_id,
-							 (unsigned int)input->config[i].next_buff_idx, &dst_mva,
-							 &dst_size);
+			disp_sync_query_buf_info(session_id, layer_id,
+						 (unsigned int)input->config[i].next_buff_idx, (unsigned long *)&dst_mva,
+						 &dst_size);
 			}
 
 			if (dst_mva == 0) {
@@ -1256,7 +1256,7 @@ static int set_primary_buffer(disp_session_input_config *input)
 		if (session_info)
 			dprec_submit(&session_info->event_setinput, input->config[i].next_buff_idx, dst_mva);
 	}
-	primary_display_config_input_multiple(&primary_input);
+	primary_display_config_input_multiple(primary_input);
 
 	return 0;
 

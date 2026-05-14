@@ -204,7 +204,7 @@ int disp_helper_get_option(DISP_HELPER_OPTION option)
 		int y = 0;
 		unsigned int value = 0;
 #ifdef CONFIG_CUSTOM_LCM_Y
-		kstrtoul(CONFIG_CUSTOM_LCM_Y, 0, &value);
+		kstrtoul(CONFIG_CUSTOM_LCM_Y, 0, (unsigned long *)&value);
 		y = (int)value;
 #endif
 		return y;
@@ -215,7 +215,7 @@ int disp_helper_get_option(DISP_HELPER_OPTION option)
 		int w = DISP_GetScreenWidth();
 		unsigned int value = 0;
 #ifdef CONFIG_CUSTOM_LCM_X
-		kstrtoul(CONFIG_CUSTOM_LCM_X, 0, &value);
+		kstrtoul(CONFIG_CUSTOM_LCM_X, 0, (unsigned long *)&value);
 		x = (int)value;
 		if (x != 0)
 			w = ALIGN_TO(w, 16);

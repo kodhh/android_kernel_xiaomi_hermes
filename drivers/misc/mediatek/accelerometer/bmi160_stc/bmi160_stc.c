@@ -735,7 +735,7 @@ static int bmi160_stc_local_init(struct platform_device *pdev)
 
 static struct step_c_init_info bmi160_stc_init_info = {
 	.name = "step_counter",
-	.init = bmi160_stc_local_init,
+	.init = (int (*)(void))bmi160_stc_local_init,
 	.uninit = bmi160_stc_remove,
 };
 

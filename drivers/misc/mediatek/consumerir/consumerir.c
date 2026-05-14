@@ -528,7 +528,7 @@ static ssize_t store_value(struct device_driver *ddri, const char *buf1, size_t 
 			printk("%s, pattern[%ld]=%08x \n", __func__, i, pattern[i]);
 	}
 
-	strict_strtoul(buf1, 10, &index1);
+	strict_strtoul(buf1, 10, (unsigned long *)&index1);
 	printk("%s, index=%d, index1=%d, sizeof( unsigned long )=%ld \n", __func__,  index , index1, sizeof(unsigned long));
 
 	if(index == 1 ) {

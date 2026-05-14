@@ -309,7 +309,7 @@ static const struct file_operations abist_meter_fops = {
     .owner = THIS_MODULE,
     .open  = proc_abist_meter_open,
     .read  = seq_read,
-    .write = abist_meter_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))abist_meter_write,
 };
 
 static int proc_ckgen_meter_open(struct inode *inode, struct file *file)
@@ -320,7 +320,7 @@ static const struct file_operations ckgen_meter_fops = {
     .owner = THIS_MODULE,
     .open  = proc_ckgen_meter_open,
     .read  = seq_read,
-    .write = ckgen_meter_write,
+    .write = (ssize_t (*)(struct file *, const char __user *, size_t, loff_t *))ckgen_meter_write,
 };
 
 #endif

@@ -344,9 +344,9 @@ static int constant_flashlight_release(void *pArg)
 
 FLASHLIGHT_FUNCTION_STRUCT	constantFlashlightFunc=
 {
-	constant_flashlight_open,
-	constant_flashlight_release,
-	constant_flashlight_ioctl
+	.flashlight_open = constant_flashlight_open,
+	.flashlight_release = constant_flashlight_release,
+	.flashlight_ioctl = (int (*)(unsigned int, unsigned long))constant_flashlight_ioctl
 };
 
 MUINT32 constantFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc)

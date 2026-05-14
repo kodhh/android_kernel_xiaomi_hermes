@@ -2187,7 +2187,7 @@ static disp_internal_buffer_info *allocat_decouple_buffer(int size)
 			return NULL;
 		}
 
-		ion_phys(client, handle, &buffer_mva, &mva_size);
+		ion_phys(client, handle, (unsigned long *)&buffer_mva, (size_t *)&mva_size);
 		if (buffer_mva == 0) {
 			DISPERR("Fatal Error, get mva failed\n");
 			ion_free(client, handle);
@@ -2532,7 +2532,7 @@ int _trigger_ovl_to_memory(disp_path_handle disp_handle,
 
 	cmdqRecBackupUpdateSlot(cmdq_handle, pgc->rdma_buff_info, 0, mem_config.addr);
 
-	cmdqRecFlushAsyncCallback(cmdq_handle, callback, data);
+	cmdqRecFlushAsyncCallback(cmdq_handle, (CmdqAsyncFlushCB)callback, data);
 	cmdqRecReset(cmdq_handle);
 	cmdqRecWait(cmdq_handle, CMDQ_EVENT_DISP_WDMA0_EOF);
 	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0, data);
@@ -2562,7 +2562,7 @@ int _trigger_ovl_to_memory_mirror(disp_path_handle disp_handle,
 	rdma_pitch_sec = mem_config.pitch | (mem_config.security << 30);
 	cmdqRecBackupUpdateSlot(cmdq_handle, pgc->rdma_buff_info, 1, rdma_pitch_sec);
 
-	cmdqRecFlushAsyncCallback(cmdq_handle, callback, data);
+	cmdqRecFlushAsyncCallback(cmdq_handle, (CmdqAsyncFlushCB)callback, data);
 	cmdqRecReset(cmdq_handle);
 	cmdqRecWait(cmdq_handle, CMDQ_EVENT_DISP_WDMA0_EOF);
 	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagEnd, 0, data);
@@ -3317,7 +3317,7 @@ static int _decouple_update_rdma_config_nolock(void)
 			RDMA_CONFIG_STRUCT tmpConfig = decouple_rdma_config;
 			cmdqRecReset(cmdq_handle);
 			_cmdq_insert_wait_frame_done_token_mira(cmdq_handle);
-			cmdqBackupReadSlot(pgc->rdma_buff_info, 0, &(tmpConfig.address));
+			cmdqBackupReadSlot(pgc->rdma_buff_info, 0, (uint32_t *)&(tmpConfig.address));
 			if (primary_display_is_mirror_mode()) {
 				/*rdma pitch only use bit[15..0], we use bit[31:30] to store secure infomation */
 				cmdqBackupReadSlot(pgc->rdma_buff_info, 1, &(rdma_pitch_sec));
@@ -3331,7 +3331,7 @@ static int _decouple_update_rdma_config_nolock(void)
 			}
 			_config_rdma_input_data(&tmpConfig, pgc->dpmgr_handle, cmdq_handle);
 			_cmdq_set_config_handle_dirty_mira(cmdq_handle);
-			cmdqRecFlushAsyncCallback(cmdq_handle, _Interface_fence_release_callback,
+			cmdqRecFlushAsyncCallback(cmdq_handle, (CmdqAsyncFlushCB)_Interface_fence_release_callback,
 						  interface_fence > 1 ? interface_fence - 1 : 0);
 			/* ddp_mmp_rdma_layer(&decouple_rdma_config, 0,  20, 20); */
 			MMProfileLogEx(ddp_mmp_get_events()->primary_rdma_config, MMProfileFlagPulse, interface_fence,
@@ -3817,7 +3817,7 @@ int primary_display_init(char *lcm_name, unsigned int lcm_fps)
 
 	update_primary_intferface_module();
 
-	ret = cmdqCoreRegisterCB(CMDQ_GROUP_DISP, cmdqDdpClockOn, cmdqDdpDumpInfo, cmdqDdpResetEng, cmdqDdpClockOff);
+	ret = cmdqCoreRegisterCB(CMDQ_GROUP_DISP, (CmdqClockOnCB)cmdqDdpClockOn, (CmdqDumpInfoCB)cmdqDdpDumpInfo, (CmdqResetEngCB)cmdqDdpResetEng, (CmdqClockOffCB)cmdqDdpClockOff);
 	if (ret) {
 		DISPERR("cmdqCoreRegisterCB failed, ret=%d\n", ret);
 		ret = DISP_STATUS_ERROR;
@@ -4299,7 +4299,7 @@ int primary_display_release_fence_fake(void)
 		if (i == primary_display_get_option("ASSERT_LAYER") && is_DAL_Enabled()) {
 			mtkfb_release_layer_fence(session_id, 3);
 		} else {
-			disp_sync_get_cached_layer_info(session_id, i, &layer_en, &addr, &fence_idx);
+			disp_sync_get_cached_layer_info(session_id, i, &layer_en, (unsigned long *)&addr, &fence_idx);
 			if (fence_idx < 0) {
 				if (fence_idx == -1) {
 					DISPPR_ERROR
@@ -5135,7 +5135,7 @@ int primary_display_mem_out_trigger(int blocking, void *callback, unsigned int u
 
 	if (_should_flush_cmdq_config_handle())
 		/* /_cmdq_flush_config_handle_mira(pgc->cmdq_handle_ovl1to2_config, 0); */
-		cmdqRecFlushAsyncCallback(pgc->cmdq_handle_ovl1to2_config, primary_display_ovl2mem_callback, userdata);
+		cmdqRecFlushAsyncCallback(pgc->cmdq_handle_ovl1to2_config, (CmdqAsyncFlushCB)primary_display_ovl2mem_callback, userdata);
 
 	if (_should_reset_cmdq_config_handle())
 		cmdqRecReset(pgc->cmdq_handle_ovl1to2_config);
@@ -6935,7 +6935,7 @@ int disp_hal_allocate_framebuffer(phys_addr_t pa_start, phys_addr_t pa_end, unsi
 		*mva = pa_start & 0xffffffffULL;
 		ret =
 			m4u_alloc_mva(client, M4U_PORT_DISP_OVL0, 0, sg_table, (pa_end - pa_start + 1),
-				      M4U_PROT_READ | M4U_PROT_WRITE, M4U_FLAGS_FIX_MVA, mva);
+				      M4U_PROT_READ | M4U_PROT_WRITE, M4U_FLAGS_FIX_MVA, (unsigned int *)mva);
 		/* m4u_alloc_mva(M4U_PORT_DISP_OVL0, pa_start, (pa_end - pa_start + 1), 0, 0, mva); */
 		if (ret)
 			DISPCHECK("m4u_alloc_mva returns fail: %d\n", ret);

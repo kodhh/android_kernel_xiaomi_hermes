@@ -1133,7 +1133,7 @@ static ssize_t debug_write(struct file *file, const char __user *ubuf, size_t co
 static const struct file_operations debug_fops = {
 	.read = debug_read,
 	.write = debug_write,
-	.open = debug_open,
+	.open = (int (*)(struct inode *, struct file *))debug_open,
 };
 
 #ifdef MTKFB_DEBUG_FS_CAPTURE_LAYER_CONTENT_SUPPORT
@@ -1186,7 +1186,7 @@ static int layer_debug_release(struct inode *inode, struct file *file)
 static const struct file_operations layer_debug_fops = {
 	.read = layer_debug_read,
 	.write = layer_debug_write,
-	.open = layer_debug_open,
+	.open = (int (*)(struct inode *, struct file *))layer_debug_open,
 	.release = layer_debug_release,
 };
 

@@ -1580,7 +1580,7 @@ void disp_config_od(unsigned int width, unsigned int height, void *cmdq, unsigne
 #if 1
 	/* OD kernel thread for monitor OD status */
 	if (g_od_inital_config == 0) {
-		disp_od_thread = kthread_create(disp_od_update_worker, NULL, "od_update_worker");
+		disp_od_thread = kthread_create((int (*)(void *))disp_od_update_worker, NULL, "od_update_worker");
 		ODDBG(OD_DBG_ALWAYS, "od kernel thread created");
 		g_od_inital_config = 1;
 
@@ -1916,7 +1916,7 @@ DDP_MODULE_DRIVER ddp_driver_od = {
 	.start			 = NULL,
 	.trigger		 = NULL,
 	.stop			 = NULL,
-	.reset			 = disp_od_core_reset,
+	.reset			 = (int (*)(DISP_MODULE_ENUM, void *))disp_od_core_reset,
 	.power_on		 = od_clock_on,
 	.power_off		 = od_clock_off,
 	.is_idle		 = NULL,
@@ -2190,19 +2190,19 @@ static int od_parse3(const char *cmd, unsigned int *offset, unsigned int *value,
 
 	*value = 0;
 	*mask = 0;
-	end = ddp_simple_strtoul(next, offset);
+	end = ddp_simple_strtoul(next, (unsigned long *)offset);
 	next += end;
 	count++;
 	if (*next == ',')
 		next++;
 
-	end = ddp_simple_strtoul(next, value);
+	end = ddp_simple_strtoul(next, (unsigned long *)value);
 	next += end;
 	count++;
 	if (*next == ',')
 		next++;
 
-	end = ddp_simple_strtoul(next, mask);
+	end = ddp_simple_strtoul(next, (unsigned long *)mask);
 	next += end;
 	count++;
 
