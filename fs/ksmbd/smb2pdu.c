@@ -79,11 +79,15 @@ struct channel *lookup_chann_list(struct ksmbd_session *sess)
 	struct channel *chann;
 	struct list_head *t;
 
+	spin_lock(&sess->chann_lock);
 	list_for_each(t, &sess->ksmbd_chann_list) {
 		chann = list_entry(t, struct channel, chann_list);
-		if (chann && chann->conn == sess->conn)
+		if (chann && chann->conn == sess->conn) {
+			spin_unlock(&sess->chann_lock);
 			return chann;
+		}
 	}
+	spin_unlock(&sess->chann_lock);
 
 	return NULL;
 }
@@ -108,6 +112,11 @@ int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 		return 0;
 	}
 
+	if (work->sess->state == SMB2_SESSION_EXPIRED) {
+		ksmbd_debug(SMB, "Session is expired\n");
+		return -1;
+	}
+
 	if (list_empty(&work->sess->tree_conn_list)) {
 		ksmbd_debug(SMB, "NO tree connected\n");
 		return -1;
@@ -117,6 +126,12 @@ int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 	work->tcon = ksmbd_tree_conn_lookup(work->sess, tree_id);
 	if (!work->tcon) {
 		ksmbd_err("Invalid tid %d\n", tree_id);
+		return -1;
+	}
+
+	if (work->tcon->t_state == KSMBD_TREE_CONN_STATUS_DISCONNECT) {
+		ksmbd_debug(SMB, "Tree connect is already disconnected\n");
+		work->tcon = NULL;
 		return -1;
 	}
 
@@ -1380,7 +1395,10 @@ static int ntlm_authenticate(struct ksmbd_work *work)
 			ksmbd_free_user(user);
 			return 0;
 		}
-		ksmbd_free_user(sess->user);
+		if (sess->user) {
+			ksmbd_free_user(sess->user);
+			sess->user = NULL;
+		}
 	}
 
 	sess->user = user;
@@ -1446,7 +1464,9 @@ static int ntlm_authenticate(struct ksmbd_work *work)
 
 			chann->conn = conn;
 			INIT_LIST_HEAD(&chann->chann_list);
+			spin_lock(&sess->chann_lock);
 			list_add(&chann->chann_list, &sess->ksmbd_chann_list);
+			spin_unlock(&sess->chann_lock);
 		}
 	}
 
@@ -1497,8 +1517,10 @@ static int krb5_authenticate(struct ksmbd_work *work)
 	if (prev_sess_id && prev_sess_id != sess->id)
 		destroy_previous_session(sess->user, prev_sess_id);
 
-	if (sess->state == SMB2_SESSION_VALID)
+	if (sess->state == SMB2_SESSION_VALID) {
 		ksmbd_free_user(sess->user);
+		sess->user = NULL;
+	}
 
 	retval = ksmbd_krb5_authenticate(sess, in_blob, in_len,
 			out_blob, &out_len);
@@ -1537,7 +1559,9 @@ static int krb5_authenticate(struct ksmbd_work *work)
 
 			chann->conn = conn;
 			INIT_LIST_HEAD(&chann->chann_list);
+			spin_lock(&sess->chann_lock);
 			list_add(&chann->chann_list, &sess->ksmbd_chann_list);
+			spin_unlock(&sess->chann_lock);
 		}
 	}
 
@@ -1575,6 +1599,7 @@ int smb2_sess_setup(struct ksmbd_work *work)
 	struct ksmbd_session *sess;
 	struct negotiate_message *negblob;
 	int rc = 0;
+	bool sess_new = false;
 
 	ksmbd_debug(SMB, "Received request for session setup\n");
 
@@ -1590,6 +1615,7 @@ int smb2_sess_setup(struct ksmbd_work *work)
 			rc = -ENOMEM;
 			goto out_err;
 		}
+		sess_new = true;
 		rsp->hdr.SessionId = cpu_to_le64(sess->id);
 		ksmbd_session_register(conn, sess);
 	} else {
@@ -1600,11 +1626,13 @@ int smb2_sess_setup(struct ksmbd_work *work)
 			rsp->hdr.Status = STATUS_USER_SESSION_DELETED;
 			goto out_err;
 		}
+		if (sess->state == SMB2_SESSION_EXPIRED) {
+			rc = -ENOENT;
+			rsp->hdr.Status = STATUS_USER_SESSION_DELETED;
+			goto out_err;
+		}
 	}
 	work->sess = sess;
-
-	if (sess->state == SMB2_SESSION_EXPIRED)
-		sess->state = SMB2_SESSION_IN_PROGRESS;
 
 	negblob = (struct negotiate_message *)((char *)&req->hdr.ProtocolId +
 			le16_to_cpu(req->SecurityBufferOffset));
@@ -1679,7 +1707,8 @@ out_err:
 	}
 
 	if (rc < 0 && sess) {
-		ksmbd_session_destroy(sess);
+		if (sess_new)
+			ksmbd_session_destroy(sess);
 		work->sess = NULL;
 	}
 
@@ -1902,6 +1931,11 @@ int smb2_session_logoff(struct ksmbd_work *work)
 	/* Got a valid session, set connection state */
 	WARN_ON(sess->conn != conn);
 
+	/* Mark session as expired first, before any cleanup,
+	 * to prevent concurrent session setup from using stale data
+	 */
+	sess->state = SMB2_SESSION_EXPIRED;
+
 	/* setting CifsExiting here may race with start_tcp_sess */
 	ksmbd_conn_set_need_reconnect(work);
 	ksmbd_close_session_fds(work);
@@ -1917,10 +1951,10 @@ int smb2_session_logoff(struct ksmbd_work *work)
 	}
 
 	ksmbd_destroy_file_table(&sess->file_table);
-	sess->state = SMB2_SESSION_EXPIRED;
 
-	ksmbd_free_user(sess->user);
-	sess->user = NULL;
+	/* don't free sess->user here - ksmbd_session_destroy will handle it.
+	 * this prevents a UAF race with concurrent smb2_sess_setup.
+	 */
 
 	/* let start_tcp_sess free connection info now */
 	ksmbd_conn_set_need_negotiate(work);
@@ -2961,7 +2995,7 @@ int smb2_open(struct ksmbd_work *work)
 		int posix_acl_rc;
 		struct inode *inode = path.dentry->d_inode;
 
-		posix_acl_rc = ksmbd_vfs_inherit_posix_acl(inode, path.dentry->d_parent->d_inode);
+		posix_acl_rc = ksmbd_vfs_inherit_posix_acl(inode, path.dentry, path.dentry->d_parent->d_inode);
 		if (posix_acl_rc)
 			ksmbd_debug(SMB, "inherit posix acl failed : %d\n", posix_acl_rc);
 
@@ -2975,7 +3009,7 @@ int smb2_open(struct ksmbd_work *work)
 			rc = smb2_create_sd_buffer(work, req, path.dentry);
 			if (rc) {
 				if (posix_acl_rc)
-					ksmbd_vfs_set_init_posix_acl(inode);
+					ksmbd_vfs_set_init_posix_acl(inode, path.dentry);
 
 				if (test_share_config_flag(work->tcon->share_conf,
 					    KSMBD_SHARE_FLAG_ACL_XATTR)) {
@@ -2996,11 +3030,11 @@ int smb2_open(struct ksmbd_work *work)
 						ace_num += fattr.cf_dacls->a_count;
 					}
 
-					pntsd = kmalloc(sizeof(struct smb_ntsd) +
+					pntsd_size = sizeof(struct smb_ntsd) +
 							sizeof(struct smb_sid)*3 +
 							sizeof(struct smb_acl) +
-							sizeof(struct smb_ace)*ace_num*2,
-							GFP_KERNEL);
+							sizeof(struct smb_ace)*ace_num*2;
+					pntsd = kmalloc(pntsd_size, GFP_KERNEL);
 					if (!pntsd)
 						goto err_out;
 
@@ -3074,7 +3108,7 @@ int smb2_open(struct ksmbd_work *work)
 		}
 	} else {
 		if (req_op_level == SMB2_OPLOCK_LEVEL_LEASE) {
-			req_op_level = smb2_map_lease_to_oplock(lc->req_state);
+			req_op_level = ksmbd_map_lease_to_oplock(lc->req_state);
 			ksmbd_debug(SMB,
 				"lease req for(%s) req oplock state 0x%x, lease state 0x%x\n",
 					name, req_op_level, lc->req_state);
@@ -5239,6 +5273,12 @@ static int smb2_get_info_sec(struct ksmbd_work *work,
 	    KSMBD_SHARE_FLAG_ACL_XATTR))
 		ksmbd_vfs_get_sd_xattr(work->conn, fp->filp->f_path.dentry, &ppntsd);
 
+	secdesclen = work->response_sz -
+		(get_rfc1002_len(rsp_org) + 4);
+	if (secdesclen > sizeof(struct smb2_query_info_rsp))
+		secdesclen -= sizeof(struct smb2_query_info_rsp);
+	else
+		secdesclen = 0;
 	rc = build_sec_desc(pntsd, ppntsd, addition_info, &secdesclen, &fattr);
 	posix_acl_release(fattr.cf_acls);
 	posix_acl_release(fattr.cf_dacls);

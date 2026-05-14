@@ -54,6 +54,7 @@ static struct oplock_info *alloc_opinfo(struct ksmbd_work *work,
 #endif
 	INIT_LIST_HEAD(&opinfo->op_entry);
 	INIT_LIST_HEAD(&opinfo->interim_list);
+	spin_lock_init(&opinfo->interim_lock);
 	init_waitqueue_head(&opinfo->oplock_q);
 	init_waitqueue_head(&opinfo->oplock_brk);
 	atomic_set(&opinfo->refcount, 1);
@@ -1031,6 +1032,7 @@ static int smb2_lease_break_noti(struct oplock_info *opinfo)
 
 	atomic_inc(&conn->r_count);
 	if (opinfo->op_state == OPLOCK_ACK_WAIT) {
+		spin_lock(&opinfo->interim_lock);
 		list_for_each_safe(tmp, t, &opinfo->interim_list) {
 			struct ksmbd_work *in_work;
 
@@ -1040,6 +1042,7 @@ static int smb2_lease_break_noti(struct oplock_info *opinfo)
 			smb2_send_interim_resp(in_work, STATUS_PENDING);
 			list_del(&in_work->interim_entry);
 		}
+		spin_unlock(&opinfo->interim_lock);
 		INIT_WORK(&work->work, __smb2_lease_break_noti);
 		ksmbd_queue_work(work);
 		wait_for_break_ack(opinfo);
@@ -1395,7 +1398,9 @@ int smb_grant_oplock(struct ksmbd_work *work,
 		goto op_break_not_needed;
 	}
 
+	spin_lock(&prev_opinfo->interim_lock);
 	list_add(&work->interim_entry, &prev_opinfo->interim_list);
+	spin_unlock(&prev_opinfo->interim_lock);
 	err = oplock_break(prev_opinfo, SMB2_OPLOCK_LEVEL_II);
 	opinfo_put(prev_opinfo);
 	if (err == -ENOENT)
@@ -1465,7 +1470,9 @@ static void smb_break_all_write_oplock(struct ksmbd_work *work,
 	}
 
 	brk_opinfo->open_trunc = is_trunc;
+	spin_lock(&brk_opinfo->interim_lock);
 	list_add(&work->interim_entry, &brk_opinfo->interim_list);
+	spin_unlock(&brk_opinfo->interim_lock);
 	oplock_break(brk_opinfo, SMB2_OPLOCK_LEVEL_II);
 	opinfo_put(brk_opinfo);
 }
@@ -1496,7 +1503,6 @@ void smb_break_all_levII_oplock(struct ksmbd_work *work,
 	list_for_each_entry_rcu(brk_op, &ci->m_op_list, op_entry) {
 		if (!atomic_inc_not_zero(&brk_op->refcount))
 			continue;
-		rcu_read_unlock();
 
 #ifdef CONFIG_SMB_INSECURE_SERVER
 		if (brk_op->is_smb2) {
@@ -1559,7 +1565,6 @@ void smb_break_all_levII_oplock(struct ksmbd_work *work,
 		oplock_break(brk_op, SMB2_OPLOCK_LEVEL_NONE);
 next:
 		opinfo_put(brk_op);
-		rcu_read_lock();
 	}
 	rcu_read_unlock();
 
@@ -1583,12 +1588,12 @@ void smb_break_all_oplock(struct ksmbd_work *work, struct ksmbd_file *fp)
 }
 
 /**
- * smb2_map_lease_to_oplock() - map lease state to corresponding oplock type
+ * ksmbd_map_lease_to_oplock() - map lease state to corresponding oplock type
  * @lease_state:     lease type
  *
  * Return:      0 if no mapping, otherwise corresponding oplock type
  */
-__u8 smb2_map_lease_to_oplock(__le32 lease_state)
+__u8 ksmbd_map_lease_to_oplock(__le32 lease_state)
 {
 	if (lease_state == (SMB2_LEASE_HANDLE_CACHING_LE |
 		SMB2_LEASE_READ_CACHING_LE | SMB2_LEASE_WRITE_CACHING_LE))

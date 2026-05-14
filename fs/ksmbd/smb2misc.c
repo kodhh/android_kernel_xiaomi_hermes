@@ -197,20 +197,26 @@ static char *smb2_get_data_area_len(int *off, int *len, struct smb2_hdr *hdr)
 	 * Invalid length or offset probably means data area is invalid, but
 	 * we have little choice but to ignore the data area in this case.
 	 */
-	if (*off > 4096) {
+	if (*off <= 0) {
+		ksmbd_debug(SMB,
+			"non-positive offset %d to data invalid ignore data area\n",
+			*off);
+		*off = 0;
+		*len = 0;
+	} else if (*off < sizeof(struct smb2_hdr)) {
+		ksmbd_debug(SMB,
+			"offset %d overlaps with fixed header, ignored\n",
+			*off);
+		*off = 0;
+		*len = 0;
+	} else if (*off > 4096) {
 		ksmbd_debug(SMB, "offset %d too large, data area ignored\n",
 			*off);
 		*len = 0;
 		*off = 0;
-	} else if (*off < 0) {
+	} else if (*len <= 0) {
 		ksmbd_debug(SMB,
-			"negative offset %d to data invalid ignore data area\n",
-			*off);
-		*off = 0;
-		*len = 0;
-	} else if (*len < 0) {
-		ksmbd_debug(SMB,
-			"negative data length %d invalid, data area ignored\n",
+			"non-positive data length %d invalid, data area ignored\n",
 			*len);
 		*len = 0;
 	} else if (*len > 128 * 1024) {

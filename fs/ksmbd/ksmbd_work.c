@@ -38,6 +38,10 @@ struct ksmbd_work *ksmbd_alloc_work_struct(void)
 void ksmbd_free_work_struct(struct ksmbd_work *work)
 {
 	WARN_ON(work->saved_cred != NULL);
+
+	if (!list_empty(&work->interim_entry))
+		list_del_init(&work->interim_entry);
+
 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_CACHE_TBUF &&
 			work->set_trans_buf)
 		ksmbd_release_buffer(RESPONSE_BUF(work));

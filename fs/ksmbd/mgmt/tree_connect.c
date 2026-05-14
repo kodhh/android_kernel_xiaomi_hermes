@@ -80,6 +80,7 @@ int ksmbd_tree_conn_disconnect(struct ksmbd_session *sess,
 	int ret;
 
 	ret = ksmbd_ipc_tree_disconnect_request(sess->id, tree_conn->id);
+	tree_conn->t_state |= KSMBD_TREE_CONN_STATUS_DISCONNECT;
 	ksmbd_release_tree_conn_id(sess, tree_conn->id);
 	list_del(&tree_conn->list);
 	ksmbd_share_config_put(tree_conn->share_conf);

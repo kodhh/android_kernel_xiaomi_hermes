@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/crc32c.h>
+#include <linux/posix_acl_xattr.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 #include <linux/sched/xacct.h>
@@ -468,10 +469,23 @@ static int ksmbd_vfs_stream_write(struct ksmbd_file *fp, char *buf, loff_t *pos,
 	ksmbd_debug(VFS, "write stream data pos : %llu, count : %zd\n",
 			*pos, count);
 
+	if (*pos < 0) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (*pos >= XATTR_SIZE_MAX) {
+		err = -ENOSPC;
+		goto out;
+	}
+
+	if (*pos + count > XATTR_SIZE_MAX)
+		count = XATTR_SIZE_MAX - *pos;
+
 	size = *pos + count;
-	if (size > XATTR_SIZE_MAX) {
-		size = XATTR_SIZE_MAX;
-		count = (*pos + count) - XATTR_SIZE_MAX;
+	if (!count) {
+		err = -ENOSPC;
+		goto out;
 	}
 
 	v_len = ksmbd_vfs_getcasexattr(fp->filp->f_path.dentry,
@@ -485,7 +499,7 @@ static int ksmbd_vfs_stream_write(struct ksmbd_file *fp, char *buf, loff_t *pos,
 	}
 
 	if (v_len < size) {
-		wbuf = ksmbd_alloc(size);
+		wbuf = kzalloc(size, GFP_KERNEL);
 		if (!wbuf) {
 			err = -ENOMEM;
 			goto out;
@@ -493,10 +507,12 @@ static int ksmbd_vfs_stream_write(struct ksmbd_file *fp, char *buf, loff_t *pos,
 
 		if (v_len > 0)
 			memcpy(wbuf, stream_buf, v_len);
+		ksmbd_free(stream_buf);
 		stream_buf = wbuf;
 	}
 
-	memcpy(&stream_buf[*pos], buf, count);
+	if (*pos <= v_len)
+		memcpy(&stream_buf[*pos], buf, count);
 
 	err = ksmbd_vfs_setxattr(fp->filp->f_path.dentry,
 				 fp->stream.name,
@@ -1761,38 +1777,58 @@ struct posix_acl *ksmbd_vfs_get_acl(struct inode *inode, int type)
 #endif
 }
 
-int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
+int ksmbd_vfs_set_posix_acl(struct inode *inode, struct dentry *dentry, int type,
 		struct posix_acl *acl)
 {
 #if IS_ENABLED(CONFIG_FS_POSIX_ACL)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
-	return set_posix_acl(inode, type, acl);
-#elif LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 21)
-	int ret;
+	char *name;
+	void *value = NULL;
+	size_t size = 0;
+	int rc;
 
 	if (!IS_POSIXACL(inode))
 		return -EOPNOTSUPP;
-	if (!inode->i_op->set_acl)
-		return -EOPNOTSUPP;
 
-	if (type == ACL_TYPE_DEFAULT && !S_ISDIR(inode->i_mode))
-		return -EACCES;
-	if (!inode_owner_or_capable(inode))
-		return -EPERM;
-	if (!acl)
+	switch (type) {
+	case ACL_TYPE_ACCESS:
+		name = POSIX_ACL_XATTR_ACCESS;
+		break;
+	case ACL_TYPE_DEFAULT:
+		name = POSIX_ACL_XATTR_DEFAULT;
+		if (!S_ISDIR(inode->i_mode))
+			return -EACCES;
+		break;
+	default:
 		return -EINVAL;
+	}
 
-	ret = posix_acl_valid(acl);
-	if (ret)
-		return ret;
-	return inode->i_op->set_acl(inode, acl, type);
-#else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-	return set_posix_acl(&init_user_ns, inode, type, acl);
-#else
-	return set_posix_acl(inode, type, acl);
-#endif
-#endif
+	if (acl) {
+		size = posix_acl_xattr_size(acl->a_count);
+		value = kmalloc(size, GFP_KERNEL);
+		if (!value)
+			return -ENOMEM;
+		rc = posix_acl_to_xattr(&init_user_ns, acl, value, size);
+		if (rc < 0) {
+			kfree(value);
+			return rc;
+		}
+		size = rc;
+	}
+
+	if (size)
+		rc = vfs_setxattr(dentry, name, value, size, 0);
+	else {
+		if (type == ACL_TYPE_DEFAULT && !S_ISDIR(inode->i_mode))
+			rc = 0;
+		else {
+			rc = vfs_removexattr(dentry, name);
+			if (rc == -ENODATA)
+				rc = 0;
+		}
+	}
+
+	kfree(value);
+	return rc;
 #else
 	return -EOPNOTSUPP;
 #endif
@@ -2525,7 +2561,7 @@ void ksmbd_vfs_posix_lock_unblock(struct file_lock *flock)
 #endif
 }
 
-int ksmbd_vfs_set_init_posix_acl(struct inode *inode)
+int ksmbd_vfs_set_init_posix_acl(struct inode *inode, struct dentry *dentry)
 {
 	struct posix_acl_state acl_state;
 	struct posix_acl *acls;
@@ -2554,13 +2590,13 @@ int ksmbd_vfs_set_init_posix_acl(struct inode *inode)
 		return -ENOMEM;
 	}
 	posix_state_to_acl(&acl_state, acls->a_entries);
-	rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_ACCESS, acls);
+	rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_ACCESS, acls);
 	if (rc < 0)
 		ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_ACCESS) failed, rc : %d\n",
 				rc);
 	else if (S_ISDIR(inode->i_mode)) {
 		posix_state_to_acl(&acl_state, acls->a_entries);
-		rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_DEFAULT, acls);
+		rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_DEFAULT, acls);
 		if (rc < 0)
 			ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_DEFAULT) failed, rc : %d\n",
 					rc);
@@ -2570,7 +2606,7 @@ int ksmbd_vfs_set_init_posix_acl(struct inode *inode)
 	return rc;
 }
 
-int ksmbd_vfs_inherit_posix_acl(struct inode *inode, struct inode *parent_inode)
+int ksmbd_vfs_inherit_posix_acl(struct inode *inode, struct dentry *dentry, struct inode *parent_inode)
 {
 	struct posix_acl *acls;
 	struct posix_acl_entry *pace;
@@ -2588,12 +2624,12 @@ int ksmbd_vfs_inherit_posix_acl(struct inode *inode, struct inode *parent_inode)
 		}
 	}
 
-	rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_ACCESS, acls);
+	rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_ACCESS, acls);
 	if (rc < 0)
 		ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_ACCESS) failed, rc : %d\n",
 				rc);
 	if (S_ISDIR(inode->i_mode)) {
-		rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_DEFAULT, acls);
+		rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_DEFAULT, acls);
 		if (rc < 0)
 			ksmbd_debug(SMB, "Set posix acl(ACL_TYPE_DEFAULT) failed, rc : %d\n",
 					rc);

@@ -28,6 +28,8 @@ static const struct smb_sid creator_owner = {
 static const struct smb_sid creator_group = {
 	1, 1, {0, 0, 0, 0, 0, 3}, {cpu_to_le32(1)} };
 
+static int parse_sid(struct smb_sid *psid, char *end_of_acl);
+
 /* security id for everyone/world system group */
 static const struct smb_sid sid_everyone = {
 	1, 1, {0, 0, 0, 0, 0, 1}, {0} };
@@ -431,12 +433,24 @@ static void parse_dacl(struct smb_acl *pdacl, char *end_of_acl,
 		ppace[i] = (struct smb_ace *) (acl_base + acl_size);
 		acl_base = (char *)ppace[i];
 		acl_size = le16_to_cpu(ppace[i]->size);
+
+		if ((char *)ppace[i] + acl_size > end_of_acl) {
+			ksmbd_err("ACE %d exceeds ACL boundary\n", i);
+			break;
+		}
+
+		if (parse_sid(&ppace[i]->sid, end_of_acl)) {
+			ksmbd_err("ACE %d has invalid SID\n", i);
+			break;
+		}
+
 		ppace[i]->access_req =
 			smb_map_generic_desired_access(ppace[i]->access_req);
 
 		if (!(compare_sids(&(ppace[i]->sid), &sid_unix_NFS_mode))) {
-			fattr->cf_mode =
-				le32_to_cpu(ppace[i]->sid.sub_auth[2]);
+			if (ppace[i]->sid.num_subauth > 2)
+				fattr->cf_mode =
+					le32_to_cpu(ppace[i]->sid.sub_auth[2]);
 			break;
 		} else if (!compare_sids(&(ppace[i]->sid), pownersid)) {
 			acl_mode = access_flags_to_mode(fattr,
@@ -449,8 +463,9 @@ static void parse_dacl(struct smb_acl *pdacl, char *end_of_acl,
 			}
 			owner_found = true;
 		} else if (!compare_sids(&(ppace[i]->sid), pgrpsid) ||
-				ppace[i]->sid.sub_auth[ppace[i]->sid.num_subauth - 1] ==
-				DOMAIN_USER_RID_LE) {
+				(ppace[i]->sid.num_subauth > 0 &&
+				 ppace[i]->sid.sub_auth[ppace[i]->sid.num_subauth - 1] ==
+				 DOMAIN_USER_RID_LE)) {
 			acl_mode = access_flags_to_mode(fattr,
 				ppace[i]->access_req, ppace[i]->type);
 			acl_mode &= 0070;
@@ -762,12 +777,25 @@ out:
 
 static int parse_sid(struct smb_sid *psid, char *end_of_acl)
 {
+	__u8 num_subauth;
 	/*
 	 * validate that we do not go past end of ACL - sid must be at least 8
 	 * bytes long (assuming no sub-auths - e.g. the null SID
 	 */
 	if (end_of_acl < (char *)psid + 8) {
 		ksmbd_err("ACL too small to parse SID %p\n", psid);
+		return -EINVAL;
+	}
+
+	num_subauth = psid->num_subauth;
+	if (num_subauth > SID_MAX_SUB_AUTHORITIES) {
+		ksmbd_err("SID has %u subauthorities, max is %u\n",
+			  num_subauth, SID_MAX_SUB_AUTHORITIES);
+		return -EINVAL;
+	}
+
+	if ((char *)psid + 8 + num_subauth * sizeof(__le32) > end_of_acl) {
+		ksmbd_err("SID data exceeds ACL boundary\n");
 		return -EINVAL;
 	}
 
@@ -859,6 +887,11 @@ int parse_sec_desc(struct smb_ntsd *pntsd, int acl_len,
 }
 
 /* Convert permission bits from mode to equivalent CIFS ACL */
+static bool within_bounds(__u32 offset, __u32 size, __u32 max_size)
+{
+	return max_size >= offset && size <= max_size - offset;
+}
+
 int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 		int addition_info, __u32 *secdesclen, struct smb_fattr *fattr)
 {
@@ -870,6 +903,7 @@ int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 	uid_t uid;
 	gid_t gid;
 	unsigned int sid_type = SIDOWNER;
+	__u32 buf_size = *secdesclen;
 
 	nowner_sid_ptr = kmalloc(sizeof(struct smb_sid), GFP_KERNEL);
 	if (!nowner_sid_ptr)
@@ -897,6 +931,10 @@ int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 		pntsd->type |= ppntsd->type;
 
 	if (addition_info & OWNER_SECINFO) {
+		if (!within_bounds(offset, sizeof(struct smb_sid), buf_size)) {
+			rc = -EINVAL;
+			goto out;
+		}
 		pntsd->osidoffset = cpu_to_le32(offset);
 		owner_sid_ptr = (struct smb_sid *)((char *)pntsd + offset);
 		smb_copy_sid(owner_sid_ptr, nowner_sid_ptr);
@@ -904,6 +942,10 @@ int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 	}
 
 	if (addition_info & GROUP_SECINFO) {
+		if (!within_bounds(offset, sizeof(struct smb_sid), buf_size)) {
+			rc = -EINVAL;
+			goto out;
+		}
 		pntsd->gsidoffset = cpu_to_le32(offset);
 		group_sid_ptr = (struct smb_sid *)((char *)pntsd + offset);
 		smb_copy_sid(group_sid_ptr, ngroup_sid_ptr);
@@ -911,6 +953,10 @@ int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 	}
 
 	if (addition_info & DACL_SECINFO) {
+		if (!within_bounds(offset, sizeof(struct smb_acl), buf_size)) {
+			rc = -EINVAL;
+			goto out;
+		}
 		pntsd->type |= cpu_to_le16(DACL_PRESENT);
 		dacl_ptr = (struct smb_acl *)((char *)pntsd + offset);
 		dacl_ptr->revision = cpu_to_le16(2);
@@ -931,6 +977,10 @@ int build_sec_desc(struct smb_ntsd *pntsd, struct smb_ntsd *ppntsd,
 		}
 		pntsd->dacloffset = cpu_to_le32(offset);
 		offset += le16_to_cpu(dacl_ptr->size);
+		if (!within_bounds(offset, 0, buf_size)) {
+			rc = -EINVAL;
+			goto out;
+		}
 	}
 
 out:
@@ -972,8 +1022,18 @@ int smb_inherit_dacl(struct ksmbd_conn *conn, struct dentry *dentry,
 		goto out;
 
 	parent_pdacl = (struct smb_acl *)((char *)parent_pntsd + dacloffset);
+	if ((char *)parent_pdacl + sizeof(struct smb_acl) > (char *)parent_pntsd + acl_len) {
+		rc = -EINVAL;
+		goto out;
+	}
+
 	num_aces = le32_to_cpu(parent_pdacl->num_aces);
 	pntsd_type = le16_to_cpu(parent_pntsd->type);
+
+	if (num_aces <= 0 || num_aces > 1024) {
+		rc = -EINVAL;
+		goto out;
+	}
 
 	aces_base = kmalloc(sizeof(struct smb_ace) * num_aces * 2, GFP_KERNEL);
 	if (!aces_base)
@@ -987,6 +1047,9 @@ int smb_inherit_dacl(struct ksmbd_conn *conn, struct dentry *dentry,
 		inherited_flags = INHERITED_ACE;
 
 	for (i = 0; i < num_aces; i++) {
+		if ((char *)parent_aces + sizeof(struct smb_ace) >
+		    (char *)parent_pdacl + le16_to_cpu(parent_pdacl->size))
+			break;
 		flags = parent_aces->flags;
 		if (!smb_inherit_flags(flags, is_dir))
 			goto pass;
@@ -1042,11 +1105,27 @@ pass:
 		if (parent_pntsd->osidoffset) {
 			powner_sid = (struct smb_sid *)((char *)parent_pntsd +
 					le32_to_cpu(parent_pntsd->osidoffset));
+			if ((char *)powner_sid + 8 > (char *)parent_pntsd + acl_len) {
+				rc = -EINVAL;
+				goto out;
+			}
+			if (powner_sid->num_subauth > SID_MAX_SUB_AUTHORITIES) {
+				rc = -EINVAL;
+				goto out;
+			}
 			powner_sid_size = 1 + 1 + 6 + (powner_sid->num_subauth * 4);
 		}
 		if (parent_pntsd->gsidoffset) {
 			pgroup_sid = (struct smb_sid *)((char *)parent_pntsd +
 					le32_to_cpu(parent_pntsd->gsidoffset));
+			if ((char *)pgroup_sid + 8 > (char *)parent_pntsd + acl_len) {
+				rc = -EINVAL;
+				goto out;
+			}
+			if (pgroup_sid->num_subauth > SID_MAX_SUB_AUTHORITIES) {
+				rc = -EINVAL;
+				goto out;
+			}
 			pgroup_sid_size = 1 + 1 + 6 + (pgroup_sid->num_subauth * 4);
 		}
 
@@ -1154,6 +1233,9 @@ int smb_check_perm_dacl(struct ksmbd_conn *conn, struct dentry *dentry,
 
 		ace = (struct smb_ace *)((char *)pdacl + sizeof(struct smb_acl));
 		for (i = 0; i < le32_to_cpu(pdacl->num_aces); i++) {
+			if ((char *)ace + sizeof(struct smb_ace) >
+			    (char *)pdacl + le16_to_cpu(pdacl->size))
+				break;
 			granted |= le32_to_cpu(ace->access_req);
 			ace = (struct smb_ace *) ((char *)ace + le16_to_cpu(ace->size));
 		}
@@ -1168,6 +1250,9 @@ int smb_check_perm_dacl(struct ksmbd_conn *conn, struct dentry *dentry,
 
 	ace = (struct smb_ace *)((char *)pdacl + sizeof(struct smb_acl));
 	for (i = 0; i < le32_to_cpu(pdacl->num_aces); i++) {
+		if ((char *)ace + sizeof(struct smb_ace) >
+		    (char *)pdacl + le16_to_cpu(pdacl->size))
+			break;
 		if (!compare_sids(&sid, &ace->sid) ||
 		    !compare_sids(&sid_unix_NFS_mode, &ace->sid)) {
 			found = 1;
@@ -1183,7 +1268,8 @@ int smb_check_perm_dacl(struct ksmbd_conn *conn, struct dentry *dentry,
 		granted = READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES |
 			DELETE;
 
-		granted |= le32_to_cpu(ace->access_req);
+		if (ace)
+			granted |= le32_to_cpu(ace->access_req);
 
 		if (!pdacl->num_aces)
 			granted = GENERIC_ALL_FLAGS;
@@ -1274,10 +1360,10 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 	ksmbd_vfs_remove_acl_xattrs(dentry);
 	/* Update posix acls */
 	if (fattr.cf_dacls) {
-		rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_ACCESS,
+		rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_ACCESS,
 				fattr.cf_acls);
 		if (S_ISDIR(inode->i_mode) && fattr.cf_dacls)
-			rc = ksmbd_vfs_set_posix_acl(inode, ACL_TYPE_DEFAULT,
+			rc = ksmbd_vfs_set_posix_acl(inode, dentry, ACL_TYPE_DEFAULT,
 					fattr.cf_dacls);
 	}
 

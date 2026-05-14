@@ -65,22 +65,22 @@ static int debug_enable_led_hal = 1;
 } while (0)
 #define DEBUG
 
-static long long current_time, last_time;
+static long long bl_current_time, last_time;
 static int count;
 static char buffer[4096] = "[LED][BL] ";
 
 static void backlight_debug_log(int level)
 {
 	/* use buffer to reduce the backlight log */
-	current_time = sched_clock();
+	bl_current_time = sched_clock();
 
 	sprintf(buffer + strlen(buffer), "T:%lld.%lld, L:%d\n",
-		current_time/1000000000, (current_time%1000000000)/1000000, level);
+		bl_current_time/1000000000, (bl_current_time%1000000000)/1000000, level);
 
 	count++;
 
 	/* if log count >= 5 or interval time > 1s, print it */
-	if (count == 5 || (current_time - last_time) > 1000000000) {
+	if (count == 5 || (bl_current_time - last_time) > 1000000000) {
 		pr_debug("%s", buffer);
 		count = 0;
 		buffer[strlen("[LED][BL] ")] = '\0';
