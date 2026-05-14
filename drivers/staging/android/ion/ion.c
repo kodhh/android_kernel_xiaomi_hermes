@@ -1973,7 +1973,7 @@ int ion_device_destory_heaps(struct ion_device *dev, int need_lock)
 		down_write(&dev->lock);
 
 	plist_for_each_entry_safe(heap, tmp, &dev->heaps, node) {
-		plist_del(heap, &dev->heaps);
+		plist_del(&heap->node, &dev->heaps);
 		ion_heap_destroy(heap);
 	}
 	

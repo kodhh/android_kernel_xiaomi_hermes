@@ -96,7 +96,7 @@ struct mutex_waiter {
 do {							\
 	static struct lock_class_key __key;		\
 							\
-	__mutex_init((mutex), #mutex, &__key);		\
+	__mutex_init((struct mutex *)(mutex), #mutex, &__key);		\
 } while (0)
 static inline void mutex_destroy(struct mutex *lock) {}
 #endif

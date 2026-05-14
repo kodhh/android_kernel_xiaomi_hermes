@@ -255,7 +255,9 @@ struct driver_attribute {
 
 #define DRIVER_ATTR(_name, _mode, _show, _store)	\
 struct driver_attribute driver_attr_##_name =		\
-	__ATTR(_name, _mode, _show, _store)
+	__ATTR(_name, _mode,				\
+	       (ssize_t (*)(struct device_driver *, char *))_show,	\
+	       (ssize_t (*)(struct device_driver *, const char *, size_t))_store)
 
 extern int __must_check driver_create_file(struct device_driver *driver,
 					const struct driver_attribute *attr);
@@ -505,7 +507,9 @@ ssize_t device_store_bool(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count);
 
 #define DEVICE_ATTR(_name, _mode, _show, _store) \
-	struct device_attribute dev_attr_##_name = __ATTR(_name, _mode, _show, _store)
+	struct device_attribute dev_attr_##_name = __ATTR(_name, _mode, \
+		(ssize_t (*)(struct device *, struct device_attribute *, char *))_show, \
+		(ssize_t (*)(struct device *, struct device_attribute *, const char *, size_t))_store)
 #define DEVICE_ULONG_ATTR(_name, _mode, _var) \
 	struct dev_ext_attribute dev_attr_##_name = \
 		{ __ATTR(_name, _mode, device_show_ulong, device_store_ulong), &(_var) }

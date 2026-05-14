@@ -1120,8 +1120,8 @@ static struct proc_dir_entry *proc_mtd;
 #define DYNAMIC_CHANGE_MTD_WRITEABLE
 #ifdef DYNAMIC_CHANGE_MTD_WRITEABLE //tonykuo 2013-11-05
 static struct proc_dir_entry *entry;
-extern int mtd_writeable_proc_write(struct file *file, const char *buffer, unsigned long count, void *data);
-extern int mtd_change_proc_write(struct file *file, const char *buffer, unsigned long count, void *data);
+extern ssize_t mtd_writeable_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos);
+extern ssize_t mtd_change_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos);
 #endif
 
 static int mtd_proc_show(struct seq_file *m, void *v)

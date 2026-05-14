@@ -38,13 +38,13 @@
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 static struct mtd_info *my_mtd = NULL;
-int mtd_writeable_proc_write(struct file *file, const char *buffer, unsigned long count, void *data);
+ssize_t mtd_writeable_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos);
 
 struct mtd_change {
     uint64_t size;
     uint64_t offset;
 };
-int mtd_change_proc_write(struct file *file, const char *buffer, unsigned long count, void *data);
+ssize_t mtd_change_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos);
 #endif
 
 
@@ -807,7 +807,7 @@ uint64_t mtd_get_device_size(const struct mtd_info *mtd)
 EXPORT_SYMBOL_GPL(mtd_get_device_size);
 
 #ifdef DYNAMIC_CHANGE_MTD_WRITEABLE //wschen 2011-01-05
-int mtd_writeable_proc_write(struct file *file, const char *buffer, unsigned long count, void *data)
+ssize_t mtd_writeable_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
 {
     char buf[3];
 
@@ -837,7 +837,7 @@ int mtd_writeable_proc_write(struct file *file, const char *buffer, unsigned lon
 }
 
 #define MTD_CHANGE_NUM 4
-int mtd_change_proc_write(struct file *file, const char *buffer, unsigned long count, void *data)
+ssize_t mtd_change_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
 {
     struct mtd_change mtd_change[MTD_CHANGE_NUM];
     int write_3 = 0;
