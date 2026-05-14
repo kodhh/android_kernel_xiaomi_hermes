@@ -5879,7 +5879,7 @@ static inline void btrfs_end_bbio(struct btrfs_bio *bbio, struct bio *bio)
 	btrfs_put_bbio(bbio);
 }
 
-static void btrfs_end_bio(struct bio *bio)
+static void btrfs_end_bio(struct bio *bio, int err)
 {
 	struct btrfs_bio *bbio = bio->bi_private;
 	int is_orig_bio = 0;

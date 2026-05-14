@@ -274,7 +274,7 @@ static int scrub_pages(struct scrub_ctx *sctx, u64 logical, u64 len,
 		       u64 physical, struct btrfs_device *dev, u64 flags,
 		       u64 gen, int mirror_num, u8 *csum, int force,
 		       u64 physical_for_dev_replace);
-static void scrub_bio_end_io(struct bio *bio);
+static void scrub_bio_end_io(struct bio *bio, int err);
 static void scrub_bio_end_io_worker(struct btrfs_work *work);
 static void scrub_block_complete(struct scrub_block *sblock);
 static void scrub_remap_extent(struct btrfs_fs_info *fs_info,
@@ -291,7 +291,7 @@ static void scrub_free_wr_ctx(struct scrub_wr_ctx *wr_ctx);
 static int scrub_add_page_to_wr_bio(struct scrub_ctx *sctx,
 				    struct scrub_page *spage);
 static void scrub_wr_submit(struct scrub_ctx *sctx);
-static void scrub_wr_bio_end_io(struct bio *bio);
+static void scrub_wr_bio_end_io(struct bio *bio, int err);
 static void scrub_wr_bio_end_io_worker(struct btrfs_work *work);
 static int write_page_nocow(struct scrub_ctx *sctx,
 			    u64 physical_for_dev_replace, struct page *page);
@@ -1424,7 +1424,7 @@ struct scrub_bio_ret {
 	int error;
 };
 
-static void scrub_bio_wait_endio(struct bio *bio)
+static void scrub_bio_wait_endio(struct bio *bio, int err)
 {
 	struct scrub_bio_ret *ret = bio->bi_private;
 
@@ -1735,7 +1735,7 @@ static void scrub_wr_submit(struct scrub_ctx *sctx)
 	btrfsic_submit_bio(WRITE, sbio->bio);
 }
 
-static void scrub_wr_bio_end_io(struct bio *bio)
+static void scrub_wr_bio_end_io(struct bio *bio, int err)
 {
 	struct scrub_bio *sbio = bio->bi_private;
 	struct btrfs_fs_info *fs_info = sbio->dev->dev_root->fs_info;
@@ -2119,7 +2119,7 @@ again:
 	return 0;
 }
 
-static void scrub_missing_raid56_end_io(struct bio *bio)
+static void scrub_missing_raid56_end_io(struct bio *bio, int err)
 {
 	struct scrub_block *sblock = bio->bi_private;
 	struct btrfs_fs_info *fs_info = sblock->sctx->dev_root->fs_info;
@@ -2325,7 +2325,7 @@ leave_nomem:
 	return 0;
 }
 
-static void scrub_bio_end_io(struct bio *bio)
+static void scrub_bio_end_io(struct bio *bio, int err)
 {
 	struct scrub_bio *sbio = bio->bi_private;
 	struct btrfs_fs_info *fs_info = sbio->dev->dev_root->fs_info;
@@ -2741,7 +2741,7 @@ static void scrub_parity_bio_endio_worker(struct btrfs_work *work)
 	scrub_pending_bio_dec(sctx);
 }
 
-static void scrub_parity_bio_endio(struct bio *bio)
+static void scrub_parity_bio_endio(struct bio *bio, int err)
 {
 	struct scrub_parity *sparity = (struct scrub_parity *)bio->bi_private;
 

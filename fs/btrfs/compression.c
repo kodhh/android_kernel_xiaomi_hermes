@@ -149,7 +149,7 @@ fail:
  * The compressed pages are freed here, and it must be run
  * in process context
  */
-static void end_compressed_bio_read(struct bio *bio)
+static void end_compressed_bio_read(struct bio *bio, int err)
 {
 	struct compressed_bio *cb = bio->bi_private;
 	struct inode *inode;
@@ -263,7 +263,7 @@ static noinline void end_compressed_writeback(struct inode *inode,
  * This also calls the writeback end hooks for the file pages so that
  * metadata and checksums can be updated in the file.
  */
-static void end_compressed_bio_write(struct bio *bio)
+static void end_compressed_bio_write(struct bio *bio, int err)
 {
 	struct extent_io_tree *tree;
 	struct compressed_bio *cb = bio->bi_private;
