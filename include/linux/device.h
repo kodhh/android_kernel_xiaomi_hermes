@@ -409,17 +409,7 @@ struct class_attribute {
 #define CLASS_ATTR(_name, _mode, _show, _store)			\
 struct class_attribute class_attr_##_name = __ATTR(_name, _mode, _show, _store)
 
-#ifndef CLASS_ATTR_RO
-#define CLASS_ATTR_RO(_name) CLASS_ATTR(_name, S_IRUGO, _name##_show, NULL)
-#endif
 
-#ifndef CLASS_ATTR_WO
-#define CLASS_ATTR_WO(_name) CLASS_ATTR(_name, S_IWUSR, NULL, _name##_store)
-#endif
-
-#ifndef CLASS_ATTR_RW
-#define CLASS_ATTR_RW(_name) CLASS_ATTR(_name, S_IRUGO | S_IWUSR, _name##_show, _name##_store)
-#endif
 
 extern int __must_check class_create_file(struct class *class,
 					  const struct class_attribute *attr);

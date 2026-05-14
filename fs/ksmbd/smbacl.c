@@ -1253,7 +1253,7 @@ int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
 		bool type_check)
 {
 	int rc;
-	struct smb_fattr fattr = {{0}};
+	struct smb_fattr fattr = {0};
 	struct inode *inode = dentry->d_inode;
 
 	fattr.cf_uid = INVALID_UID;

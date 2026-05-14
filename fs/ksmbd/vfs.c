@@ -37,6 +37,7 @@
 #include "auth.h"
 
 #include "time_wrappers.h"
+#include "compat.h"
 #include "smb_common.h"
 #include "mgmt/share_config.h"
 #include "mgmt/tree_connect.h"
@@ -357,14 +358,11 @@ static int check_lock_range(struct file *filp,
 			    unsigned char type)
 {
 	struct file_lock *flock;
-	struct file_lock_context *ctx = file_inode(filp)->i_flctx;
+	struct inode *inode = file_inode(filp);
 	int error = 0;
 
-	if (!ctx || list_empty_careful(&ctx->flc_posix))
-		return 0;
-
-	spin_lock(&ctx->flc_lock);
-	list_for_each_entry(flock, &ctx->flc_posix, fl_list) {
+	spin_lock(&inode->i_lock);
+	for (flock = inode->i_flock; flock; flock = flock->fl_next) {
 		/* check conflict locks */
 		if (flock->fl_end >= start && end >= flock->fl_start) {
 			if (flock->fl_type == F_RDLCK) {
@@ -384,7 +382,7 @@ static int check_lock_range(struct file *filp,
 		}
 	}
 out:
-	spin_unlock(&ctx->flc_lock);
+	spin_unlock(&inode->i_lock);
 	return error;
 }
 
@@ -1767,7 +1765,9 @@ int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
 		struct posix_acl *acl)
 {
 #if IS_ENABLED(CONFIG_FS_POSIX_ACL)
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 21)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
+	return set_posix_acl(inode, type, acl);
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 21)
 	int ret;
 
 	if (!IS_POSIXACL(inode))
@@ -2094,7 +2094,7 @@ struct ksmbd_file *ksmbd_vfs_dentry_open(struct ksmbd_work *work,
 }
 #endif
 
-static int __dir_empty(struct dir_context *ctx,
+static int __dir_empty(void *ctx,
 				   const char *name,
 				   int namlen,
 				   loff_t offset,
@@ -2103,7 +2103,7 @@ static int __dir_empty(struct dir_context *ctx,
 {
 	struct ksmbd_readdir_data *buf;
 
-	buf = container_of(ctx, struct ksmbd_readdir_data, ctx);
+	buf = container_of((struct dir_context *)ctx, struct ksmbd_readdir_data, ctx);
 	buf->dirent_count++;
 
 	if (buf->dirent_count > 2)
@@ -2135,7 +2135,7 @@ int ksmbd_vfs_empty_dir(struct ksmbd_file *fp)
 	return err;
 }
 
-static int __caseless_lookup(struct dir_context *ctx,
+static int __caseless_lookup(void *ctx,
 			     const char *name,
 			     int namlen,
 			     loff_t offset,
@@ -2144,7 +2144,7 @@ static int __caseless_lookup(struct dir_context *ctx,
 {
 	struct ksmbd_readdir_data *buf;
 
-	buf = container_of(ctx, struct ksmbd_readdir_data, ctx);
+	buf = container_of((struct dir_context *)ctx, struct ksmbd_readdir_data, ctx);
 
 	if (buf->used != namlen)
 		return 0;
@@ -2516,7 +2516,9 @@ int ksmbd_vfs_posix_lock_wait_timeout(struct file_lock *flock, long timeout)
 
 void ksmbd_vfs_posix_lock_unblock(struct file_lock *flock)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 15, 0)
+	posix_unblock_lock(flock->fl_file, flock);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
 	posix_unblock_lock(flock);
 #else
 	locks_delete_block(flock);

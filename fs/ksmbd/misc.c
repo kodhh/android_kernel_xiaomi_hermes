@@ -193,7 +193,7 @@ int get_nlink(struct kstat *st)
 	return nlink;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 2, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 static void strreplace(char *s, char old, char new)
 {
 	for (; *s; ++s)
@@ -201,6 +201,7 @@ static void strreplace(char *s, char old, char new)
 			*s = new;
 }
 #endif
+/* strreplace is in <linux/string.h> on this kernel */
 
 void ksmbd_conv_path_to_unix(char *path)
 {

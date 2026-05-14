@@ -541,7 +541,11 @@ out_error:
 static int ksmbd_netdev_event(struct notifier_block *nb, unsigned long event,
 				void *ptr)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0)
 	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
+#else
+	struct net_device *netdev = ptr;
+#endif
 	struct interface *iface;
 	int ret, found = 0;
 

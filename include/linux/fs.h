@@ -2696,13 +2696,6 @@ static inline struct inode *d_inode(const struct dentry *dentry)
 }
 #endif
 
-#ifndef file_inode
-static inline struct inode *file_inode(const struct file *f)
-{
-	return f->f_path.dentry->d_inode;
-}
-#endif
-
 #ifndef d_really_is_negative
 #define d_really_is_negative(dentry)	((dentry)->d_inode == NULL)
 #endif

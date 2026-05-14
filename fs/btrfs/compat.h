@@ -16,13 +16,6 @@ static inline gfp_t mapping_gfp_constraint(struct address_space *mapping,
 #define smp_mb__after_atomic()	smp_mb()
 #endif
 
-#ifndef d_inode
-static inline struct inode *d_inode(const struct dentry *dentry)
-{
-	return dentry->d_inode;
-}
-#endif
-
 #ifndef strchrnul
 static inline char *strchrnul(const char *s, int c)
 {

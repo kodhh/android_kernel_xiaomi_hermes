@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
+#ifndef __NTFS3_COMPAT_H
+#define __NTFS3_COMPAT_H
+
 #ifndef __bitmap_set
 #define __bitmap_set(a, b, c)	bitmap_set(a, b, c)
 #endif
@@ -96,5 +99,6 @@ static inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
 	return ret;
 }
 #endif /* mul_u64_u32_shr */
+#endif /* CONFIG_ARCH_SUPPORTS_INT128 */
 
-#endif
+#endif /* __NTFS3_COMPAT_H */

@@ -10,7 +10,9 @@
 #include <linux/namei.h>
 #include <linux/statfs.h>
 #include <linux/ethtool.h>
+#include <linux/magic.h>
 
+#include "compat.h"
 #include "glob.h"
 #include "smb2pdu.h"
 #include "smbfsctl.h"
@@ -3835,7 +3837,7 @@ static int reserve_populate_dentry(struct ksmbd_dir_info *d_info,
 	return 0;
 }
 
-static int __query_dir(struct dir_context *ctx,
+static int __query_dir(void *ctx,
 		       const char *name,
 		       int namlen,
 		       loff_t offset,
@@ -3847,7 +3849,7 @@ static int __query_dir(struct dir_context *ctx,
 	struct ksmbd_dir_info		*d_info;
 	int				rc;
 
-	buf	= container_of(ctx, struct ksmbd_readdir_data, ctx);
+	buf	= container_of((struct dir_context *)ctx, struct ksmbd_readdir_data, ctx);
 	priv	= buf->private;
 	d_info	= priv->d_info;
 
@@ -5198,7 +5200,7 @@ static int smb2_get_info_sec(struct ksmbd_work *work,
 {
 	struct ksmbd_file *fp;
 	struct smb_ntsd *pntsd = (struct smb_ntsd *)rsp->Buffer, *ppntsd = NULL;
-	struct smb_fattr fattr = {{0}};
+	struct smb_fattr fattr = {0};
 	struct inode *inode;
 	__u32 secdesclen;
 	unsigned int id = KSMBD_NO_FID, pid = KSMBD_NO_FID;
@@ -6771,7 +6773,7 @@ struct file_lock *smb_flock_init(struct file *f)
 
 	locks_init_lock(fl);
 
-	fl->fl_owner = f;
+	fl->fl_owner = current->files;
 	fl->fl_pid = current->tgid;
 	fl->fl_file = f;
 	fl->fl_flags = FL_POSIX;

@@ -10,6 +10,7 @@
 #include <linux/statfs.h>
 #include <linux/vmalloc.h>
 
+#include "compat.h"
 #include "glob.h"
 #include "oplock.h"
 #include "buffer_pool.h"
@@ -5865,7 +5866,7 @@ static int smb_populate_readdir_entry(struct ksmbd_conn *conn,
  *
  * Return:	0 on success, otherwise -EINVAL
  */
-static int ksmbd_fill_dirent(struct dir_context *ctx,
+static int ksmbd_fill_dirent(void *ctx,
 			     const char *name,
 			     int namlen,
 			     loff_t offset,
@@ -5873,7 +5874,7 @@ static int ksmbd_fill_dirent(struct dir_context *ctx,
 			     unsigned int d_type)
 {
 	struct ksmbd_readdir_data *buf =
-		container_of(ctx, struct ksmbd_readdir_data, ctx);
+		container_of((struct dir_context *)ctx, struct ksmbd_readdir_data, ctx);
 	struct ksmbd_dirent *de = (void *)(buf->dirent + buf->used);
 	unsigned int reclen;
 

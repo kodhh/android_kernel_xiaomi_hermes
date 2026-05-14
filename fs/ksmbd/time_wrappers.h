@@ -6,6 +6,8 @@
 #ifndef __KSMBD_TIME_WRAPPERS_H
 #define __KSMBD_TIME_WRAPPERS_H
 
+#include <linux/time64.h>
+
 /*
  * A bunch of ugly hacks to workaoround all the API differences
  * between different kernel versions.

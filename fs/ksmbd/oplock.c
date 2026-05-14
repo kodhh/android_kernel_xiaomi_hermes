@@ -682,7 +682,8 @@ static void wake_up_oplock_break(struct oplock_info *opinfo)
 static int oplock_break_pending(struct oplock_info *opinfo, int req_op_level)
 {
 	while  (test_and_set_bit(0, &opinfo->pending_break)) {
-		wait_on_bit(&opinfo->pending_break, 0, TASK_UNINTERRUPTIBLE);
+		wait_on_bit(&opinfo->pending_break, 0,
+			    bit_wait_io, TASK_UNINTERRUPTIBLE);
 
 		/* Not immediately break to none. */
 		opinfo->open_trunc = 0;
