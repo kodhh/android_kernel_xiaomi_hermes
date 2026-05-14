@@ -1025,6 +1025,7 @@ static S32 mt_i2c_do_transfer(mt_i2c *i2c, struct mt_i2c_msg *msgs, S32 num)
 
 extern char *mt_i2c_bus_to_virt(unsigned long address);
 
+#if !defined(USE_I2C_MTK_EXT) || defined(COMPATIBLE_WITH_AOSP)
 static S32 standard_i2c_start_xfer(mt_i2c *i2c, struct i2c_msg *msg)
 {
 	S32 return_value = 0;
@@ -1175,6 +1176,7 @@ static S32 standard_i2c_transfer(struct i2c_adapter *adap, struct i2c_msg msgs[]
 	else
 		return -EREMOTEIO;
 }
+#endif
 
 S32 mtk_i2c_transfer(struct i2c_adapter *adap, struct mt_i2c_msg msgs[], S32 num)
 {
@@ -1390,6 +1392,7 @@ static struct i2c_algorithm mt_i2c_algorithm = {
 	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))standard_i2c_transfer,
 #else
 	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))mtk_i2c_transfer,
+#endif
 #else
 	.master_xfer = (int (*)(struct i2c_adapter *, struct i2c_msg *, int))standard_i2c_transfer,
 #endif
