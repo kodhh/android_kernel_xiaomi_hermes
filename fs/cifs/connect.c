@@ -4044,6 +4044,7 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 		reset_cifs_unix_caps(0, tcon, NULL, vol_info);
 out:
 	kfree(vol_info->username);
+	kfree(vol_info->domainname);
 	kfree(vol_info->password);
 	kfree(vol_info);
 
