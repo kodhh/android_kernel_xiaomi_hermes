@@ -92,11 +92,11 @@ struct mutex_waiter {
  *
  * It is not allowed to initialize an already locked mutex.
  */
-# define mutex_init(mutex) \
+# define mutex_init(lock) \
 do {							\
 	static struct lock_class_key __key;		\
 							\
-	__mutex_init((struct mutex *)(mutex), #mutex, &__key);		\
+	__mutex_init((struct mutex *)(lock), #lock, &__key);		\
 } while (0)
 static inline void mutex_destroy(struct mutex *lock) {}
 #endif
