@@ -133,4 +133,5 @@ obj-$(CONFIG_EFIVAR_FS)		+= efivarfs/
 obj-$(CONFIG_RAWFS_FS)		+= rawfs/
 # Patched by YAFFS
 obj-$(CONFIG_YAFFS_FS)          += yaffs2/
+obj-$(CONFIG_SMB_SERVER)	+= ksmbd/
 

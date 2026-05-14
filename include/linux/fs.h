@@ -2689,6 +2689,35 @@ extern void setattr_copy(struct inode *inode, const struct iattr *attr);
 
 extern int file_update_time(struct file *file);
 
+#ifndef d_inode
+static inline struct inode *d_inode(const struct dentry *dentry)
+{
+	return dentry->d_inode;
+}
+#endif
+
+#ifndef file_inode
+static inline struct inode *file_inode(const struct file *f)
+{
+	return f->f_path.dentry->d_inode;
+}
+#endif
+
+#ifndef d_really_is_negative
+#define d_really_is_negative(dentry)	((dentry)->d_inode == NULL)
+#endif
+
+#ifndef d_really_is_positive
+#define d_really_is_positive(dentry)	((dentry)->d_inode != NULL)
+#endif
+
+#ifndef current_time
+static inline struct timespec current_time(struct inode *inode)
+{
+	return CURRENT_TIME;
+}
+#endif
+
 extern int generic_show_options(struct seq_file *m, struct dentry *root);
 extern void save_mount_options(struct super_block *sb, char *options);
 extern void replace_mount_options(struct super_block *sb, char *options);
