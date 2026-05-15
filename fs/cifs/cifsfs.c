@@ -1269,5 +1269,6 @@ MODULE_DESCRIPTION
     ("VFS to access servers complying with the SNIA CIFS Specification "
      "e.g. Samba and Windows");
 MODULE_VERSION(CIFS_VERSION);
+MODULE_SOFTDEP("pre: sha512");
 module_init(init_cifs)
 module_exit(exit_cifs)

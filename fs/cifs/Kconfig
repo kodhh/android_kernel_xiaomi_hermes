@@ -9,7 +9,6 @@ config CIFS
 	select CRYPTO_ARC4
 	select CRYPTO_ECB
 	select CRYPTO_DES
-	select CRYPTO_SHA256
 	help
 	  This is the client VFS module for the Common Internet File System
 	  (CIFS) protocol which is the successor to the Server Message Block
@@ -161,16 +160,18 @@ config CIFS_NFSD_EXPORT
 	   Allows NFS server to export a CIFS mounted share (nfsd over cifs)
 
 config CIFS_SMB2
-	bool "SMB2 network file system support"
-	depends on CIFS && INET
-	select NLS
+	bool "SMB2 and SMB3 network file system support"
+	depends on CIFS
 	select KEYS
 	select FSCACHE
 	select DNS_RESOLVER
+	select CRYPTO_AES
+	select CRYPTO_SHA256
+	select CRYPTO_CMAC
 
 	help
-	  This enables experimental support for the SMB2 (Server Message Block
-	  version 2) protocol. The SMB2 protocol is the successor to the
+	  This enables support for the SMB2 (Server Message Block
+	  version 2) and SMB3 protocol. The SMB2 protocol is the successor to the
 	  popular CIFS and SMB network file sharing protocols. SMB2 is the
 	  native file sharing mechanism for recent versions of Windows
 	  operating systems (since Vista).  SMB2 enablement will eventually
@@ -179,6 +180,15 @@ config CIFS_SMB2
 	  (compared to cifs) due to protocol improvements.
 
 	  Unless you are a developer or tester, say N.
+
+config CIFS_SMB311
+	bool "SMB3.1.1 network file system support"
+	depends on CIFS_SMB2
+	select CRYPTO_SHA512
+
+	help
+	  This enables support for the newest, and most secure dialect, SMB3.11.
+	  If unsure, say Y
 
 config CIFS_FSCACHE
 	  bool "Provide CIFS client caching support"

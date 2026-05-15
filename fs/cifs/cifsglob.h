@@ -127,9 +127,15 @@ struct cifs_secmech {
 	struct crypto_shash *hmacmd5; /* hmac-md5 hash function */
 	struct crypto_shash *md5; /* md5 hash function */
 	struct crypto_shash *hmacsha256; /* hmac-sha256 hash function */
+#ifdef CONFIG_CIFS_SMB311
+	struct crypto_shash *sha512; /* sha512 hash function */
+#endif
 	struct sdesc *sdeschmacmd5;  /* ctxt to generate ntlmv2 hash, CR1 */
 	struct sdesc *sdescmd5; /* ctxt to generate cifs/smb signature */
 	struct sdesc *sdeschmacsha256;  /* ctxt to generate smb2 signature */
+#ifdef CONFIG_CIFS_SMB311
+	struct sdesc *sdescsha512; /* ctxt to generate smb3.11 signing key */
+#endif
 };
 
 /* per smb session structure/fields */
@@ -177,6 +183,10 @@ enum smb_version {
 	Smb_20,
 	Smb_21,
 	Smb_30,
+#ifdef CONFIG_CIFS_SMB311
+	Smb_311,
+#endif /* SMB311 */
+	Smb_version_err
 };
 
 struct mid_q_entry;
@@ -1504,6 +1514,9 @@ extern struct smb_version_values smb21_values;
 #define SMB30_VERSION_STRING	"3.0"
 extern struct smb_version_operations smb30_operations;
 extern struct smb_version_values smb30_values;
+#define SMB311_VERSION_STRING	"3.1.1"
+/*extern struct smb_version_operations smb311_operations;*/ /* not needed yet */
+extern struct smb_version_values smb311_values;
 static inline u64 cifs_flock_len(struct file_lock *fl)
 {
 	return fl->fl_end == OFFSET_MAX ? 0 : fl->fl_end - fl->fl_start + 1;

@@ -179,6 +179,10 @@ extern const struct gtype##_id __mod_##gtype##_table		\
  * files require multiple MODULE_FIRMWARE() specifiers */
 #define MODULE_FIRMWARE(_firmware) MODULE_INFO(firmware, _firmware)
 
+#ifndef MODULE_SOFTDEP
+#define MODULE_SOFTDEP(_softdep) MODULE_INFO(softdep, _softdep)
+#endif
+
 /* Given an address, look for it in the exception tables */
 const struct exception_table_entry *search_exception_tables(unsigned long add);
 
