@@ -39,7 +39,6 @@
 #include "smb2status.h"
 #include "smb2glob.h"
 
-#ifdef CONFIG_CIFS_SMB311
 int
 smb311_crypto_shash_allocate(struct TCP_Server_Info *server)
 {
@@ -48,7 +47,6 @@ smb311_crypto_shash_allocate(struct TCP_Server_Info *server)
 	/* sha512 already allocated in cifs_crypto_shash_allocate */
 	return rc;
 }
-#endif
 
 int
 smb2_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)

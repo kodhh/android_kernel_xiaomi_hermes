@@ -269,9 +269,7 @@ int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
 {
 	int i;
 	int rc;
-	char password_with_pad[CIFS_ENCPWD_SIZE];
-
-	memset(password_with_pad, 0, CIFS_ENCPWD_SIZE);
+	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
 	if (password)
 		strncpy(password_with_pad, password, CIFS_ENCPWD_SIZE);
 
@@ -330,6 +328,7 @@ build_avpair_blob(struct cifs_ses *ses, const struct nls_table *nls_cp)
 	 * ( for NTLMSSP_AV_NB_DOMAIN_NAME followed by NTLMSSP_AV_EOL ) +
 	 * unicode length of a netbios domain name
 	 */
+	kzfree(ses->auth_key.response);
 	ses->auth_key.len = size + 2 * dlen;
 	ses->auth_key.response = kzalloc(ses->auth_key.len, GFP_KERNEL);
 	if (!ses->auth_key.response) {
@@ -715,16 +714,12 @@ cifs_crypto_shash_release(struct TCP_Server_Info *server)
 	if (server->secmech.hmacmd5)
 		crypto_free_shash(server->secmech.hmacmd5);
 
-#ifdef CONFIG_CIFS_SMB311
 	if (server->secmech.sha512)
 		crypto_free_shash(server->secmech.sha512);
-#endif
 
 	kfree(server->secmech.sdeschmacsha256);
 
-#ifdef CONFIG_CIFS_SMB311
 	kfree(server->secmech.sdescsha512);
-#endif
 
 	kfree(server->secmech.sdeschmacmd5);
 
@@ -787,7 +782,6 @@ cifs_crypto_shash_allocate(struct TCP_Server_Info *server)
 	server->secmech.sdeschmacsha256->shash.tfm = server->secmech.hmacsha256;
 	server->secmech.sdeschmacsha256->shash.flags = 0x0;
 
-#ifdef CONFIG_CIFS_SMB311
 	server->secmech.sha512 = crypto_alloc_shash("sha512", 0, 0);
 	if (IS_ERR(server->secmech.sha512)) {
 		cifs_dbg(VFS, "could not allocate crypto sha512\n");
@@ -804,16 +798,13 @@ cifs_crypto_shash_allocate(struct TCP_Server_Info *server)
 	}
 	server->secmech.sdescsha512->shash.tfm = server->secmech.sha512;
 	server->secmech.sdescsha512->shash.flags = 0x0;
-#endif
 
 	return 0;
 
-#ifdef CONFIG_CIFS_SMB311
 crypto_allocate_sha512_sdesc_fail:
 	crypto_free_shash(server->secmech.sha512);
 
 crypto_allocate_sha512_fail:
-#endif
 crypto_allocate_hmacsha256_sdesc_fail:
 	kfree(server->secmech.sdescmd5);
 
