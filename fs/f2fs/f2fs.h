@@ -94,6 +94,7 @@ extern char *fault_name[FAULT_MAX];
 #define clear_opt(sbi, option)	((sbi)->mount_opt.opt &= ~F2FS_MOUNT_##option)
 #define set_opt(sbi, option)	((sbi)->mount_opt.opt |= F2FS_MOUNT_##option)
 #define test_opt(sbi, option)	((sbi)->mount_opt.opt & F2FS_MOUNT_##option)
+#define F2FS_OPTION(sbi)	((sbi)->mount_opt)
 
 #define ver_after(a, b)	(typecheck(unsigned long long, a) &&		\
 		typecheck(unsigned long long, b) &&			\
@@ -106,7 +107,22 @@ typedef u32 block_t;	/*
 typedef u32 nid_t;
 
 struct f2fs_mount_info {
+	enum fsync_mode {
+		FSYNC_MODE_POSIX,	/* fsync follows posix semantics */
+		FSYNC_MODE_STRICT,	/* fsync behaves in line with ext4 */
+		FSYNC_MODE_NOBARRIER,	/* fsync behaves nobarrier based on posix */
+	};
 	unsigned int	opt;
+	int write_io_size_bits;
+	block_t root_reserved_blocks;
+	kuid_t s_resuid;
+	kgid_t s_resgid;
+	int active_logs;
+	int inline_xattr_size;
+	int whint_mode;
+	int alloc_mode;
+	int fsync_mode;
+	bool test_dummy_encryption;
 };
 
 #define F2FS_FEATURE_ENCRYPT	0x0001
@@ -240,6 +256,8 @@ enum {
 	ORPHAN_INO,		/* for orphan ino list */
 	APPEND_INO,		/* for append ino list */
 	UPDATE_INO,		/* for update ino list */
+	TRANS_DIR_INO,		/* for transactions dir ino list */
+	FLUSH_INO,		/* for multiple device flushing */
 	MAX_INO_ENTRY,		/* max. list */
 };
 
@@ -591,6 +609,7 @@ struct f2fs_inode_info {
 	struct list_head gdirty_list;	/* linked in global dirty list */
 	struct list_head inmem_pages;	/* inmemory pages managed by f2fs */
 	struct mutex inmem_lock;	/* lock for inmemory pages */
+	kprojid_t i_projid;		/* id for project quota */
 	struct extent_tree *extent_tree;	/* cached extent_tree entry */
 	struct rw_semaphore dio_rwsem[2];/* avoid racing between dio and gc */
 };
@@ -1857,6 +1876,7 @@ enum {
 	FI_DO_DEFRAG,		/* indicate defragment is running */
 	FI_DIRTY_FILE,		/* indicate regular/symlink has dirty pages */
 	FI_HOT_DATA,		/* indicate file is hot */
+	FI_PROJ_INHERIT,	/* indicate file inherits projectid */
 };
 
 static inline void __mark_inode_dirty_flag(struct inode *inode,
@@ -2393,6 +2413,7 @@ void ra_meta_pages_cond(struct f2fs_sb_info *sbi, pgoff_t index);
 long sync_meta_pages(struct f2fs_sb_info *sbi, enum page_type type,
 			long nr_to_write);
 void add_ino_entry(struct f2fs_sb_info *sbi, nid_t ino, int type);
+void f2fs_add_ino_entry(struct f2fs_sb_info *, nid_t, int);
 void remove_ino_entry(struct f2fs_sb_info *sbi, nid_t ino, int type);
 void release_ino_entry(struct f2fs_sb_info *sbi, bool all);
 bool exist_written_data(struct f2fs_sb_info *sbi, nid_t ino, int mode);
@@ -2816,3 +2837,8 @@ static inline bool f2fs_may_encrypt(struct inode *inode)
 #endif
 }
 #endif
+
+static inline bool f2fs_is_checkpoint_ready(struct f2fs_sb_info *sbi)
+{
+	return true;
+}

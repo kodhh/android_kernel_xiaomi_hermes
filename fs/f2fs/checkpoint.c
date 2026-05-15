@@ -450,6 +450,11 @@ void add_ino_entry(struct f2fs_sb_info *sbi, nid_t ino, int type)
 	__add_ino_entry(sbi, ino, type);
 }
 
+void f2fs_add_ino_entry(struct f2fs_sb_info *sbi, nid_t ino, int type)
+{
+	add_ino_entry(sbi, ino, type);
+}
+
 void remove_ino_entry(struct f2fs_sb_info *sbi, nid_t ino, int type)
 {
 	/* remove dirty ino entry from list */

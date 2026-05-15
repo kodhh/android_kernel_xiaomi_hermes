@@ -175,3 +175,27 @@ static inline int fscrypt_zeroout_range(const struct inode *inode, pgoff_t lblk,
 }
 
 #endif	/* _LINUX_FSCRYPT_NOTSUPP_H */
+
+/* hooks.c */
+static inline int __fscrypt_prepare_rename(struct inode *old_dir,
+					   struct dentry *old_dentry,
+					   struct inode *new_dir,
+					   struct dentry *new_dentry,
+					   unsigned int flags)
+{
+	return 0;
+}
+
+static inline int fscrypt_require_key(struct inode *inode)
+{
+	return 0;
+}
+
+static inline int fscrypt_prepare_rename(struct inode *old_dir,
+					 struct dentry *old_dentry,
+					 struct inode *new_dir,
+					 struct dentry *new_dentry,
+					 unsigned int flags)
+{
+	return 0;
+}

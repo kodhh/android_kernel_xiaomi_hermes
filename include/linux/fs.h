@@ -1718,6 +1718,8 @@ struct super_operations {
 #define S_NOSEC		4096	/* no suid or xattr security attributes */
 #define S_ATOMIC_COPY	8192	/* Pages mapped with this inode need to be
 				   atomically copied (gem) */
+#define S_ENCRYPTED	16384	/* Encrypted file (using fs/crypto/) */
+#define IS_ENCRYPTED(inode)	((inode)->i_flags & S_ENCRYPTED)
 
 /*
  * Note that nosuid etc flags are inode-specific: setting some file-system
@@ -2878,3 +2880,4 @@ static inline bool dir_emit_dots(struct file *file, struct dir_context *ctx)
 }
 
 #endif /* _LINUX_FS_H */
+/* test write */
