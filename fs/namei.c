@@ -3937,8 +3937,12 @@ int vfs_rename2(struct vfsmount *mnt,
 			target->i_flags |= S_DEAD;
 		dont_mount(new_dentry);
 	}
-	if (!(old_dir->i_sb->s_type->fs_flags & FS_RENAME_DOES_D_MOVE))
-		d_move(old_dentry, new_dentry);
+	if (!(old_dir->i_sb->s_type->fs_flags & FS_RENAME_DOES_D_MOVE)) {
+		if (!(flags & RENAME_EXCHANGE))
+			d_move(old_dentry, new_dentry);
+		else
+			d_exchange(old_dentry, new_dentry);
+	}
 
 	if (!error) {
 		fsnotify_move(old_dir, new_dir, old_name, is_dir,

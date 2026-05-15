@@ -98,6 +98,10 @@ static unsigned char btrfs_type_by_mode[S_IFMT >> S_SHIFT] = {
 static int btrfs_setsize(struct inode *inode, struct iattr *attr);
 static int btrfs_truncate(struct inode *inode);
 static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent);
+static int btrfs_whiteout_for_rename(struct btrfs_trans_handle *trans,
+				     struct btrfs_root *root,
+				     struct inode *dir,
+				     struct dentry *dentry);
 static noinline int cow_file_range(struct inode *inode,
 				   struct page *locked_page,
 				   u64 start, u64 end, int *page_started,
@@ -6393,6 +6397,57 @@ static int btrfs_add_nondir(struct btrfs_trans_handle *trans,
 	return err;
 }
 
+static int btrfs_whiteout_for_rename(struct btrfs_trans_handle *trans,
+				     struct btrfs_root *root,
+				     struct inode *dir,
+				     struct dentry *dentry)
+{
+	int ret;
+	struct inode *inode;
+	u64 objectid;
+	u64 index;
+
+	ret = btrfs_find_free_ino(root, &objectid);
+	if (ret)
+		return ret;
+
+	inode = btrfs_new_inode(trans, root, dir,
+				dentry->d_name.name,
+				dentry->d_name.len,
+				btrfs_ino(dir),
+				objectid,
+				S_IFCHR | WHITEOUT_MODE,
+				&index);
+
+	if (IS_ERR(inode)) {
+		ret = PTR_ERR(inode);
+		return ret;
+	}
+
+	inode->i_op = &btrfs_special_inode_operations;
+	init_special_inode(inode, inode->i_mode,
+		WHITEOUT_DEV);
+
+	ret = btrfs_init_inode_security(trans, inode, dir,
+				&dentry->d_name);
+	if (ret)
+		goto out;
+
+	ret = btrfs_add_nondir(trans, dir, dentry,
+				inode, 0, index);
+	if (ret)
+		goto out;
+
+	ret = btrfs_update_inode(trans, root, inode);
+out:
+	unlock_new_inode(inode);
+	if (ret)
+		inode_dec_link_count(inode);
+	iput(inode);
+
+	return ret;
+}
+
 static int btrfs_mknod(struct inode *dir, struct dentry *dentry,
 			umode_t mode, dev_t rdev)
 {
@@ -9317,18 +9372,20 @@ static int btrfs_getattr(struct vfsmount *mnt,
 }
 
 static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-			   struct inode *new_dir, struct dentry *new_dentry)
+			   struct inode *new_dir, struct dentry *new_dentry,
+			   unsigned int flags)
 {
 	struct btrfs_trans_handle *trans;
+	unsigned int trans_num_items;
 	struct btrfs_root *root = BTRFS_I(old_dir)->root;
 	struct btrfs_root *dest = BTRFS_I(new_dir)->root;
 	struct inode *new_inode = d_inode(new_dentry);
 	struct inode *old_inode = d_inode(old_dentry);
-	struct timespec ctime = CURRENT_TIME;
 	u64 index = 0;
 	u64 root_objectid;
 	int ret;
 	u64 old_ino = btrfs_ino(old_inode);
+	bool log_pinned = false;
 
 	if (btrfs_ino(new_dir) == BTRFS_EMPTY_SUBVOL_DIR_OBJECTID)
 		return -EPERM;
@@ -9379,15 +9436,21 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	 * We want to reserve the absolute worst case amount of items.  So if
 	 * both inodes are subvols and we need to unlink them then that would
 	 * require 4 item modifications, but if they are both normal inodes it
-	 * would require 5 item modifications, so we'll assume their normal
+	 * would require 5 item modifications, so we'll assume they are normal
 	 * inodes.  So 5 * 2 is 10, plus 1 for the new link, so 11 total items
 	 * should cover the worst case number of items we'll modify.
+	 * If our rename has the whiteout flag, we need more 5 units for the
+	 * new inode (1 inode item, 1 inode ref, 2 dir items and 1 xattr item
+	 * when selinux is enabled).
 	 */
-	trans = btrfs_start_transaction(root, 11);
+	trans_num_items = 11;
+	if (flags & RENAME_WHITEOUT)
+		trans_num_items += 5;
+	trans = btrfs_start_transaction(root, trans_num_items);
 	if (IS_ERR(trans)) {
-                ret = PTR_ERR(trans);
-                goto out_notrans;
-        }
+		ret = PTR_ERR(trans);
+		goto out_notrans;
+	}
 
 	if (dest != root)
 		btrfs_record_root_in_trans(trans, dest);
@@ -9401,6 +9464,8 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		/* force full log commit if subvolume involved. */
 		btrfs_set_log_full_commit(root->fs_info, trans);
 	} else {
+		btrfs_pin_log_trans(root);
+		log_pinned = true;
 		ret = btrfs_insert_inode_ref(trans, dest,
 					     new_dentry->d_name.name,
 					     new_dentry->d_name.len,
@@ -9408,22 +9473,14 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 					     btrfs_ino(new_dir), index);
 		if (ret)
 			goto out_fail;
-		/*
-		 * this is an ugly little race, but the rename is required
-		 * to make sure that if we crash, the inode is either at the
-		 * old name or the new one.  pinning the log transaction lets
-		 * us make sure we don't allow a log commit to come in after
-		 * we unlink the name but before we add the new name back in.
-		 */
-		btrfs_pin_log_trans(root);
 	}
 
 	inode_inc_iversion(old_dir);
 	inode_inc_iversion(new_dir);
 	inode_inc_iversion(old_inode);
-	old_dir->i_ctime = old_dir->i_mtime = ctime;
-	new_dir->i_ctime = new_dir->i_mtime = ctime;
-	old_inode->i_ctime = ctime;
+	old_dir->i_ctime = old_dir->i_mtime =
+	new_dir->i_ctime = new_dir->i_mtime =
+	old_inode->i_ctime = current_time(old_dir);
 
 	if (old_dentry->d_parent != new_dentry->d_parent)
 		btrfs_record_unlink_dir(trans, old_dir, old_inode, 1);
@@ -9448,7 +9505,7 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	if (new_inode) {
 		inode_inc_iversion(new_inode);
-		new_inode->i_ctime = CURRENT_TIME;
+		new_inode->i_ctime = current_time(new_inode);
 		if (unlikely(btrfs_ino(new_inode) ==
 			     BTRFS_EMPTY_SUBVOL_DIR_OBJECTID)) {
 			root_objectid = BTRFS_I(new_inode)->location.objectid;
@@ -9482,15 +9539,238 @@ static int btrfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	if (old_inode->i_nlink == 1)
 		BTRFS_I(old_inode)->dir_index = index;
 
-	if (old_ino != BTRFS_FIRST_FREE_OBJECTID) {
+	if (log_pinned) {
 		struct dentry *parent = new_dentry->d_parent;
+
 		btrfs_log_new_name(trans, old_inode, old_dir, parent);
 		btrfs_end_log_trans(root);
+		log_pinned = false;
+	}
+
+	if (flags & RENAME_WHITEOUT) {
+		ret = btrfs_whiteout_for_rename(trans, root, old_dir,
+						old_dentry);
+
+		if (ret) {
+			btrfs_abort_transaction(trans, root, ret);
+			goto out_fail;
+		}
 	}
 out_fail:
+	/*
+	 * If we have pinned the log and an error happened, we unpin tasks
+	 * trying to sync the log and force them to fallback to a transaction
+	 * commit if the log currently contains any of the inodes involved in
+	 * this rename operation (to ensure we do not persist a log with an
+	 * inconsistent state for any of these inodes or leading to any
+	 * inconsistencies when replayed). If the transaction was aborted, the
+	 * abortion reason is propagated to userspace when attempting to commit
+	 * the transaction. If the log does not contain any of these inodes, we
+	 * allow the tasks to sync it.
+	 */
+	if (ret && log_pinned) {
+		if (btrfs_inode_in_log(old_dir, root->fs_info->generation) ||
+		    btrfs_inode_in_log(new_dir, root->fs_info->generation) ||
+		    btrfs_inode_in_log(old_inode, root->fs_info->generation) ||
+		    (new_inode &&
+		     btrfs_inode_in_log(new_inode, root->fs_info->generation)))
+		    btrfs_set_log_full_commit(root->fs_info, trans);
+
+		btrfs_end_log_trans(root);
+		log_pinned = false;
+	}
 	btrfs_end_transaction(trans, root);
 out_notrans:
 	if (old_ino == BTRFS_FIRST_FREE_OBJECTID)
+		up_read(&root->fs_info->subvol_sem);
+
+	return ret;
+}
+
+static int btrfs_rename_exchange(struct inode *old_dir,
+				 struct dentry *old_dentry,
+				 struct inode *new_dir,
+				 struct dentry *new_dentry)
+{
+	struct btrfs_trans_handle *trans;
+	struct btrfs_root *root = BTRFS_I(old_dir)->root;
+	struct btrfs_root *dest = BTRFS_I(new_dir)->root;
+	struct inode *new_inode = d_inode(new_dentry);
+	struct inode *old_inode = d_inode(old_dentry);
+	struct dentry *parent;
+	u64 old_ino = btrfs_ino(old_inode);
+	u64 new_ino = btrfs_ino(new_inode);
+	u64 old_idx = 0;
+	u64 new_idx = 0;
+	u64 root_objectid;
+	int ret;
+	int ret2;
+	bool root_log_pinned = false;
+	bool dest_log_pinned = false;
+
+	if (root != dest &&
+	    (old_ino != BTRFS_FIRST_FREE_OBJECTID ||
+	     new_ino != BTRFS_FIRST_FREE_OBJECTID))
+		return -EXDEV;
+
+	if (old_ino == BTRFS_FIRST_FREE_OBJECTID ||
+	    new_ino == BTRFS_FIRST_FREE_OBJECTID)
+		down_read(&root->fs_info->subvol_sem);
+
+	trans = btrfs_start_transaction(root, 12);
+	if (IS_ERR(trans)) {
+		ret = PTR_ERR(trans);
+		goto out_notrans;
+	}
+
+	if (dest != root)
+		btrfs_record_root_in_trans(trans, dest);
+
+	ret = btrfs_set_inode_index(new_dir, &old_idx);
+	if (ret)
+		goto out_fail;
+	ret = btrfs_set_inode_index(old_dir, &new_idx);
+	if (ret)
+		goto out_fail;
+
+	BTRFS_I(old_inode)->dir_index = 0ULL;
+	BTRFS_I(new_inode)->dir_index = 0ULL;
+
+	if (old_ino == BTRFS_FIRST_FREE_OBJECTID) {
+		btrfs_set_log_full_commit(root->fs_info, trans);
+	} else {
+		btrfs_pin_log_trans(root);
+		root_log_pinned = true;
+		ret = btrfs_insert_inode_ref(trans, dest,
+					     new_dentry->d_name.name,
+					     new_dentry->d_name.len,
+					     old_ino,
+					     btrfs_ino(new_dir), old_idx);
+		if (ret)
+			goto out_fail;
+	}
+
+	if (new_ino == BTRFS_FIRST_FREE_OBJECTID) {
+		btrfs_set_log_full_commit(dest->fs_info, trans);
+	} else {
+		btrfs_pin_log_trans(dest);
+		dest_log_pinned = true;
+		ret = btrfs_insert_inode_ref(trans, root,
+					     old_dentry->d_name.name,
+					     old_dentry->d_name.len,
+					     new_ino,
+					     btrfs_ino(old_dir), new_idx);
+		if (ret)
+			goto out_fail;
+	}
+
+	inode_inc_iversion(old_dir);
+	inode_inc_iversion(new_dir);
+	inode_inc_iversion(old_inode);
+	inode_inc_iversion(new_inode);
+	old_dir->i_ctime = old_dir->i_mtime =
+	new_dir->i_ctime = new_dir->i_mtime =
+	old_inode->i_ctime = new_inode->i_ctime = current_time(old_inode);
+
+	if (old_dentry->d_parent != new_dentry->d_parent) {
+		btrfs_record_unlink_dir(trans, old_dir, old_inode, 1);
+		btrfs_record_unlink_dir(trans, new_dir, new_inode, 1);
+	}
+
+	if (old_ino == BTRFS_FIRST_FREE_OBJECTID) {
+		root_objectid = BTRFS_I(old_inode)->root->root_key.objectid;
+		ret = btrfs_unlink_subvol(trans, root, old_dir,
+					  root_objectid,
+					  old_dentry->d_name.name,
+					  old_dentry->d_name.len);
+	} else {
+		ret = __btrfs_unlink_inode(trans, root, old_dir,
+					   d_inode(old_dentry),
+					   old_dentry->d_name.name,
+					   old_dentry->d_name.len);
+		if (!ret)
+			ret = btrfs_update_inode(trans, root, old_inode);
+	}
+	if (ret) {
+		btrfs_abort_transaction(trans, root, ret);
+		goto out_fail;
+	}
+
+	if (new_ino == BTRFS_FIRST_FREE_OBJECTID) {
+		root_objectid = BTRFS_I(new_inode)->root->root_key.objectid;
+		ret = btrfs_unlink_subvol(trans, dest, new_dir,
+					  root_objectid,
+					  new_dentry->d_name.name,
+					  new_dentry->d_name.len);
+	} else {
+		ret = __btrfs_unlink_inode(trans, dest, new_dir,
+					   d_inode(new_dentry),
+					   new_dentry->d_name.name,
+					   new_dentry->d_name.len);
+		if (!ret)
+			ret = btrfs_update_inode(trans, dest, new_inode);
+	}
+	if (ret) {
+		btrfs_abort_transaction(trans, root, ret);
+		goto out_fail;
+	}
+
+	ret = btrfs_add_link(trans, new_dir, old_inode,
+			     new_dentry->d_name.name,
+			     new_dentry->d_name.len, 0, old_idx);
+	if (ret) {
+		btrfs_abort_transaction(trans, root, ret);
+		goto out_fail;
+	}
+
+	ret = btrfs_add_link(trans, old_dir, new_inode,
+			     old_dentry->d_name.name,
+			     old_dentry->d_name.len, 0, new_idx);
+	if (ret) {
+		btrfs_abort_transaction(trans, root, ret);
+		goto out_fail;
+	}
+
+	if (old_inode->i_nlink == 1)
+		BTRFS_I(old_inode)->dir_index = old_idx;
+	if (new_inode->i_nlink == 1)
+		BTRFS_I(new_inode)->dir_index = new_idx;
+
+	if (root_log_pinned) {
+		parent = new_dentry->d_parent;
+		btrfs_log_new_name(trans, old_inode, old_dir, parent);
+		btrfs_end_log_trans(root);
+		root_log_pinned = false;
+	}
+	if (dest_log_pinned) {
+		parent = old_dentry->d_parent;
+		btrfs_log_new_name(trans, new_inode, new_dir, parent);
+		btrfs_end_log_trans(dest);
+		dest_log_pinned = false;
+	}
+out_fail:
+	if (ret && (root_log_pinned || dest_log_pinned)) {
+		if (btrfs_inode_in_log(old_dir, root->fs_info->generation) ||
+		    btrfs_inode_in_log(new_dir, root->fs_info->generation) ||
+		    btrfs_inode_in_log(old_inode, root->fs_info->generation) ||
+		    (new_inode &&
+		     btrfs_inode_in_log(new_inode, root->fs_info->generation)))
+		    btrfs_set_log_full_commit(root->fs_info, trans);
+
+		if (root_log_pinned) {
+			btrfs_end_log_trans(root);
+			root_log_pinned = false;
+		}
+		if (dest_log_pinned) {
+			btrfs_end_log_trans(dest);
+			dest_log_pinned = false;
+		}
+	}
+	ret2 = btrfs_end_transaction(trans, root);
+	ret = ret ? ret : ret2;
+out_notrans:
+	if (new_ino == BTRFS_FIRST_FREE_OBJECTID ||
+	    old_ino == BTRFS_FIRST_FREE_OBJECTID)
 		up_read(&root->fs_info->subvol_sem);
 
 	return ret;
@@ -9500,10 +9780,14 @@ static int btrfs_rename2(struct inode *old_dir, struct dentry *old_dentry,
 			 struct inode *new_dir, struct dentry *new_dentry,
 			 unsigned int flags)
 {
-	if (flags & ~RENAME_NOREPLACE)
+	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
 		return -EINVAL;
 
-	return btrfs_rename(old_dir, old_dentry, new_dir, new_dentry);
+	if (flags & RENAME_EXCHANGE)
+		return btrfs_rename_exchange(old_dir, old_dentry, new_dir,
+					  new_dentry);
+
+	return btrfs_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
 }
 
 static void btrfs_run_delalloc_work(struct btrfs_work *work)
