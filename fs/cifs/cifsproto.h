@@ -125,9 +125,11 @@ extern u64 cifs_UnixTimeToNT(struct timespec);
 extern struct timespec cnvrtDosUnixTm(__le16 le_date, __le16 le_time,
 				      int offset);
 extern void cifs_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int cifs_unlock_range(struct cifsFileInfo *cfile,
 			     struct file_lock *flock, const unsigned int xid);
 extern int cifs_push_mandatory_locks(struct cifsFileInfo *cfile);
+#endif
 
 extern struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid,
 					      struct file *file,
@@ -165,8 +167,10 @@ extern int id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64,
 					kuid_t, kgid_t);
 extern struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *, struct inode *,
 					const char *, u32 *);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int set_cifs_acl(struct cifs_ntsd *, __u32, struct inode *,
 				const char *, int);
+#endif
 
 extern void dequeue_mid(struct mid_q_entry *mid, bool malformed);
 extern int cifs_read_from_socket(struct TCP_Server_Info *server, char *buf,
@@ -280,6 +284,7 @@ extern int CIFSSMBQFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon);
 extern int CIFSSMBQFSPosixInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			struct kstatfs *FSData);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			const char *fileName, const FILE_BASIC_INFO *data,
 			const struct nls_table *nls_codepage,
@@ -416,27 +421,10 @@ extern int CIFSSMBTDis(const unsigned int xid, struct cifs_tcon *tcon);
 extern int CIFSSMBEcho(struct TCP_Server_Info *server);
 extern int CIFSSMBLogoff(const unsigned int xid, struct cifs_ses *ses);
 
-extern struct cifs_ses *sesInfoAlloc(void);
-extern void sesInfoFree(struct cifs_ses *);
-extern struct cifs_tcon *tconInfoAlloc(void);
-extern void tconInfoFree(struct cifs_tcon *);
+extern void cifs_autodisable_serverino(struct cifs_sb_info *cifs_sb);
+extern bool CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr);
 
-extern int cifs_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server,
-		   __u32 *pexpected_response_sequence_number);
-extern int cifs_sign_smbv(struct kvec *iov, int n_vec, struct TCP_Server_Info *,
-			  __u32 *);
-extern int cifs_sign_smb(struct smb_hdr *, struct TCP_Server_Info *, __u32 *);
-extern int cifs_verify_signature(struct smb_rqst *rqst,
-				 struct TCP_Server_Info *server,
-				__u32 expected_sequence_number);
-extern int SMBNTencrypt(unsigned char *, unsigned char *, unsigned char *,
-			const struct nls_table *);
-extern int setup_ntlm_response(struct cifs_ses *, const struct nls_table *);
-extern int setup_ntlmv2_rsp(struct cifs_ses *, const struct nls_table *);
-extern int cifs_crypto_shash_allocate(struct TCP_Server_Info *);
-extern void cifs_crypto_shash_release(struct TCP_Server_Info *);
-extern int calc_seckey(struct cifs_ses *);
-
+extern int UNICODE_CS(const unsigned char *, unsigned char *, int);
 #ifdef CONFIG_CIFS_WEAK_PW_HASH
 extern int calc_lanman_hash(const char *password, const char *cryptkey,
 				bool encrypt, char *lnm_session_key);
@@ -477,11 +465,33 @@ extern int CIFSSMBSetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
 		const struct nls_table *nls_codepage, int remap_special_chars);
 extern int CIFSGetExtAttr(const unsigned int xid, struct cifs_tcon *tcon,
 			const int netfid, __u64 *pExtAttrBits, __u64 *pMask);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 extern void cifs_autodisable_serverino(struct cifs_sb_info *cifs_sb);
 extern bool CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr);
+extern struct cifs_ses *sesInfoAlloc(void);
+extern void sesInfoFree(struct cifs_ses *);
+extern struct cifs_tcon *tconInfoAlloc(void);
+extern void tconInfoFree(struct cifs_tcon *);
+extern int cifs_crypto_shash_allocate(struct TCP_Server_Info *);
+extern void cifs_crypto_shash_release(struct TCP_Server_Info *);
+extern int cifs_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server,
+		   __u32 *pexpected_response_sequence_number);
+extern int cifs_sign_smbv(struct kvec *iov, int n_vec, struct TCP_Server_Info *,
+			  __u32 *);
+extern int cifs_sign_smb(struct smb_hdr *, struct TCP_Server_Info *, __u32 *);
+extern int cifs_verify_signature(struct smb_rqst *rqst,
+				 struct TCP_Server_Info *server,
+				__u32 expected_sequence_number);
+extern int SMBNTencrypt(unsigned char *, unsigned char *, unsigned char *,
+			const struct nls_table *);
+extern int setup_ntlm_response(struct cifs_ses *, const struct nls_table *);
+extern int setup_ntlmv2_rsp(struct cifs_ses *, const struct nls_table *);
+extern int calc_seckey(struct cifs_ses *);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSCheckMFSymlink(struct cifs_fattr *fattr,
 		const unsigned char *path,
 		struct cifs_sb_info *cifs_sb, unsigned int xid);
+#endif
 extern int mdfour(unsigned char *, unsigned char *, int);
 extern int E_md4hash(const unsigned char *passwd, unsigned char *p16,
 			const struct nls_table *codepage);

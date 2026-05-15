@@ -3088,6 +3088,7 @@ ip_connect(struct TCP_Server_Info *server)
 	return generic_ip_connect(server);
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
 			  struct cifs_sb_info *cifs_sb, struct smb_vol *vol_info)
 {
@@ -3187,6 +3188,7 @@ void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
 		}
 	}
 }
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 int cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 			struct cifs_sb_info *cifs_sb)
@@ -3551,6 +3553,7 @@ try_mount_again:
 	}
 
 	/* tell server which Unix caps we support */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(tcon->ses)) {
 		/* reset of caps checks mount to see if unix extensions
 		   disabled for just this mount */
@@ -3562,6 +3565,7 @@ try_mount_again:
 			goto mount_fail_check;
 		}
 	} else
+#endif
 		tcon->unix_ext = 0; /* server does not support them */
 
 	/* do not care if a following call succeed - informational */
@@ -3700,6 +3704,7 @@ out:
  * Issue a TREE_CONNECT request. Note that for IPC$ shares, that the tcon
  * pointer may be NULL.
  */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
 	 const char *tree, struct cifs_tcon *tcon,
@@ -3856,6 +3861,7 @@ CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
 	cifs_buf_release(smb_buffer);
 	return rc;
 }
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 void
 cifs_umount(struct cifs_sb_info *cifs_sb)
@@ -4031,8 +4037,10 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 		goto out;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(ses))
 		reset_cifs_unix_caps(0, tcon, NULL, vol_info);
+#endif
 out:
 	kfree(vol_info->username);
 	kfree(vol_info->domainname);
