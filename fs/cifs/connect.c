@@ -1235,9 +1235,9 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 
 	vol->actimeo = CIFS_DEF_ACTIMEO;
 
-	/* default to SMB3 which supports SMB2, SMB3, SMB3.1.1 dialects */
-	vol->ops = &smb30_operations;
-	vol->vals = &smb30_values;
+	/* default to SMB2.0 */
+	vol->ops = &smb21_operations;
+	vol->vals = &smb20_values;
 
 	if (!mountdata)
 		goto cifs_parse_mount_err;
