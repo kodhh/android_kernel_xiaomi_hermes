@@ -53,11 +53,19 @@ int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 	}
 
 	for (name = buf; name < (buf + list_size); name += strlen(name) + 1) {
+		error = security_inode_copy_up_xattr(name);
+		if (error < 0 && error != -EOPNOTSUPP)
+			goto out_free_value;
+		if (error == 1) {
+			error = 0;
+			continue;
+		}
 		size = vfs_getxattr(old, name, value, XATTR_SIZE_MAX);
 		if (size <= 0) {
 			error = size;
 			goto out_free_value;
 		}
+
 		error = vfs_setxattr(new, name, value, size, 0);
 		if (error)
 			goto out_free_value;
@@ -336,6 +344,11 @@ int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	cap_raise(override_cred->cap_effective, CAP_FSETID);
 	cap_raise(override_cred->cap_effective, CAP_CHOWN);
 	cap_raise(override_cred->cap_effective, CAP_MKNOD);
+
+	err = security_inode_copy_up(lowerpath->dentry, &override_cred);
+	if (err < 0)
+		goto out_free_cred;
+
 	old_cred = override_creds(override_cred);
 
 	err = -EIO;
@@ -366,6 +379,7 @@ out_unlock:
 	unlock_rename(workdir, upperdir);
 out_put_cred:
 	revert_creds(old_cred);
+out_free_cred:
 	put_cred(override_cred);
 
 out_free_link:

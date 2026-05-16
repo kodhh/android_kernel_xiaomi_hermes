@@ -988,13 +988,15 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_root = root_dentry;
 	sb->s_fs_info = ufs;
 
-	/* Clone security mount options from the upper superblock.
+	/* Clone security mount options from the upper or lower superblock.
 	 * This ensures SELinux uses xattr-based labeling (SECURITY_FS_USE_XATTR)
 	 * instead of falling back to SECURITY_FS_USE_NONE, which would cause
 	 * all files on the overlay to appear as "unlabeled".
 	 */
 	if (ufs->upper_mnt)
 		security_sb_clone_mnt_opts(ufs->upper_mnt->mnt_sb, sb);
+	else if (ufs->numlower)
+		security_sb_clone_mnt_opts(ufs->lower_mnt[0]->mnt_sb, sb);
 
 	return 0;
 
