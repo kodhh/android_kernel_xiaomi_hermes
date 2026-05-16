@@ -186,7 +186,8 @@ static int cap_inode_mknod(struct inode *inode, struct dentry *dentry,
 }
 
 static int cap_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
-			    struct inode *new_inode, struct dentry *new_dentry)
+			    struct inode *new_inode, struct dentry *new_dentry,
+			    unsigned int flags)
 {
 	return 0;
 }
@@ -290,7 +291,8 @@ static int cap_path_link(struct dentry *old_dentry, struct path *new_dir,
 }
 
 static int cap_path_rename(struct path *old_path, struct dentry *old_dentry,
-			   struct path *new_path, struct dentry *new_dentry)
+			   struct path *new_path, struct dentry *new_dentry,
+			   unsigned int flags)
 {
 	return 0;
 }

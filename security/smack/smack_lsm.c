@@ -708,7 +708,8 @@ static int smack_inode_rmdir(struct inode *dir, struct dentry *dentry)
 static int smack_inode_rename(struct inode *old_inode,
 			      struct dentry *old_dentry,
 			      struct inode *new_inode,
-			      struct dentry *new_dentry)
+			      struct dentry *new_dentry,
+			      unsigned int flags)
 {
 	int rc;
 	char *isp;

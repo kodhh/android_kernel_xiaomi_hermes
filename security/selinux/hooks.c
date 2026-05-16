@@ -2781,7 +2781,8 @@ static int selinux_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t
 }
 
 static int selinux_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
-				struct inode *new_inode, struct dentry *new_dentry)
+				struct inode *new_inode, struct dentry *new_dentry,
+				unsigned int flags)
 {
 	return may_rename(old_inode, old_dentry, new_inode, new_dentry);
 }

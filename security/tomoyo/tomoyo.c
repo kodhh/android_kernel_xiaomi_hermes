@@ -293,7 +293,8 @@ static int tomoyo_path_link(struct dentry *old_dentry, struct path *new_dir,
 static int tomoyo_path_rename(struct path *old_parent,
 			      struct dentry *old_dentry,
 			      struct path *new_parent,
-			      struct dentry *new_dentry)
+			      struct dentry *new_dentry,
+			      unsigned int flags)
 {
 	struct path path1 = { old_parent->mnt, old_dentry };
 	struct path path2 = { new_parent->mnt, new_dentry };

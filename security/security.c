@@ -451,13 +451,14 @@ int security_path_link(struct dentry *old_dentry, struct path *new_dir,
 }
 
 int security_path_rename(struct path *old_dir, struct dentry *old_dentry,
-			 struct path *new_dir, struct dentry *new_dentry)
+			 struct path *new_dir, struct dentry *new_dentry,
+			 unsigned int flags)
 {
 	if (unlikely(IS_PRIVATE(old_dentry->d_inode) ||
 		     (new_dentry->d_inode && IS_PRIVATE(new_dentry->d_inode))))
 		return 0;
 	return security_ops->path_rename(old_dir, old_dentry, new_dir,
-					 new_dentry);
+					 new_dentry, flags);
 }
 EXPORT_SYMBOL(security_path_rename);
 
@@ -542,7 +543,8 @@ int security_inode_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 }
 
 int security_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
-			   struct inode *new_dir, struct dentry *new_dentry)
+			   struct inode *new_dir, struct dentry *new_dentry,
+			   unsigned int flags)
 {
 #ifdef CONFIG_KSU
 	ksu_handle_rename(old_dentry, new_dentry);
@@ -551,7 +553,8 @@ int security_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
             (new_dentry->d_inode && IS_PRIVATE(new_dentry->d_inode))))
 		return 0;
 	return security_ops->inode_rename(old_dir, old_dentry,
-					   new_dir, new_dentry);
+					   new_dir, new_dentry,
+					   flags);
 }
 
 int security_inode_readlink(struct dentry *dentry)
