@@ -2331,13 +2331,13 @@ static void __d_move(struct dentry *dentry, struct dentry *target,
 		dentry->d_flags |= DCACHE_RCUACCESS;
 		dentry->d_parent = target->d_parent;
 		target->d_parent = target;
-		list_del_init(&target->d_child);
-		list_move(&dentry->d_child, &dentry->d_parent->d_subdirs);
+		INIT_LIST_HEAD(&target->d_child);
+		list_add(&dentry->d_child, &dentry->d_parent->d_subdirs);
 	} else {
 		/* swapping two dentries or moving */
 		swap(dentry->d_parent, target->d_parent);
-		list_move(&target->d_child, &target->d_parent->d_subdirs);
-		list_move(&dentry->d_child, &dentry->d_parent->d_subdirs);
+		list_add(&target->d_child, &target->d_parent->d_subdirs);
+		list_add(&dentry->d_child, &dentry->d_parent->d_subdirs);
 		if (exchange)
 			fsnotify_d_move(target);
 		fsnotify_d_move(dentry);
