@@ -9,6 +9,7 @@
 
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/cred.h>
 #include <linux/xattr.h>
 #include "overlayfs.h"
 
@@ -45,6 +46,19 @@ int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 	int err;
 	struct dentry *upperdentry;
 
+	/*
+	 * Check for permissions before trying to copy-up.  This is redundant
+	 * since it will be rechecked later by ->setattr() on upper dentry.  But
+	 * without this, copy-up can be triggered by just about anybody.
+	 *
+	 * We don't initialize inode->size, which just means that
+	 * inode_newsize_ok() will always check against MAX_LFS_FILESIZE and not
+	 * check for a swapfile (which this won't be anyway).
+	 */
+	err = inode_change_ok(dentry->d_inode, attr);
+	if (err)
+		return err;
+
 	err = ovl_want_write(dentry);
 	if (err)
 		goto out;
@@ -76,6 +90,7 @@ int ovl_permission(struct inode *inode, int mask)
 	struct ovl_entry *oe;
 	struct dentry *alias = NULL;
 	struct inode *realinode;
+	const struct cred *old_cred;
 	struct dentry *realdentry;
 	bool is_upper;
 	int err;
@@ -128,7 +143,18 @@ int ovl_permission(struct inode *inode, int mask)
 			goto out_dput;
 	}
 
+	/*
+	 * Check overlay inode with the creds of task and underlying inode
+	 * with creds of mounter
+	 */
+	err = generic_permission(inode, mask);
+	if (err)
+		goto out_dput;
+
+	old_cred = ovl_override_creds(inode->i_sb);
 	err = __inode_permission(realinode, mask);
+	ovl_revert_creds(old_cred);
+
 out_dput:
 	dput(alias);
 	return err;

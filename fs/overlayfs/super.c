@@ -30,6 +30,7 @@ struct ovl_config {
 	char *lowerdir;
 	char *upperdir;
 	char *workdir;
+	bool override_creds;
 };
 
 /* private information held for overlayfs's superblock */
@@ -41,6 +42,8 @@ struct ovl_fs {
 	long lower_namelen;
 	/* pathnames of lower and upper dirs, for show_options */
 	struct ovl_config config;
+	/* creds of process who forced instantiation of super block */
+	const struct cred *creator_cred;
 };
 
 struct ovl_dir_cache;
@@ -241,6 +244,21 @@ bool ovl_is_whiteout(struct dentry *dentry)
 	struct inode *inode = dentry->d_inode;
 
 	return inode && IS_WHITEOUT(inode);
+}
+
+const struct cred *ovl_override_creds(struct super_block *sb)
+{
+	struct ovl_fs *ofs = sb->s_fs_info;
+
+	if (!ofs->config.override_creds)
+		return NULL;
+	return override_creds(ofs->creator_cred);
+}
+
+void ovl_revert_creds(const struct cred *old_cred)
+{
+	if (old_cred)
+		revert_creds(old_cred);
 }
 
 static bool ovl_is_opaquedir(struct dentry *dentry)
@@ -477,6 +495,7 @@ static void ovl_put_super(struct super_block *sb)
 	kfree(ufs->config.lowerdir);
 	kfree(ufs->config.upperdir);
 	kfree(ufs->config.workdir);
+	put_cred(ufs->creator_cred);
 	kfree(ufs);
 }
 
@@ -512,6 +531,17 @@ static int ovl_statfs(struct dentry *dentry, struct kstatfs *buf)
  * Prints the mount options for a given superblock.
  * Returns zero; does not fail.
  */
+static bool __read_mostly ovl_override_creds_def = true;
+module_param_named(override_creds, ovl_override_creds_def, bool, 0644);
+MODULE_PARM_DESC(ovl_override_creds_def,
+		 "Use mounter's credentials for accesses");
+
+/**
+ * ovl_show_options
+ *
+ * Prints the mount options for a given superblock.
+ * Returns zero; does not fail.
+ */
 static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 {
 	struct super_block *sb = dentry->d_sb;
@@ -522,6 +552,9 @@ static int ovl_show_options(struct seq_file *m, struct dentry *dentry)
 		seq_printf(m, ",upperdir=%s", ufs->config.upperdir);
 		seq_printf(m, ",workdir=%s", ufs->config.workdir);
 	}
+	if (ufs->config.override_creds != ovl_override_creds_def)
+		seq_printf(m, ",override_creds=%s",
+				ufs->config.override_creds ? "on" : "off");
 	return 0;
 }
 
@@ -546,6 +579,8 @@ enum {
 	OPT_LOWERDIR,
 	OPT_UPPERDIR,
 	OPT_WORKDIR,
+	OPT_OVERRIDE_CREDS_ON,
+	OPT_OVERRIDE_CREDS_OFF,
 	OPT_ERR,
 };
 
@@ -553,6 +588,8 @@ static const match_table_t ovl_tokens = {
 	{OPT_LOWERDIR,			"lowerdir=%s"},
 	{OPT_UPPERDIR,			"upperdir=%s"},
 	{OPT_WORKDIR,			"workdir=%s"},
+	{OPT_OVERRIDE_CREDS_ON,		"override_creds=on"},
+	{OPT_OVERRIDE_CREDS_OFF,	"override_creds=off"},
 	{OPT_ERR,			NULL}
 };
 
@@ -583,6 +620,7 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 {
 	char *p;
 
+	config->override_creds = ovl_override_creds_def;
 	while ((p = ovl_next_opt(&opt)) != NULL) {
 		int token;
 		substring_t args[MAX_OPT_ARGS];
@@ -611,6 +649,14 @@ static int ovl_parse_opt(char *opt, struct ovl_config *config)
 			config->workdir = match_strdup(&args[0]);
 			if (!config->workdir)
 				return -ENOMEM;
+			break;
+
+		case OPT_OVERRIDE_CREDS_ON:
+			config->override_creds = true;
+			break;
+
+		case OPT_OVERRIDE_CREDS_OFF:
+			config->override_creds = false;
 			break;
 
 		default:
@@ -960,10 +1006,14 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 
 	sb->s_d_op = &ovl_dentry_operations;
 
+	ufs->creator_cred = prepare_creds();
+	if (!ufs->creator_cred)
+		goto out_put_lower_mnt;
+
 	err = -ENOMEM;
 	oe = ovl_alloc_entry(numlower);
 	if (!oe)
-		goto out_put_lower_mnt;
+		goto out_put_cred;
 
 	root_dentry = d_make_root(ovl_new_inode(sb, S_IFDIR, oe));
 	if (!root_dentry)
@@ -1002,6 +1052,8 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 
 out_free_oe:
 	kfree(oe);
+out_put_cred:
+	put_cred(ufs->creator_cred);
 out_put_lower_mnt:
 	for (i = 0; i < ufs->numlower; i++)
 		mntput(ufs->lower_mnt[i]);
