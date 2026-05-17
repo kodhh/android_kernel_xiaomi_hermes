@@ -159,6 +159,19 @@ smb2_dump_detail(void *buf)
 }
 
 static bool
+smb2_is_session_expired(char *buf)
+{
+	struct smb2_hdr *hdr = (struct smb2_hdr *)buf;
+
+	if (hdr->Status != STATUS_NETWORK_SESSION_EXPIRED &&
+	    hdr->Status != STATUS_USER_SESSION_DELETED)
+		return false;
+
+	cifs_dbg(FYI, "Session expired or deleted\n");
+	return true;
+}
+
+static bool
 smb2_need_neg(struct TCP_Server_Info *server)
 {
 	return server->max_read == 0;
@@ -628,6 +641,7 @@ struct smb_version_operations smb21_operations = {
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
 	.calc_signature = smb2_calc_signature,
+	.is_session_expired = smb2_is_session_expired,
 	.dir_needs_close = smb2_dir_needs_close,
 };
 
@@ -696,6 +710,7 @@ struct smb_version_operations smb30_operations = {
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
 	.calc_signature = smb3_calc_signature,
+	.is_session_expired = smb2_is_session_expired,
 	.generate_signingkey = generate_smb3signingkey,
 	.dir_needs_close = smb2_dir_needs_close,
 };
@@ -764,6 +779,7 @@ struct smb_version_operations smb311_operations = {
 	.set_lease_key = smb2_set_lease_key,
 	.new_lease_key = smb2_new_lease_key,
 	.calc_signature = smb3_calc_signature,
+	.is_session_expired = smb2_is_session_expired,
 	.generate_signingkey = generate_smb3signingkey,
 	.dir_needs_close = smb2_dir_needs_close,
 };
