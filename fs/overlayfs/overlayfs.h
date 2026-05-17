@@ -8,8 +8,28 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/xattr.h>
 
 struct ovl_entry;
+
+struct ovl_config {
+	char *lowerdir;
+	char *upperdir;
+	char *workdir;
+	bool default_permissions;
+	bool override_creds;
+};
+
+/* private information held for overlayfs's superblock */
+struct ovl_fs {
+	struct vfsmount *upper_mnt;
+	unsigned numlower;
+	struct vfsmount **lower_mnt;
+	struct dentry *workdir;
+	long lower_namelen;
+	struct ovl_config config;
+	const struct cred *creator_cred;
+};
 
 enum ovl_path_type {
 	__OVL_PATH_PURE		= (1 << 0),
@@ -178,6 +198,7 @@ int ovl_removexattr(struct dentry *dentry, const char *name);
 
 struct inode *ovl_new_inode(struct super_block *sb, umode_t mode,
 			    struct ovl_entry *oe);
+extern const struct xattr_handler *ovl_xattr_handlers[];
 static inline void ovl_copyattr(struct inode *from, struct inode *to)
 {
 	to->i_uid = from->i_uid;

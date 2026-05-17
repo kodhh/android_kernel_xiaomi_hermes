@@ -41,6 +41,78 @@ out_dput_parent:
 	return err;
 }
 
+/*
+ * xattr handlers for sb->s_xattr - used by security modules (SELinux)
+ * to access xattrs on the underlying real inodes.
+ */
+
+static int ovl_own_xattr_get(struct dentry *dentry, const char *name,
+			      void *buffer, size_t size, int handler_flags)
+{
+	return -EOPNOTSUPP;
+}
+
+static int ovl_own_xattr_set(struct dentry *dentry, const char *name,
+			      const void *buffer, size_t size, int flags,
+			      int handler_flags)
+{
+	return -EOPNOTSUPP;
+}
+
+static const struct xattr_handler ovl_own_xattr_handler = {
+	.prefix = OVL_XATTR_PRE_NAME,
+	.get = ovl_own_xattr_get,
+	.set = ovl_own_xattr_set,
+};
+
+static int ovl_other_xattr_get(struct dentry *dentry, const char *name,
+				void *buffer, size_t size, int handler_flags)
+{
+	struct path realpath;
+
+	ovl_path_real(dentry, &realpath);
+	return vfs_getxattr(realpath.dentry, name, buffer, size);
+}
+
+static int ovl_other_xattr_set(struct dentry *dentry, const char *name,
+				const void *buffer, size_t size, int flags,
+				int handler_flags)
+{
+	struct path realpath;
+	int err;
+
+	err = ovl_want_write(dentry);
+	if (err)
+		return err;
+
+	ovl_path_real(dentry, &realpath);
+
+	if (!OVL_TYPE_UPPER(ovl_path_type(dentry))) {
+		err = ovl_copy_up(dentry);
+		if (err)
+			goto out_drop_write;
+		ovl_path_upper(dentry, &realpath);
+	}
+
+	err = vfs_setxattr(realpath.dentry, name, buffer, size, flags);
+
+out_drop_write:
+	ovl_drop_write(dentry);
+	return err;
+}
+
+static const struct xattr_handler ovl_other_xattr_handler = {
+	.prefix = "",
+	.get = ovl_other_xattr_get,
+	.set = ovl_other_xattr_set,
+};
+
+const struct xattr_handler *ovl_xattr_handlers[] = {
+	&ovl_own_xattr_handler,
+	&ovl_other_xattr_handler,
+	NULL
+};
+
 int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	int err;
@@ -151,9 +223,17 @@ int ovl_permission(struct inode *inode, int mask)
 	if (err)
 		goto out_dput;
 
-	old_cred = ovl_override_creds(inode->i_sb);
-	err = __inode_permission(realinode, mask);
-	ovl_revert_creds(old_cred);
+	/* With default_permissions, let VFS handle permission checking */
+	{
+		struct super_block *sb = inode->i_sb;
+		struct ovl_fs *ofs = sb->s_fs_info;
+
+		if (!ofs->config.default_permissions) {
+			old_cred = ovl_override_creds(sb);
+			err = __inode_permission(realinode, mask);
+			ovl_revert_creds(old_cred);
+		}
+	}
 
 out_dput:
 	dput(alias);
