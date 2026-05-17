@@ -34,7 +34,6 @@
 #include <linux/task_io_accounting_ops.h>
 #include <linux/uaccess.h>
 #include <linux/pagemap.h>
-#include <linux/random.h>
 #include <linux/xattr.h>
 #include "smb2pdu.h"
 #include "cifsglob.h"
@@ -306,46 +305,6 @@ free_rsp_buf(int resp_buftype, void *rsp)
 }
 
 
-#define OFFSET_OF_NEG_CONTEXT 0x68
-
-#define SMB2_PREAUTH_INTEGRITY_CAPABILITIES	cpu_to_le16(1)
-#define SMB2_ENCRYPTION_CAPABILITIES		cpu_to_le16(2)
-
-static void
-build_preauth_ctxt(struct smb2_preauth_neg_context *pneg_ctxt)
-{
-	pneg_ctxt->ContextType = SMB2_PREAUTH_INTEGRITY_CAPABILITIES;
-	pneg_ctxt->DataLength = cpu_to_le16(38);
-	pneg_ctxt->HashAlgorithmCount = cpu_to_le16(1);
-	pneg_ctxt->SaltLength = cpu_to_le16(SMB311_SALT_SIZE);
-	get_random_bytes(pneg_ctxt->Salt, SMB311_SALT_SIZE);
-	pneg_ctxt->HashAlgorithms = SMB2_PREAUTH_INTEGRITY_SHA512;
-}
-
-static void
-build_encrypt_ctxt(struct smb2_encryption_neg_context *pneg_ctxt)
-{
-	pneg_ctxt->ContextType = SMB2_ENCRYPTION_CAPABILITIES;
-	pneg_ctxt->DataLength = cpu_to_le16(6);
-	pneg_ctxt->CipherCount = cpu_to_le16(2);
-	pneg_ctxt->Ciphers[0] = SMB2_ENCRYPTION_AES128_GCM;
-	pneg_ctxt->Ciphers[1] = SMB2_ENCRYPTION_AES128_CCM;
-}
-
-static void
-assemble_neg_contexts(struct smb2_negotiate_req *req)
-{
-	char *pneg_ctxt = (char *)req + OFFSET_OF_NEG_CONTEXT + 4;
-
-	build_preauth_ctxt((struct smb2_preauth_neg_context *)pneg_ctxt);
-	pneg_ctxt += 2 + sizeof(struct smb2_preauth_neg_context);
-	build_encrypt_ctxt((struct smb2_encryption_neg_context *)pneg_ctxt);
-	req->NegotiateContextOffset = cpu_to_le32(OFFSET_OF_NEG_CONTEXT);
-	req->NegotiateContextCount = cpu_to_le16(2);
-	inc_rfc1001_len(req, 4 + sizeof(struct smb2_preauth_neg_context)
-			+ sizeof(struct smb2_encryption_neg_context));
-}
-
 /*
  *
  *	SMB2 Worker functions follow:
@@ -414,9 +373,6 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 
 	req->Capabilities = cpu_to_le32(ses->server->vals->req_capabilities);
 
-	if (ses->server->vals->protocol_id == SMB311_PROT_ID)
-		assemble_neg_contexts(req);
-
 	memcpy(req->ClientGUID, cifs_client_guid, SMB2_CLIENT_GUID_SIZE);
 
 	iov[0].iov_base = (char *)req;
@@ -443,10 +399,6 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 		cifs_dbg(FYI, "negotiated smb2.1 dialect\n");
 	else if (rsp->DialectRevision == cpu_to_le16(SMB30_PROT_ID))
 		cifs_dbg(FYI, "negotiated smb3.0 dialect\n");
-	else if (rsp->DialectRevision == cpu_to_le16(SMB302_PROT_ID))
-		cifs_dbg(FYI, "negotiated smb3.02 dialect\n");
-	else if (rsp->DialectRevision == cpu_to_le16(SMB311_PROT_ID))
-		cifs_dbg(FYI, "negotiated smb3.1.1 dialect\n");
 	else {
 		cifs_dbg(VFS, "Illegal dialect returned by server %d\n",
 			 le16_to_cpu(rsp->DialectRevision));
@@ -575,7 +527,7 @@ ssetup_ntlmssp_authenticate:
 	cifs_dbg(FYI, "sec_flags 0x%x\n", sec_flags);
 
 	req->hdr.SessionId = 0; /* First session, not a reauthenticate */
-	req->Flags = 0; /* MBZ */
+	req->VcNumber = 0; /* MBZ */
 	/* to enable echos and oplocks */
 	req->hdr.CreditRequest = cpu_to_le16(3);
 
@@ -701,40 +653,12 @@ ssetup_ntlmssp_authenticate:
 		goto ssetup_exit;
 
 	ses->session_flags = le16_to_cpu(rsp->SessionFlags);
-	if (ses->session_flags & SMB2_SESSION_FLAG_ENCRYPT_DATA)
-		cifs_dbg(VFS, "SMB3 encryption not supported yet\n");
 ssetup_exit:
 	free_rsp_buf(resp_buftype, rsp);
 
 	/* if ntlmssp, and negotiate succeeded, proceed to authenticate phase */
 	if ((phase == NtLmChallenge) && (rc == 0))
 		goto ssetup_ntlmssp_authenticate;
-
-	if (!rc) {
-		mutex_lock(&server->srv_mutex);
-		if (server->ops->generate_signingkey) {
-			rc = server->ops->generate_signingkey(ses);
-			if (rc) {
-				cifs_dbg(FYI,
-					"SMB3 session key generation failed\n");
-				mutex_unlock(&server->srv_mutex);
-				goto keygen_exit;
-			}
-		}
-		if (!server->session_estab) {
-			server->sequence_number = 0x2;
-			server->session_estab = true;
-		}
-		mutex_unlock(&server->srv_mutex);
-
-		cifs_dbg(FYI, "SMB2/3 session established successfully\n");
-		spin_lock(&GlobalMid_Lock);
-		ses->status = CifsGood;
-		ses->need_reconnect = false;
-		spin_unlock(&GlobalMid_Lock);
-	}
-
-keygen_exit:
 	return rc;
 }
 

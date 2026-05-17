@@ -82,8 +82,8 @@
 
 #define NUMBER_OF_SMB2_COMMANDS	0x0013
 
-/* 52 transform hdr + 64 hdr + 88 create rsp */
-#define MAX_SMB2_HDR_SIZE 204
+/* BB FIXME - analyze following length BB */
+#define MAX_SMB2_HDR_SIZE 0x78 /* 4 len + 64 hdr + (2*24 wct) + 2 bct + 2 pad */
 
 #define SMB2_PROTO_NUMBER __constant_cpu_to_le32(0x424d53fe)
 
@@ -122,18 +122,6 @@ struct smb2_pdu {
 	__le16 StructureSize2; /* size of wct area (varies, request specific) */
 } __packed;
 
-struct smb2_transform_hdr {
-	__be32 smb2_buf_length;
-	__u8   ProtocolId[4];	/* 0xFD 'S' 'M' 'B' */
-	__u8   Signature[16];
-	__u8   Nonce[11];
-	__u8   Reserved[5];
-	__le32 OriginalMessageSize;
-	__u16  Reserved1;
-	__le16 EncryptionAlgorithm;
-	__u64  SessionId;
-} __packed;
-
 /*
  *	SMB2 flag definitions
  */
@@ -166,12 +154,6 @@ struct smb2_err_rsp {
 
 extern __u8 cifs_client_guid[SMB2_CLIENT_GUID_SIZE];
 
-#define SMB2_SIGNATURE_SIZE (16)
-#define SMB2_NTLMV2_SESSKEY_SIZE (16)
-#define SMB2_HMACSHA256_SIZE (32)
-#define SMB2_CMACAES_SIZE (16)
-#define SMB3_SIGNKEY_SIZE (16)
-
 struct smb2_negotiate_req {
 	struct smb2_hdr hdr;
 	__le16 StructureSize; /* Must be 36 */
@@ -180,10 +162,7 @@ struct smb2_negotiate_req {
 	__le16 Reserved;	/* MBZ */
 	__le32 Capabilities;
 	__u8   ClientGUID[SMB2_CLIENT_GUID_SIZE];
-	/* In SMB3.02 and earlier next three were MBZ le64 ClientStartTime */
-	__le32 NegotiateContextOffset; /* SMB3.1.1 only. MBZ earlier */
-	__le16 NegotiateContextCount; /* SMB3.1.1 only. MBZ earlier */
-	__le16 Reserved2;
+	__le64 ClientStartTime;	/* MBZ */
 	__le16 Dialects[1]; /* One dialect (vers=) at a time for now */
 } __packed;
 
@@ -191,8 +170,6 @@ struct smb2_negotiate_req {
 #define SMB20_PROT_ID 0x0202
 #define SMB21_PROT_ID 0x0210
 #define SMB30_PROT_ID 0x0300
-#define SMB302_PROT_ID 0x0302
-#define SMB311_PROT_ID 0x0311
 #define BAD_PROT_ID   0xFFFF
 
 /* SecurityMode flags */
@@ -210,36 +187,12 @@ struct smb2_negotiate_req {
 #define SMB2_NT_FIND			0x00100000
 #define SMB2_LARGE_FILES		0x00200000
 
-#define SMB311_SALT_SIZE			32
-#define SMB2_PREAUTH_INTEGRITY_SHA512	cpu_to_le16(0x0001)
-
-struct smb2_preauth_neg_context {
-	__le16	ContextType;
-	__le16	DataLength;
-	__le32	Reserved;
-	__le16	HashAlgorithmCount;
-	__le16	SaltLength;
-	__le16	HashAlgorithms;
-	__u8	Salt[SMB311_SALT_SIZE];
-} __packed;
-
-#define SMB2_ENCRYPTION_AES128_CCM	cpu_to_le16(0x0001)
-#define SMB2_ENCRYPTION_AES128_GCM	cpu_to_le16(0x0002)
-
-struct smb2_encryption_neg_context {
-	__le16	ContextType;
-	__le16	DataLength;
-	__le32	Reserved;
-	__le16	CipherCount;
-	__le16	Ciphers[2];
-} __packed;
-
 struct smb2_negotiate_rsp {
 	struct smb2_hdr hdr;
 	__le16 StructureSize;	/* Must be 65 */
 	__le16 SecurityMode;
 	__le16 DialectRevision;
-	__le16 NegotiateContextCount; /* Prior to SMB3.1.1 was Reserved & MBZ */
+	__le16 Reserved;	/* MBZ */
 	__u8   ServerGUID[16];
 	__le32 Capabilities;
 	__le32 MaxTransactSize;
@@ -249,14 +202,14 @@ struct smb2_negotiate_rsp {
 	__le64 ServerStartTime;
 	__le16 SecurityBufferOffset;
 	__le16 SecurityBufferLength;
-	__le32 NegotiateContextOffset; /* Pre:SMB3.1.1 was reserved/ignored */
+	__le32 Reserved2;	/* may be any value, ignore */
 	__u8   Buffer[1];	/* variable length GSS security buffer */
 } __packed;
 
 struct smb2_sess_setup_req {
 	struct smb2_hdr hdr;
 	__le16 StructureSize; /* Must be 25 */
-	__u8   Flags;
+	__u8   VcNumber;
 	__u8   SecurityMode;
 	__le32 Capabilities;
 	__le32 Channel;
@@ -266,14 +219,9 @@ struct smb2_sess_setup_req {
 	__u8   Buffer[1];	/* variable length GSS security buffer */
 } __packed;
 
-/* Session Flags */
-#define SMB2_SESSION_REQ_FLAG_BINDING		0x01
-#define SMB2_SESSION_REQ_FLAG_ENCRYPT_DATA	0x04
-
 /* Currently defined SessionFlags */
 #define SMB2_SESSION_FLAG_IS_GUEST	0x0001
 #define SMB2_SESSION_FLAG_IS_NULL	0x0002
-#define SMB2_SESSION_FLAG_ENCRYPT_DATA	0x0004
 struct smb2_sess_setup_rsp {
 	struct smb2_hdr hdr;
 	__le16 StructureSize; /* Must be 9 */

@@ -52,7 +52,9 @@
 #include "nterr.h"
 #include "rfc1002pdu.h"
 #include "fscache.h"
+#ifdef CONFIG_CIFS_SMB2
 #include "smb2proto.h"
+#endif
 
 #define CIFS_PORT 445
 #define RFC1001_PORT 139
@@ -272,11 +274,10 @@ static const match_table_t cifs_cacheflavor_tokens = {
 };
 
 static const match_table_t cifs_smb_version_tokens = {
+	{ Smb_1, SMB1_VERSION_STRING },
 	{ Smb_20, SMB20_VERSION_STRING},
 	{ Smb_21, SMB21_VERSION_STRING },
 	{ Smb_30, SMB30_VERSION_STRING },
-	{ Smb_311, SMB311_VERSION_STRING },
-	{ Smb_version_err, NULL }
 };
 
 static int ip_connect(struct TCP_Server_Info *server);
@@ -314,7 +315,9 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		server->tcpStatus = CifsNeedReconnect;
 	spin_unlock(&GlobalMid_Lock);
 	server->maxBuf = 0;
+#ifdef CONFIG_CIFS_SMB2
 	server->max_read = 0;
+#endif
 
 	cifs_dbg(FYI, "Reconnecting tcp session\n");
 
@@ -819,13 +822,6 @@ standard_receive3(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 		cifs_dump_mem("Bad SMB: ", buf,
 			min_t(unsigned int, server->total_read, 48));
 
-	if (server->ops->is_session_expired &&
-	    server->ops->is_session_expired(buf)) {
-		cifs_reconnect(server);
-		wake_up(&server->response_q);
-		return -1;
-	}
-
 	if (server->ops->is_status_pending &&
 	    server->ops->is_status_pending(buf, server, length))
 		return -1;
@@ -1113,6 +1109,11 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 	substring_t args[MAX_OPT_ARGS];
 
 	switch (match_token(value, cifs_smb_version_tokens, args)) {
+	case Smb_1:
+		vol->ops = &smb1_operations;
+		vol->vals = &smb1_values;
+		break;
+#ifdef CONFIG_CIFS_SMB2
 	case Smb_20:
 		vol->ops = &smb21_operations; /* currently identical with 2.1 */
 		vol->vals = &smb20_values;
@@ -1125,10 +1126,7 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 		vol->ops = &smb30_operations;
 		vol->vals = &smb30_values;
 		break;
-	case Smb_311:
-		vol->ops = &smb311_operations;
-		vol->vals = &smb311_values;
-		break;
+#endif
 	default:
 		cifs_dbg(VFS, "Unknown vers= option specified: %s\n", value);
 		return 1;
@@ -1242,9 +1240,9 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 
 	vol->actimeo = CIFS_DEF_ACTIMEO;
 
-	/* default to SMB2.0 */
-	vol->ops = &smb21_operations;
-	vol->vals = &smb20_values;
+	/* FIXME: add autonegotiation -- for now, SMB1 is default */
+	vol->ops = &smb1_operations;
+	vol->vals = &smb1_values;
 
 	if (!mountdata)
 		goto cifs_parse_mount_err;
@@ -2093,6 +2091,7 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 
 	cancel_delayed_work_sync(&server->echo);
 
+#ifdef CONFIG_CIFS_SMB2
 	if (from_reconnect)
 		/*
 		 * Avoid deadlock here: reconnect work calls
@@ -2103,6 +2102,7 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 		cancel_delayed_work(&server->reconnect);
 	else
 		cancel_delayed_work_sync(&server->reconnect);
+#endif
 
 	spin_lock(&GlobalMid_Lock);
 	server->tcpStatus = CifsExiting;
@@ -2174,8 +2174,10 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	INIT_LIST_HEAD(&tcp_ses->tcp_ses_list);
 	INIT_LIST_HEAD(&tcp_ses->smb_ses_list);
 	INIT_DELAYED_WORK(&tcp_ses->echo, cifs_echo_request);
+#ifdef CONFIG_CIFS_SMB2
 	INIT_DELAYED_WORK(&tcp_ses->reconnect, smb2_reconnect_server);
 	mutex_init(&tcp_ses->reconnect_mutex);
+#endif
 	memcpy(&tcp_ses->srcaddr, &volume_info->srcaddr,
 	       sizeof(tcp_ses->srcaddr));
 	memcpy(&tcp_ses->dstaddr, &volume_info->dstaddr,
@@ -3095,7 +3097,6 @@ ip_connect(struct TCP_Server_Info *server)
 	return generic_ip_connect(server);
 }
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
 			  struct cifs_sb_info *cifs_sb, struct smb_vol *vol_info)
 {
@@ -3195,7 +3196,6 @@ void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
 		}
 	}
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 int cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 			struct cifs_sb_info *cifs_sb)
@@ -3560,7 +3560,6 @@ try_mount_again:
 	}
 
 	/* tell server which Unix caps we support */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(tcon->ses)) {
 		/* reset of caps checks mount to see if unix extensions
 		   disabled for just this mount */
@@ -3572,7 +3571,6 @@ try_mount_again:
 			goto mount_fail_check;
 		}
 	} else
-#endif
 		tcon->unix_ext = 0; /* server does not support them */
 
 	/* do not care if a following call succeed - informational */
@@ -3711,7 +3709,6 @@ out:
  * Issue a TREE_CONNECT request. Note that for IPC$ shares, that the tcon
  * pointer may be NULL.
  */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
 	 const char *tree, struct cifs_tcon *tcon,
@@ -3868,7 +3865,6 @@ CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
 	cifs_buf_release(smb_buffer);
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 void
 cifs_umount(struct cifs_sb_info *cifs_sb)
@@ -4044,14 +4040,12 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 		goto out;
 	}
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(ses))
 		reset_cifs_unix_caps(0, tcon, NULL, vol_info);
-#endif
 out:
 	kfree(vol_info->username);
 	kfree(vol_info->domainname);
-	kzfree(vol_info->password);
+	kfree(vol_info->password);
 	kfree(vol_info);
 
 	return tcon;

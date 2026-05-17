@@ -269,7 +269,9 @@ int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
 {
 	int i;
 	int rc;
-	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
+	char password_with_pad[CIFS_ENCPWD_SIZE];
+
+	memset(password_with_pad, 0, CIFS_ENCPWD_SIZE);
 	if (password)
 		strncpy(password_with_pad, password, CIFS_ENCPWD_SIZE);
 
@@ -328,7 +330,6 @@ build_avpair_blob(struct cifs_ses *ses, const struct nls_table *nls_cp)
 	 * ( for NTLMSSP_AV_NB_DOMAIN_NAME followed by NTLMSSP_AV_EOL ) +
 	 * unicode length of a netbios domain name
 	 */
-	kzfree(ses->auth_key.response);
 	ses->auth_key.len = size + 2 * dlen;
 	ses->auth_key.response = kzalloc(ses->auth_key.len, GFP_KERNEL);
 	if (!ses->auth_key.response) {
@@ -714,17 +715,7 @@ cifs_crypto_shash_release(struct TCP_Server_Info *server)
 	if (server->secmech.hmacmd5)
 		crypto_free_shash(server->secmech.hmacmd5);
 
-	if (server->secmech.sha512)
-		crypto_free_shash(server->secmech.sha512);
-
-	if (server->secmech.cmacaes)
-		crypto_free_shash(server->secmech.cmacaes);
-
 	kfree(server->secmech.sdeschmacsha256);
-
-	kfree(server->secmech.sdescsha512);
-
-	kfree(server->secmech.sdesccmacaes);
 
 	kfree(server->secmech.sdeschmacmd5);
 
@@ -787,50 +778,8 @@ cifs_crypto_shash_allocate(struct TCP_Server_Info *server)
 	server->secmech.sdeschmacsha256->shash.tfm = server->secmech.hmacsha256;
 	server->secmech.sdeschmacsha256->shash.flags = 0x0;
 
-	server->secmech.sha512 = crypto_alloc_shash("sha512", 0, 0);
-	if (IS_ERR(server->secmech.sha512)) {
-		cifs_dbg(VFS, "could not allocate crypto sha512\n");
-		rc = PTR_ERR(server->secmech.sha512);
-		goto crypto_allocate_sha512_fail;
-	}
-
-	size = sizeof(struct shash_desc) +
-			crypto_shash_descsize(server->secmech.sha512);
-	server->secmech.sdescsha512 = kmalloc(size, GFP_KERNEL);
-	if (!server->secmech.sdescsha512) {
-		rc = -ENOMEM;
-		goto crypto_allocate_sha512_sdesc_fail;
-	}
-	server->secmech.sdescsha512->shash.tfm = server->secmech.sha512;
-	server->secmech.sdescsha512->shash.flags = 0x0;
-
-	server->secmech.cmacaes = crypto_alloc_shash("cmac(aes)", 0, 0);
-	if (IS_ERR(server->secmech.cmacaes)) {
-		cifs_dbg(VFS, "could not allocate crypto cmac-aes\n");
-		rc = PTR_ERR(server->secmech.cmacaes);
-		goto crypto_allocate_cmacaes_fail;
-	}
-
-	size = sizeof(struct shash_desc) +
-			crypto_shash_descsize(server->secmech.cmacaes);
-	server->secmech.sdesccmacaes = kmalloc(size, GFP_KERNEL);
-	if (!server->secmech.sdesccmacaes) {
-		rc = -ENOMEM;
-		goto crypto_allocate_cmacaes_sdesc_fail;
-	}
-	server->secmech.sdesccmacaes->shash.tfm = server->secmech.cmacaes;
-	server->secmech.sdesccmacaes->shash.flags = 0x0;
-
 	return 0;
 
-crypto_allocate_cmacaes_sdesc_fail:
-	crypto_free_shash(server->secmech.cmacaes);
-
-crypto_allocate_cmacaes_fail:
-crypto_allocate_sha512_sdesc_fail:
-	crypto_free_shash(server->secmech.sha512);
-
-crypto_allocate_sha512_fail:
 crypto_allocate_hmacsha256_sdesc_fail:
 	kfree(server->secmech.sdescmd5);
 

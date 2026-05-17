@@ -865,7 +865,6 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 	return rc;
 }
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static struct cifs_ntsd *get_cifs_acl_by_fid(struct cifs_sb_info *cifs_sb,
 		__u16 fid, u32 *pacllen)
 {
@@ -987,7 +986,6 @@ out:
 	cifs_put_tlink(tlink);
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 /* Translate the CIFS ACL (simlar to NTFS ACL) for a file into mode bits */
 int
@@ -1000,14 +998,10 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 
 	cifs_dbg(NOISY, "converting ACL to mode for %s\n", path);
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (pfid)
 		pntsd = get_cifs_acl_by_fid(cifs_sb, *pfid, &acllen);
 	else
 		pntsd = get_cifs_acl(cifs_sb, inode, path, &acllen);
-#else
-	pntsd = NULL;
-#endif
 
 	/* if we can retrieve the ACL, now parse Access Control Entries, ACEs */
 	if (IS_ERR(pntsd)) {

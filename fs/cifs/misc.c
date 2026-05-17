@@ -29,7 +29,9 @@
 #include "smberr.h"
 #include "nterr.h"
 #include "cifs_unicode.h"
+#ifdef CONFIG_CIFS_SMB2
 #include "smb2pdu.h"
+#endif
 
 extern mempool_t *cifs_sm_req_poolp;
 extern mempool_t *cifs_req_poolp;
@@ -97,10 +99,13 @@ sesInfoFree(struct cifs_ses *buf_to_free)
 	kfree(buf_to_free->serverOS);
 	kfree(buf_to_free->serverDomain);
 	kfree(buf_to_free->serverNOS);
-	kzfree(buf_to_free->password);
+	if (buf_to_free->password) {
+		memset(buf_to_free->password, 0, strlen(buf_to_free->password));
+		kfree(buf_to_free->password);
+	}
 	kfree(buf_to_free->user_name);
 	kfree(buf_to_free->domainName);
-	kzfree(buf_to_free);
+	kfree(buf_to_free);
 }
 
 struct cifs_tcon *
@@ -130,7 +135,10 @@ tconInfoFree(struct cifs_tcon *buf_to_free)
 	}
 	atomic_dec(&tconInfoAllocCount);
 	kfree(buf_to_free->nativeFileSystem);
-	kzfree(buf_to_free->password);
+	if (buf_to_free->password) {
+		memset(buf_to_free->password, 0, strlen(buf_to_free->password));
+		kfree(buf_to_free->password);
+	}
 	kfree(buf_to_free);
 }
 
@@ -140,11 +148,13 @@ cifs_buf_get(void)
 	struct smb_hdr *ret_buf = NULL;
 	size_t buf_size = sizeof(struct smb_hdr);
 
+#ifdef CONFIG_CIFS_SMB2
 	/*
 	 * SMB2 header is bigger than CIFS one - no problems to clean some
 	 * more bytes for CIFS.
 	 */
 	buf_size = sizeof(struct smb2_hdr);
+#endif
 	/*
 	 * We could use negotiated size instead of max_msgsize -
 	 * but it may be more efficient to always alloc same size
@@ -578,7 +588,9 @@ void
 cifs_add_pending_open_locked(struct cifs_fid *fid, struct tcon_link *tlink,
 			     struct cifs_pending_open *open)
 {
+#ifdef CONFIG_CIFS_SMB2
 	memcpy(open->lease_key, fid->lease_key, SMB2_LEASE_KEY_SIZE);
+#endif
 	open->oplock = CIFS_OPLOCK_NO_CHANGE;
 	open->tlink = tlink;
 	fid->pending_open = open;

@@ -45,7 +45,6 @@
 	md5_hash[8],  md5_hash[9],  md5_hash[10], md5_hash[11],\
 	md5_hash[12], md5_hash[13], md5_hash[14], md5_hash[15]
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 symlink_hash(unsigned int link_len, const char *link_str, u8 *md5_hash)
 {
@@ -90,9 +89,7 @@ symlink_hash_err:
 
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 CIFSParseMFSymlink(const u8 *buf,
 		   unsigned int buf_len,
@@ -182,9 +179,7 @@ CIFSFormatMFSymlink(u8 *buf, unsigned int buf_len, const char *link_str)
 
 	return 0;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 CIFSCreateMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		    const char *fromName, const char *toName,
@@ -241,9 +236,7 @@ CIFSCreateMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	return 0;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 CIFSQueryMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		   const unsigned char *searchName, char **symlinkinfo,
@@ -296,7 +289,6 @@ CIFSQueryMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	return 0;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 bool
 CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr)
@@ -312,7 +304,6 @@ CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr)
 	return true;
 }
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 CIFSCheckMFSymlink(struct cifs_fattr *fattr,
 		   const unsigned char *path,
@@ -393,7 +384,6 @@ out:
 	cifs_put_tlink(tlink);
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 int
 cifs_hardlink(struct dentry *old_file, struct inode *inode,
@@ -423,16 +413,12 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 		goto cifs_hl_exit;
 	}
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext)
 		rc = CIFSUnixCreateHardLink(xid, tcon, from_name, to_name,
 					    cifs_sb->local_nls,
 					    cifs_sb->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
 	else {
-#else
-	{
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 		server = tcon->ses->server;
 		if (!server->ops->create_hardlink)
 			return -ENOSYS;
@@ -542,7 +528,6 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	 * First try Minshall+French Symlinks, if configured
 	 * and fallback to UNIX Extensions Symlinks.
 	 */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS)
 		rc = CIFSQueryMFSymLink(xid, tcon, full_path, &target_path,
 					cifs_sb->local_nls,
@@ -552,7 +537,6 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	if ((rc != 0) && cap_unix(tcon->ses))
 		rc = CIFSSMBUnixQuerySymLink(xid, tcon, full_path, &target_path,
 					     cifs_sb->local_nls);
-#endif
 
 	kfree(full_path);
 out:
@@ -598,33 +582,30 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 	cifs_dbg(FYI, "symname is %s\n", symname);
 
 	/* BB what if DFS and this volume is on different share? BB */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS)
 		rc = CIFSCreateMFSymLink(xid, pTcon, full_path, symname,
 					cifs_sb);
 	else if (pTcon->unix_ext)
 		rc = CIFSUnixCreateSymLink(xid, pTcon, full_path, symname,
 					   cifs_sb->local_nls);
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	/* else
 	   rc = CIFSCreateReparseSymLink(xid, pTcon, fromName, toName,
 					cifs_sb_target->local_nls); */
 
 	if (rc == 0) {
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		if (pTcon->unix_ext)
 			rc = cifs_get_inode_info_unix(&newinode, full_path,
 						      inode->i_sb, xid);
 		else
-#endif
 			rc = cifs_get_inode_info(&newinode, full_path, NULL,
 						 inode->i_sb, xid, NULL);
-		if (rc) {
+
+		if (rc != 0) {
 			cifs_dbg(FYI, "Create symlink ok, getinodeinfo fail rc = %d\n",
 				 rc);
-			goto symlink_exit;
+		} else {
+			d_instantiate(direntry, newinode);
 		}
-		d_instantiate(direntry, newinode);
 	}
 symlink_exit:
 	kfree(full_path);
