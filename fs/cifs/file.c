@@ -110,6 +110,7 @@ static inline int cifs_get_disposition(unsigned int flags)
 		return FILE_OPEN;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int cifs_posix_open(char *full_path, struct inode **pinode,
 			struct super_block *sb, int mode, unsigned int f_flags,
 			__u32 *poplock, __u16 *pnetfid, unsigned int xid)
@@ -171,6 +172,7 @@ posix_open_ret:
 	kfree(presp_data);
 	return rc;
 }
+#endif
 
 static int
 cifs_nt_open(char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
@@ -469,6 +471,7 @@ int cifs_open(struct inode *inode, struct file *file)
 	else
 		oplock = 0;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (!tcon->broken_posix_open && tcon->unix_ext &&
 	    cap_unix(tcon->ses) && (CIFS_UNIX_POSIX_PATH_OPS_CAP &
 				le64_to_cpu(tcon->fsUnixInfo.Capability))) {
@@ -490,9 +493,10 @@ int cifs_open(struct inode *inode, struct file *file)
 			goto out;
 		/*
 		 * Else fallthrough to retry open the old way on network i/o
-		 * or DFS errors.
+		 * errors
 		 */
 	}
+#endif
 
 	if (server->ops->get_lease_key)
 		server->ops->get_lease_key(inode, &fid);
@@ -522,6 +526,7 @@ int cifs_open(struct inode *inode, struct file *file)
 
 	cifs_fscache_set_inode_cookie(inode, file);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if ((oplock & CIFS_CREATE_ACTION) && !posix_open_ok && tcon->unix_ext) {
 		/*
 		 * Time to set mode which we can not set earlier due to
@@ -539,6 +544,7 @@ int cifs_open(struct inode *inode, struct file *file)
 		CIFSSMBUnixSetFileInfo(xid, tcon, &args, fid.netfid,
 				       cfile->pid);
 	}
+#endif
 
 out:
 	kfree(full_path);
@@ -547,7 +553,9 @@ out:
 	return rc;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int cifs_push_posix_locks(struct cifsFileInfo *cfile);
+#endif
 
 /*
  * Try to reacquire byte range locks that were released when session
@@ -568,11 +576,13 @@ cifs_relock_file(struct cifsFileInfo *cfile)
 		return rc;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(tcon->ses) &&
 	    (CIFS_UNIX_FCNTL_CAP & le64_to_cpu(tcon->fsUnixInfo.Capability)) &&
 	    ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NOPOSIXBRL) == 0))
 		rc = cifs_push_posix_locks(cfile);
 	else
+#endif
 		rc = tcon->ses->server->ops->push_mand_locks(cfile);
 
 	up_read(&cinode->lock_sem);
@@ -632,6 +642,7 @@ cifs_reopen_file(struct cifsFileInfo *cfile, bool can_flush)
 	else
 		oplock = 0;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext && cap_unix(tcon->ses) &&
 	    (CIFS_UNIX_POSIX_PATH_OPS_CAP &
 				le64_to_cpu(tcon->fsUnixInfo.Capability))) {
@@ -654,6 +665,7 @@ cifs_reopen_file(struct cifsFileInfo *cfile, bool can_flush)
 		 * in the reconnect path it is important to retry hard
 		 */
 	}
+#endif
 
 	desired_access = cifs_convert_flags(cfile->f_flags);
 
@@ -1033,6 +1045,7 @@ try_again:
 	return rc;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 cifs_push_mandatory_locks(struct cifsFileInfo *cfile)
 {
@@ -1103,6 +1116,7 @@ cifs_push_mandatory_locks(struct cifsFileInfo *cfile)
 	free_xid(xid);
 	return rc;
 }
+#endif
 
 /* copied from fs/locks.c with a name change */
 #define cifs_for_each_lock(inode, lockp) \
@@ -1118,6 +1132,7 @@ struct lock_to_push {
 	__u8 type;
 };
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 cifs_push_posix_locks(struct cifsFileInfo *cfile)
 {
@@ -1205,6 +1220,7 @@ err_out:
 	}
 	goto out;
 }
+#endif
 
 static int
 cifs_push_locks(struct cifsFileInfo *cfile)
@@ -1221,11 +1237,13 @@ cifs_push_locks(struct cifsFileInfo *cfile)
 		return rc;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cap_unix(tcon->ses) &&
 	    (CIFS_UNIX_FCNTL_CAP & le64_to_cpu(tcon->fsUnixInfo.Capability)) &&
 	    ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NOPOSIXBRL) == 0))
 		rc = cifs_push_posix_locks(cfile);
 	else
+#endif
 		rc = tcon->ses->server->ops->push_mand_locks(cfile);
 
 	cinode->can_cache_brlcks = false;
@@ -1291,6 +1309,7 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 	struct TCP_Server_Info *server = tcon->ses->server;
 	__u16 netfid = cfile->fid.netfid;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (posix_lck) {
 		int posix_lock_type;
 
@@ -1307,6 +1326,7 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 				      posix_lock_type, wait_flag);
 		return rc;
 	}
+#endif
 
 	rc = cifs_lock_test(cfile, flock->fl_start, length, type, flock);
 	if (!rc)
@@ -1367,6 +1387,7 @@ cifs_free_llist(struct list_head *llist)
 	}
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 cifs_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 		  unsigned int xid)
@@ -1473,6 +1494,7 @@ cifs_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 	kfree(buf);
 	return rc;
 }
+#endif
 
 static int
 cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
@@ -1486,6 +1508,7 @@ cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
 	struct TCP_Server_Info *server = tcon->ses->server;
 	struct inode *inode = cfile->dentry->d_inode;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (posix_lck) {
 		int posix_lock_type;
 
@@ -1506,6 +1529,7 @@ cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
 				      NULL, posix_lock_type, wait_flag);
 		goto out;
 	}
+#endif
 
 	if (lock) {
 		struct cifsLockInfo *lock;

@@ -27,6 +27,7 @@
  /* treated slightly differently for reconnection purposes since we never     */
  /* want to reuse a stale file handle and only the caller knows the file info */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/vfs.h>
@@ -6417,3 +6418,4 @@ int CIFSSMBNotify(const unsigned int xid, struct cifs_tcon *tcon,
 	return rc;
 }
 #endif /* was needed for dnotify, and will be needed for inotify when VFS fix */
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */

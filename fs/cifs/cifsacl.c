@@ -864,6 +864,7 @@ static int build_sec_desc(struct cifs_ntsd *pntsd, struct cifs_ntsd *pnntsd,
 	return rc;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static struct cifs_ntsd *get_cifs_acl_by_fid(struct cifs_sb_info *cifs_sb,
 		__u16 fid, u32 *pacllen)
 {
@@ -985,12 +986,14 @@ out:
 	cifs_put_tlink(tlink);
 	return rc;
 }
+#endif
 
 /* Translate the CIFS ACL (simlar to NTFS ACL) for a file into mode bits */
 int
 cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 		  struct inode *inode, const char *path, const __u16 *pfid)
 {
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	struct cifs_ntsd *pntsd = NULL;
 	u32 acllen = 0;
 	int rc = 0;
@@ -1014,6 +1017,9 @@ cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb, struct cifs_fattr *fattr,
 	}
 
 	return rc;
+#else
+	return -EOPNOTSUPP;
+#endif
 }
 
 /* Convert mode bits to an ACL so we can update the ACL on the server */

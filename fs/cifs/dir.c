@@ -232,6 +232,7 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 		goto out;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext && cap_unix(tcon->ses) && !tcon->broken_posix_open &&
 	    (CIFS_UNIX_POSIX_PATH_OPS_CAP &
 			le64_to_cpu(tcon->fsUnixInfo.Capability))) {
@@ -278,16 +279,6 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 			 * POSIX open in samba versions 3.3.1 and earlier could
 			 * incorrectly fail with invalid parameter.
 			 */
-			tcon->broken_posix_open = true;
-			break;
-
-		case -EREMOTE:
-		case -EOPNOTSUPP:
-			/*
-			 * EREMOTE indicates DFS junction, which is not handled
-			 * in posix open.  If either that or op not supported
-			 * returned, follow the normal lookup.
-			 */
 			break;
 
 		default:
@@ -300,106 +291,19 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 		 * rare for path not covered on files)
 		 */
 	}
-
-	desired_access = 0;
-	if (OPEN_FMODE(oflags) & FMODE_READ)
-		desired_access |= GENERIC_READ; /* is this too little? */
-	if (OPEN_FMODE(oflags) & FMODE_WRITE)
-		desired_access |= GENERIC_WRITE;
-
-	disposition = FILE_OVERWRITE_IF;
-	if ((oflags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
-		disposition = FILE_CREATE;
-	else if ((oflags & (O_CREAT | O_TRUNC)) == (O_CREAT | O_TRUNC))
-		disposition = FILE_OVERWRITE_IF;
-	else if ((oflags & O_CREAT) == O_CREAT)
-		disposition = FILE_OPEN_IF;
-	else
-		cifs_dbg(FYI, "Create flag not set in create function\n");
-
-	/*
-	 * BB add processing to set equivalent of mode - e.g. via CreateX with
-	 * ACLs
-	 */
-
-	if (!server->ops->open) {
-		rc = -ENOSYS;
-		goto out;
-	}
-
-	buf = kmalloc(sizeof(FILE_ALL_INFO), GFP_KERNEL);
-	if (buf == NULL) {
-		rc = -ENOMEM;
-		goto out;
-	}
-
-	/*
-	 * if we're not using unix extensions, see if we need to set
-	 * ATTR_READONLY on the create call
-	 */
-	if (!tcon->unix_ext && (mode & S_IWUGO) == 0)
-		create_options |= CREATE_OPTION_READONLY;
-
-	if (backup_cred(cifs_sb))
-		create_options |= CREATE_OPEN_BACKUP_INTENT;
-
-	oparms.tcon = tcon;
-	oparms.cifs_sb = cifs_sb;
-	oparms.desired_access = desired_access;
-	oparms.create_options = create_options;
-	oparms.disposition = disposition;
-	oparms.path = full_path;
-	oparms.fid = fid;
-	oparms.reconnect = false;
-
-	rc = server->ops->open(xid, &oparms, oplock, buf);
-	if (rc) {
-		cifs_dbg(FYI, "cifs_create returned 0x%x\n", rc);
-		goto out;
-	}
-
-	/*
-	 * If Open reported that we actually created a file then we now have to
-	 * set the mode if possible.
-	 */
-	if ((tcon->unix_ext) && (*oplock & CIFS_CREATE_ACTION)) {
-		struct cifs_unix_set_info_args args = {
-				.mode	= mode,
-				.ctime	= NO_CHANGE_64,
-				.atime	= NO_CHANGE_64,
-				.mtime	= NO_CHANGE_64,
-				.device	= 0,
-		};
-
+#endif
+	/* If the open was with ida signed, we can not set posix syscall */
+	if (!rc)
 		*created |= FILE_CREATED;
-		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SET_UID) {
-			args.uid = current_fsuid();
-			if (inode->i_mode & S_ISGID)
-				args.gid = inode->i_gid;
-			else
-				args.gid = current_fsgid();
-		} else {
-			args.uid = INVALID_UID; /* no change */
-			args.gid = INVALID_GID; /* no change */
-		}
-		CIFSSMBUnixSetFileInfo(xid, tcon, &args, fid->netfid,
-				       current->tgid);
-	} else {
-		/*
-		 * BB implement mode setting via Windows security
-		 * descriptors e.g.
-		 */
-		/* CIFSSMBWinSetPerms(xid,tcon,path,mode,-1,-1,nls);*/
-
-		/* Could set r/o dos attribute if mode & 0222 == 0 */
-	}
-
 cifs_create_get_file_info:
 	/* server might mask mode so we have to query for it */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext)
 		rc = cifs_get_inode_info_unix(&newinode, full_path, inode->i_sb,
 					      xid);
-	else {
+	else
+#endif
+	{
 		rc = cifs_get_inode_info(&newinode, full_path, buf, inode->i_sb,
 					 xid, &fid->netfid);
 		if (newinode) {
@@ -625,6 +529,7 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 		goto mknod_out;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (pTcon->unix_ext) {
 		struct cifs_unix_set_info_args args = {
 			.mode	= mode & ~current_umask(),
@@ -709,6 +614,7 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 	} /* else if (S_ISFIFO) */
 	CIFSSMBClose(xid, pTcon, fileHandle);
 	d_drop(direntry);
+#endif
 
 	/* FIXME: add code here to set EAs */
 

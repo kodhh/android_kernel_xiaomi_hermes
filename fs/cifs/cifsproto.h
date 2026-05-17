@@ -118,16 +118,11 @@ extern void header_assemble(struct smb_hdr *, char /* command */ ,
 extern int small_smb_init_no_tc(const int smb_cmd, const int wct,
 				struct cifs_ses *ses,
 				void **request_buf);
-extern int CIFS_SessSetup(const unsigned int xid, struct cifs_ses *ses,
-			  const struct nls_table *nls_cp);
 extern struct timespec cifs_NTtimeToUnix(__le64 utc_nanoseconds_since_1601);
 extern u64 cifs_UnixTimeToNT(struct timespec);
 extern struct timespec cnvrtDosUnixTm(__le16 le_date, __le16 le_time,
 				      int offset);
 extern void cifs_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock);
-extern int cifs_unlock_range(struct cifsFileInfo *cfile,
-			     struct file_lock *flock, const unsigned int xid);
-extern int cifs_push_mandatory_locks(struct cifsFileInfo *cfile);
 
 extern struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid,
 					      struct file *file,
@@ -158,15 +153,216 @@ extern int cifs_set_file_info(struct inode *inode, struct iattr *attrs,
 extern int cifs_rename_pending_delete(const char *full_path,
 				      struct dentry *dentry,
 				      const unsigned int xid);
+
 extern int cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb,
 			      struct cifs_fattr *fattr, struct inode *inode,
 			      const char *path, const __u16 *pfid);
 extern int id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64,
 					kuid_t, kgid_t);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
+extern int CIFS_SessSetup(const unsigned int xid, struct cifs_ses *ses,
+			  const struct nls_table *nls_cp);
 extern struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *, struct inode *,
 					const char *, u32 *);
 extern int set_cifs_acl(struct cifs_ntsd *, __u32, struct inode *,
 				const char *, int);
+extern int cifs_unlock_range(struct cifsFileInfo *cfile,
+			     struct file_lock *flock, const unsigned int xid);
+extern int cifs_push_mandatory_locks(struct cifsFileInfo *cfile);
+extern int small_smb_init_no_tc(const int smb_cmd, const int wct,
+				struct cifs_ses *ses,
+				void **request_buf);
+extern int CIFSSMBQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			struct kstatfs *FSData);
+extern int SMBOldQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			struct kstatfs *FSData);
+extern int CIFSSMBSetFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			__u64 cap);
+extern int CIFSSMBQFSAttributeInfo(const unsigned int xid,
+			struct cifs_tcon *tcon);
+extern int CIFSSMBQFSDeviceInfo(const unsigned int xid, struct cifs_tcon *tcon);
+extern int CIFSSMBQFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon);
+extern int CIFSSMBQFSPosixInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			struct kstatfs *FSData);
+extern int CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *fileName, const FILE_BASIC_INFO *data,
+			const struct nls_table *nls_codepage,
+			int remap_special_chars);
+extern int CIFSSMBSetFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			const FILE_BASIC_INFO *data, __u16 fid,
+			__u32 pid_of_opener);
+extern int CIFSSMBSetFileDisposition(const unsigned int xid,
+				     struct cifs_tcon *tcon,
+				     bool delete_file, __u16 fid,
+				     __u32 pid_of_opener);
+extern int CIFSSMBSetEOF(const unsigned int xid, struct cifs_tcon *tcon,
+			 const char *file_name, __u64 size,
+			 struct cifs_sb_info *cifs_sb, bool set_allocation);
+extern int CIFSSMBSetFileSize(const unsigned int xid, struct cifs_tcon *tcon,
+			      struct cifsFileInfo *cfile, __u64 size,
+			      bool set_allocation);
+extern int CIFSSMBUnixSetFileInfo(const unsigned int xid,
+				  struct cifs_tcon *tcon,
+				  const struct cifs_unix_set_info_args *args,
+				  u16 fid, u32 pid_of_opener);
+extern int CIFSSMBUnixSetPathInfo(const unsigned int xid,
+				  struct cifs_tcon *tcon, const char *file_name,
+				  const struct cifs_unix_set_info_args *args,
+				  const struct nls_table *nls_codepage,
+				  int remap);
+extern int CIFSSMBMkDir(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *name, struct cifs_sb_info *cifs_sb);
+extern int CIFSSMBRmDir(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *name, struct cifs_sb_info *cifs_sb);
+extern int CIFSPOSIXDelFile(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *name, __u16 type,
+			const struct nls_table *nls_codepage,
+			int remap_special_chars);
+extern int CIFSSMBDelFile(const unsigned int xid, struct cifs_tcon *tcon,
+			  const char *name, struct cifs_sb_info *cifs_sb);
+extern int CIFSSMBRename(const unsigned int xid, struct cifs_tcon *tcon,
+			 const char *from_name, const char *to_name,
+			 struct cifs_sb_info *cifs_sb);
+extern int CIFSSMBRenameOpenFile(const unsigned int xid, struct cifs_tcon *tcon,
+				 int netfid, const char *target_name,
+				 const struct nls_table *nls_codepage,
+				 int remap_special_chars);
+extern int CIFSCreateHardLink(const unsigned int xid, struct cifs_tcon *tcon,
+			      const char *from_name, const char *to_name,
+			      struct cifs_sb_info *cifs_sb);
+extern int CIFSUnixCreateHardLink(const unsigned int xid,
+			struct cifs_tcon *tcon,
+			const char *fromName, const char *toName,
+			const struct nls_table *nls_codepage,
+			int remap_special_chars);
+extern int CIFSUnixCreateSymLink(const unsigned int xid,
+			struct cifs_tcon *tcon,
+			const char *fromName, const char *toName,
+			const struct nls_table *nls_codepage);
+extern int CIFSSMBUnixQuerySymLink(const unsigned int xid,
+			struct cifs_tcon *tcon,
+			const unsigned char *searchName, char **syminfo,
+			const struct nls_table *nls_codepage);
+extern int CIFSSMBOpen(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *fileName, const int disposition,
+			const int access_flags, const int omode,
+			__u16 *netfid, int *pOplock, FILE_ALL_INFO *,
+			const struct nls_table *nls_codepage, int remap);
+extern int SMBLegacyOpen(const unsigned int xid, struct cifs_tcon *tcon,
+			const char *fileName, const int disposition,
+			const int access_flags, const int omode,
+			__u16 *netfid, int *pOplock, FILE_ALL_INFO *,
+			const struct nls_table *nls_codepage, int remap);
+extern int CIFSPOSIXCreate(const unsigned int xid, struct cifs_tcon *tcon,
+			u32 posix_flags, __u64 mode, __u16 *netfid,
+			FILE_UNIX_BASIC_INFO *pRetData,
+			__u32 *pOplock, const char *name,
+			const struct nls_table *nls_codepage, int remap);
+extern int CIFSSMBClose(const unsigned int xid, struct cifs_tcon *tcon,
+			const int smb_file_id);
+extern int CIFSSMBFlush(const unsigned int xid, struct cifs_tcon *tcon,
+			const int smb_file_id);
+extern int CIFSSMBRead(const unsigned int xid, struct cifs_io_parms *io_parms,
+			unsigned int *nbytes, char **buf,
+			int *return_buf_type);
+extern int CIFSSMBWrite(const unsigned int xid, struct cifs_io_parms *io_parms,
+			unsigned int *nbytes, const char *buf,
+			const char __user *ubuf, const int long_op);
+extern int CIFSSMBWrite2(const unsigned int xid, struct cifs_io_parms *io_parms,
+			unsigned int *nbytes, struct kvec *iov, const int nvec);
+extern int CIFSGetSrvInodeNumber(const unsigned int xid, struct cifs_tcon *tcon,
+				 const char *search_name, __u64 *inode_number,
+				 const struct nls_table *nls_codepage,
+				 int remap);
+extern int cifs_lockv(const unsigned int xid, struct cifs_tcon *tcon,
+		      const __u16 netfid, const __u8 lock_type,
+		      const __u32 num_unlock, const __u32 num_lock,
+		      LOCKING_ANDX_RANGE *buf);
+extern int CIFSSMBLock(const unsigned int xid, struct cifs_tcon *tcon,
+			const __u16 netfid, const __u32 netpid, const __u64 len,
+			const __u64 offset, const __u32 numUnlock,
+			const __u32 numLock, const __u8 lockType,
+			const bool waitFlag, const __u8 oplock_level);
+extern int CIFSSMBPosixLock(const unsigned int xid, struct cifs_tcon *tcon,
+			const __u16 smb_file_id, const __u32 netpid,
+			const loff_t start_offset, const __u64 len,
+			struct file_lock *, const __u16 lock_type,
+			const bool waitFlag);
+extern int CIFSSMBTDis(const unsigned int xid, struct cifs_tcon *tcon);
+extern int CIFSSMBEcho(struct TCP_Server_Info *server);
+extern int CIFSSMBLogoff(const unsigned int xid, struct cifs_ses *ses);
+extern int CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses);
+extern int CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
+		    const char *tree, struct cifs_tcon *tcon,
+		    const struct nls_table *);
+extern int CIFSFindFirst(const unsigned int xid, struct cifs_tcon *tcon,
+		const char *searchName, struct cifs_sb_info *cifs_sb,
+		__u16 *searchHandle, __u16 search_flags,
+		struct cifs_search_info *psrch_inf,
+		bool msearch);
+extern int CIFSFindNext(const unsigned int xid, struct cifs_tcon *tcon,
+		__u16 searchHandle, __u16 search_flags,
+		struct cifs_search_info *psrch_inf);
+extern int CIFSFindClose(const unsigned int xid, struct cifs_tcon *tcon,
+			const __u16 search_handle);
+extern int CIFSSMBQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			u16 netfid, FILE_ALL_INFO *pFindData);
+extern int CIFSSMBQPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			    const char *search_Name, FILE_ALL_INFO *data,
+			    int legacy /* whether to use old info level */,
+			    const struct nls_table *nls_codepage, int remap);
+extern int SMBQueryInformation(const unsigned int xid, struct cifs_tcon *tcon,
+			       const char *search_name, FILE_ALL_INFO *data,
+			       const struct nls_table *nls_codepage, int remap);
+extern int CIFSSMBUnixQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
+			u16 netfid, FILE_UNIX_BASIC_INFO *pFindData);
+extern int CIFSSMBUnixQPathInfo(const unsigned int xid,
+			struct cifs_tcon *tcon,
+			const unsigned char *searchName,
+			FILE_UNIX_BASIC_INFO *pFindData,
+			const struct nls_table *nls_codepage, int remap);
+extern int CIFSGetDFSRefer(const unsigned int xid, struct cifs_ses *ses,
+			   const char *search_name,
+			   struct dfs_info3_param **target_nodes,
+			   unsigned int *num_of_nodes,
+			   const struct nls_table *nls_codepage, int remap);
+extern void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
+				 struct cifs_sb_info *cifs_sb,
+				 struct smb_vol *vol);
+extern int CIFSSMBCopy(unsigned int xid,
+			struct cifs_tcon *source_tcon,
+			const char *fromName,
+			const __u16 target_tid,
+			const char *toName, const int flags,
+			const struct nls_table *nls_codepage,
+			int remap_special_chars);
+extern ssize_t CIFSSMBQAllEAs(const unsigned int xid, struct cifs_tcon *tcon,
+			const unsigned char *searchName,
+			const unsigned char *ea_name, char *EAData,
+			size_t bufsize, const struct nls_table *nls_codepage,
+			int remap_special_chars);
+extern int CIFSSMBSetEA(const unsigned int xid, struct cifs_tcon *tcon,
+		const char *fileName, const char *ea_name,
+		const void *ea_value, const __u16 ea_value_len,
+		const struct nls_table *nls_codepage, int remap_special_chars);
+extern int CIFSSMBGetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon,
+			__u16 fid, struct cifs_ntsd **acl_inf, __u32 *buflen);
+extern int CIFSSMBSetCIFSACL(const unsigned int, struct cifs_tcon *, __u16,
+			struct cifs_ntsd *, __u32, int);
+extern int CIFSSMBGetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
+		const unsigned char *searchName,
+		char *acl_inf, const int buflen, const int acl_type,
+		const struct nls_table *nls_codepage, int remap_special_chars);
+extern int CIFSSMBSetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
+		const unsigned char *fileName,
+		const char *local_acl, const int buflen, const int acl_type,
+		const struct nls_table *nls_codepage, int remap_special_chars);
+extern int CIFSGetExtAttr(const unsigned int xid, struct cifs_tcon *tcon,
+			const int netfid, __u64 *pExtAttrBits, __u64 *pMask);
+extern int CIFSCheckMFSymlink(struct cifs_fattr *fattr,
+		const unsigned char *path,
+		struct cifs_sb_info *cifs_sb, unsigned int xid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 extern void dequeue_mid(struct mid_q_entry *mid, bool malformed);
 extern int cifs_read_from_socket(struct TCP_Server_Info *server, char *buf,
@@ -215,211 +411,12 @@ extern int cifs_negotiate_protocol(const unsigned int xid,
 				   struct cifs_ses *ses);
 extern int cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 			      struct nls_table *nls_info);
-extern int CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses);
-
-extern int CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
-		    const char *tree, struct cifs_tcon *tcon,
-		    const struct nls_table *);
-
-extern int CIFSFindFirst(const unsigned int xid, struct cifs_tcon *tcon,
-		const char *searchName, struct cifs_sb_info *cifs_sb,
-		__u16 *searchHandle, __u16 search_flags,
-		struct cifs_search_info *psrch_inf,
-		bool msearch);
-
-extern int CIFSFindNext(const unsigned int xid, struct cifs_tcon *tcon,
-		__u16 searchHandle, __u16 search_flags,
-		struct cifs_search_info *psrch_inf);
-
-extern int CIFSFindClose(const unsigned int xid, struct cifs_tcon *tcon,
-			const __u16 search_handle);
-
-extern int CIFSSMBQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			u16 netfid, FILE_ALL_INFO *pFindData);
-extern int CIFSSMBQPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			    const char *search_Name, FILE_ALL_INFO *data,
-			    int legacy /* whether to use old info level */,
-			    const struct nls_table *nls_codepage, int remap);
-extern int SMBQueryInformation(const unsigned int xid, struct cifs_tcon *tcon,
-			       const char *search_name, FILE_ALL_INFO *data,
-			       const struct nls_table *nls_codepage, int remap);
-
-extern int CIFSSMBUnixQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			u16 netfid, FILE_UNIX_BASIC_INFO *pFindData);
-extern int CIFSSMBUnixQPathInfo(const unsigned int xid,
-			struct cifs_tcon *tcon,
-			const unsigned char *searchName,
-			FILE_UNIX_BASIC_INFO *pFindData,
-			const struct nls_table *nls_codepage, int remap);
-
-extern int CIFSGetDFSRefer(const unsigned int xid, struct cifs_ses *ses,
-			   const char *search_name,
-			   struct dfs_info3_param **target_nodes,
-			   unsigned int *num_of_nodes,
-			   const struct nls_table *nls_codepage, int remap);
-
 extern int get_dfs_path(const unsigned int xid, struct cifs_ses *ses,
 			const char *old_path,
 			const struct nls_table *nls_codepage,
 			unsigned int *num_referrals,
 			struct dfs_info3_param **referrals, int remap);
-extern void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
-				 struct cifs_sb_info *cifs_sb,
-				 struct smb_vol *vol);
-extern int CIFSSMBQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			struct kstatfs *FSData);
-extern int SMBOldQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			struct kstatfs *FSData);
-extern int CIFSSMBSetFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			__u64 cap);
-
-extern int CIFSSMBQFSAttributeInfo(const unsigned int xid,
-			struct cifs_tcon *tcon);
-extern int CIFSSMBQFSDeviceInfo(const unsigned int xid, struct cifs_tcon *tcon);
-extern int CIFSSMBQFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon);
-extern int CIFSSMBQFSPosixInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			struct kstatfs *FSData);
-
-extern int CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *fileName, const FILE_BASIC_INFO *data,
-			const struct nls_table *nls_codepage,
-			int remap_special_chars);
-extern int CIFSSMBSetFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
-			const FILE_BASIC_INFO *data, __u16 fid,
-			__u32 pid_of_opener);
-extern int CIFSSMBSetFileDisposition(const unsigned int xid,
-				     struct cifs_tcon *tcon,
-				     bool delete_file, __u16 fid,
-				     __u32 pid_of_opener);
-#if 0
-extern int CIFSSMBSetAttrLegacy(unsigned int xid, struct cifs_tcon *tcon,
-			char *fileName, __u16 dos_attributes,
-			const struct nls_table *nls_codepage);
-#endif /* possibly unneeded function */
-extern int CIFSSMBSetEOF(const unsigned int xid, struct cifs_tcon *tcon,
-			 const char *file_name, __u64 size,
-			 struct cifs_sb_info *cifs_sb, bool set_allocation);
-extern int CIFSSMBSetFileSize(const unsigned int xid, struct cifs_tcon *tcon,
-			      struct cifsFileInfo *cfile, __u64 size,
-			      bool set_allocation);
-
-struct cifs_unix_set_info_args {
-	__u64	ctime;
-	__u64	atime;
-	__u64	mtime;
-	__u64	mode;
-	kuid_t	uid;
-	kgid_t	gid;
-	dev_t	device;
-};
-
-extern int CIFSSMBUnixSetFileInfo(const unsigned int xid,
-				  struct cifs_tcon *tcon,
-				  const struct cifs_unix_set_info_args *args,
-				  u16 fid, u32 pid_of_opener);
-
-extern int CIFSSMBUnixSetPathInfo(const unsigned int xid,
-				  struct cifs_tcon *tcon, const char *file_name,
-				  const struct cifs_unix_set_info_args *args,
-				  const struct nls_table *nls_codepage,
-				  int remap);
-
-extern int CIFSSMBMkDir(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *name, struct cifs_sb_info *cifs_sb);
-extern int CIFSSMBRmDir(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *name, struct cifs_sb_info *cifs_sb);
-extern int CIFSPOSIXDelFile(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *name, __u16 type,
-			const struct nls_table *nls_codepage,
-			int remap_special_chars);
-extern int CIFSSMBDelFile(const unsigned int xid, struct cifs_tcon *tcon,
-			  const char *name, struct cifs_sb_info *cifs_sb);
-extern int CIFSSMBRename(const unsigned int xid, struct cifs_tcon *tcon,
-			 const char *from_name, const char *to_name,
-			 struct cifs_sb_info *cifs_sb);
-extern int CIFSSMBRenameOpenFile(const unsigned int xid, struct cifs_tcon *tcon,
-				 int netfid, const char *target_name,
-				 const struct nls_table *nls_codepage,
-				 int remap_special_chars);
-extern int CIFSCreateHardLink(const unsigned int xid, struct cifs_tcon *tcon,
-			      const char *from_name, const char *to_name,
-			      struct cifs_sb_info *cifs_sb);
-extern int CIFSUnixCreateHardLink(const unsigned int xid,
-			struct cifs_tcon *tcon,
-			const char *fromName, const char *toName,
-			const struct nls_table *nls_codepage,
-			int remap_special_chars);
-extern int CIFSUnixCreateSymLink(const unsigned int xid,
-			struct cifs_tcon *tcon,
-			const char *fromName, const char *toName,
-			const struct nls_table *nls_codepage);
-extern int CIFSSMBUnixQuerySymLink(const unsigned int xid,
-			struct cifs_tcon *tcon,
-			const unsigned char *searchName, char **syminfo,
-			const struct nls_table *nls_codepage);
-#ifdef CONFIG_CIFS_SYMLINK_EXPERIMENTAL
-extern int CIFSSMBQueryReparseLinkInfo(const unsigned int xid,
-			struct cifs_tcon *tcon,
-			const unsigned char *searchName,
-			char *symlinkinfo, const int buflen, __u16 fid,
-			const struct nls_table *nls_codepage);
-#endif /* temporarily unused until cifs_symlink fixed */
-extern int CIFSSMBOpen(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *fileName, const int disposition,
-			const int access_flags, const int omode,
-			__u16 *netfid, int *pOplock, FILE_ALL_INFO *,
-			const struct nls_table *nls_codepage, int remap);
-extern int SMBLegacyOpen(const unsigned int xid, struct cifs_tcon *tcon,
-			const char *fileName, const int disposition,
-			const int access_flags, const int omode,
-			__u16 *netfid, int *pOplock, FILE_ALL_INFO *,
-			const struct nls_table *nls_codepage, int remap);
-extern int CIFSPOSIXCreate(const unsigned int xid, struct cifs_tcon *tcon,
-			u32 posix_flags, __u64 mode, __u16 *netfid,
-			FILE_UNIX_BASIC_INFO *pRetData,
-			__u32 *pOplock, const char *name,
-			const struct nls_table *nls_codepage, int remap);
-extern int CIFSSMBClose(const unsigned int xid, struct cifs_tcon *tcon,
-			const int smb_file_id);
-
-extern int CIFSSMBFlush(const unsigned int xid, struct cifs_tcon *tcon,
-			const int smb_file_id);
-
-extern int CIFSSMBRead(const unsigned int xid, struct cifs_io_parms *io_parms,
-			unsigned int *nbytes, char **buf,
-			int *return_buf_type);
-extern int CIFSSMBWrite(const unsigned int xid, struct cifs_io_parms *io_parms,
-			unsigned int *nbytes, const char *buf,
-			const char __user *ubuf, const int long_op);
-extern int CIFSSMBWrite2(const unsigned int xid, struct cifs_io_parms *io_parms,
-			unsigned int *nbytes, struct kvec *iov, const int nvec);
-extern int CIFSGetSrvInodeNumber(const unsigned int xid, struct cifs_tcon *tcon,
-				 const char *search_name, __u64 *inode_number,
-				 const struct nls_table *nls_codepage,
-				 int remap);
-
-extern int cifs_lockv(const unsigned int xid, struct cifs_tcon *tcon,
-		      const __u16 netfid, const __u8 lock_type,
-		      const __u32 num_unlock, const __u32 num_lock,
-		      LOCKING_ANDX_RANGE *buf);
-extern int CIFSSMBLock(const unsigned int xid, struct cifs_tcon *tcon,
-			const __u16 netfid, const __u32 netpid, const __u64 len,
-			const __u64 offset, const __u32 numUnlock,
-			const __u32 numLock, const __u8 lockType,
-			const bool waitFlag, const __u8 oplock_level);
-extern int CIFSSMBPosixLock(const unsigned int xid, struct cifs_tcon *tcon,
-			const __u16 smb_file_id, const __u32 netpid,
-			const loff_t start_offset, const __u64 len,
-			struct file_lock *, const __u16 lock_type,
-			const bool waitFlag);
-extern int CIFSSMBTDis(const unsigned int xid, struct cifs_tcon *tcon);
-extern int CIFSSMBEcho(struct TCP_Server_Info *server);
-extern int CIFSSMBLogoff(const unsigned int xid, struct cifs_ses *ses);
-
-extern struct cifs_ses *sesInfoAlloc(void);
-extern void sesInfoFree(struct cifs_ses *);
-extern struct cifs_tcon *tconInfoAlloc(void);
-extern void tconInfoFree(struct cifs_tcon *);
+extern void cifs_autodisable_serverino(struct cifs_sb_info *cifs_sb);
 
 extern int cifs_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server,
 		   __u32 *pexpected_response_sequence_number);
@@ -441,47 +438,7 @@ extern int calc_seckey(struct cifs_ses *);
 extern int calc_lanman_hash(const char *password, const char *cryptkey,
 				bool encrypt, char *lnm_session_key);
 #endif /* CIFS_WEAK_PW_HASH */
-#ifdef CONFIG_CIFS_DNOTIFY_EXPERIMENTAL /* unused temporarily */
-extern int CIFSSMBNotify(const unsigned int xid, struct cifs_tcon *tcon,
-			const int notify_subdirs, const __u16 netfid,
-			__u32 filter, struct file *file, int multishot,
-			const struct nls_table *nls_codepage);
-#endif /* was needed for dnotify, and will be needed for inotify when VFS fix */
-extern int CIFSSMBCopy(unsigned int xid,
-			struct cifs_tcon *source_tcon,
-			const char *fromName,
-			const __u16 target_tid,
-			const char *toName, const int flags,
-			const struct nls_table *nls_codepage,
-			int remap_special_chars);
-extern ssize_t CIFSSMBQAllEAs(const unsigned int xid, struct cifs_tcon *tcon,
-			const unsigned char *searchName,
-			const unsigned char *ea_name, char *EAData,
-			size_t bufsize, const struct nls_table *nls_codepage,
-			int remap_special_chars);
-extern int CIFSSMBSetEA(const unsigned int xid, struct cifs_tcon *tcon,
-		const char *fileName, const char *ea_name,
-		const void *ea_value, const __u16 ea_value_len,
-		const struct nls_table *nls_codepage, int remap_special_chars);
-extern int CIFSSMBGetCIFSACL(const unsigned int xid, struct cifs_tcon *tcon,
-			__u16 fid, struct cifs_ntsd **acl_inf, __u32 *buflen);
-extern int CIFSSMBSetCIFSACL(const unsigned int, struct cifs_tcon *, __u16,
-			struct cifs_ntsd *, __u32, int);
-extern int CIFSSMBGetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
-		const unsigned char *searchName,
-		char *acl_inf, const int buflen, const int acl_type,
-		const struct nls_table *nls_codepage, int remap_special_chars);
-extern int CIFSSMBSetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
-		const unsigned char *fileName,
-		const char *local_acl, const int buflen, const int acl_type,
-		const struct nls_table *nls_codepage, int remap_special_chars);
-extern int CIFSGetExtAttr(const unsigned int xid, struct cifs_tcon *tcon,
-			const int netfid, __u64 *pExtAttrBits, __u64 *pMask);
-extern void cifs_autodisable_serverino(struct cifs_sb_info *cifs_sb);
 extern bool CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr);
-extern int CIFSCheckMFSymlink(struct cifs_fattr *fattr,
-		const unsigned char *path,
-		struct cifs_sb_info *cifs_sb, unsigned int xid);
 extern int mdfour(unsigned char *, unsigned char *, int);
 extern int E_md4hash(const unsigned char *passwd, unsigned char *p16,
 			const struct nls_table *codepage);

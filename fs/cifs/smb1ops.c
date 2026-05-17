@@ -17,6 +17,7 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 #include <linux/pagemap.h>
 #include <linux/vfs.h>
 #include "cifsglob.h"
@@ -993,3 +994,4 @@ struct smb_version_values smb1_values = {
 	.cap_large_files = CAP_LARGE_FILES,
 	.oplock_read = OPLOCK_READ,
 };
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */

@@ -181,6 +181,7 @@ CIFSFormatMFSymlink(u8 *buf, unsigned int buf_len, const char *link_str)
 }
 
 static int
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 CIFSCreateMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		    const char *fromName, const char *toName,
 		    struct cifs_sb_info *cifs_sb)
@@ -236,7 +237,9 @@ CIFSCreateMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	return 0;
 }
+#endif
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 CIFSQueryMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		   const unsigned char *searchName, char **symlinkinfo,
@@ -289,6 +292,7 @@ CIFSQueryMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 
 	return 0;
 }
+#endif
 
 bool
 CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr)
@@ -304,6 +308,7 @@ CIFSCouldBeMFSymlink(const struct cifs_fattr *fattr)
 	return true;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 CIFSCheckMFSymlink(struct cifs_fattr *fattr,
 		   const unsigned char *path,
@@ -384,6 +389,7 @@ out:
 	cifs_put_tlink(tlink);
 	return rc;
 }
+#endif
 
 int
 cifs_hardlink(struct dentry *old_file, struct inode *inode,
@@ -413,12 +419,16 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 		goto cifs_hl_exit;
 	}
 
-	if (tcon->unix_ext)
+	if (tcon->unix_ext) {
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		rc = CIFSUnixCreateHardLink(xid, tcon, from_name, to_name,
 					    cifs_sb->local_nls,
 					    cifs_sb->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
-	else {
+#else
+		rc = -EOPNOTSUPP;
+#endif
+	} else {
 		server = tcon->ses->server;
 		if (!server->ops->create_hardlink)
 			return -ENOSYS;
@@ -528,6 +538,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	 * First try Minshall+French Symlinks, if configured
 	 * and fallback to UNIX Extensions Symlinks.
 	 */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS)
 		rc = CIFSQueryMFSymLink(xid, tcon, full_path, &target_path,
 					cifs_sb->local_nls,
@@ -537,6 +548,7 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 	if ((rc != 0) && cap_unix(tcon->ses))
 		rc = CIFSSMBUnixQuerySymLink(xid, tcon, full_path, &target_path,
 					     cifs_sb->local_nls);
+#endif
 
 	kfree(full_path);
 out:
@@ -582,6 +594,7 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 	cifs_dbg(FYI, "symname is %s\n", symname);
 
 	/* BB what if DFS and this volume is on different share? BB */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS)
 		rc = CIFSCreateMFSymLink(xid, pTcon, full_path, symname,
 					cifs_sb);
@@ -607,6 +620,7 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 			d_instantiate(direntry, newinode);
 		}
 	}
+#endif
 symlink_exit:
 	kfree(full_path);
 	cifs_put_tlink(tlink);
