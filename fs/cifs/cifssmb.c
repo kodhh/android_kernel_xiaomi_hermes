@@ -2451,10 +2451,9 @@ CIFSSMBPosixLock(const unsigned int xid, struct cifs_tcon *tcon,
 					__constant_cpu_to_le16(CIFS_WRLCK))
 				pLockData->fl_type = F_WRLCK;
 
-		pLockData->fl_start = le64_to_cpu(parm_data->start);
-		pLockData->fl_end = pLockData->fl_start +
-			(le64_to_cpu(parm_data->length) ?
-			 le64_to_cpu(parm_data->length) - 1 : 0);
+			pLockData->fl_start = le64_to_cpu(parm_data->start);
+			pLockData->fl_end = pLockData->fl_start +
+					le64_to_cpu(parm_data->length) - 1;
 			pLockData->fl_pid = le32_to_cpu(parm_data->pid);
 		}
 	}
@@ -4674,28 +4673,11 @@ parse_DFS_referrals(TRANSACTION2_GET_DFS_REFER_RSP *pSMBr,
 		is_unicode = true;
 	else
 		is_unicode = false;
-	/* get the upper boundary of the resp buffer */
-	data_end = (char *)(&(pSMBr->PathConsumed)) +
-				le16_to_cpu(pSMBr->t2.DataCount);
-
-	if (data_end < (char *)pSMBr + sizeof(*pSMBr)) {
-		cifs_dbg(VFS, "DFS referral header is malformed\n");
-		rc = -EINVAL;
-		goto parse_DFS_referrals_exit;
-	}
-
 	*num_of_nodes = le16_to_cpu(pSMBr->NumberOfReferrals);
 
 	if (*num_of_nodes < 1) {
 		cifs_dbg(VFS, "num_referrals: must be at least > 0, but we get num_referrals = %d\n",
 			 *num_of_nodes);
-		rc = -EINVAL;
-		goto parse_DFS_referrals_exit;
-	}
-
-	if ((char *)&pSMBr->referrals +
-	    *num_of_nodes * sizeof(struct dfs_referral_level_3) > data_end) {
-		cifs_dbg(VFS, "Number of referrals exceeds buffer size\n");
 		rc = -EINVAL;
 		goto parse_DFS_referrals_exit;
 	}
@@ -4707,6 +4689,10 @@ parse_DFS_referrals(TRANSACTION2_GET_DFS_REFER_RSP *pSMBr,
 		rc = -EINVAL;
 		goto parse_DFS_referrals_exit;
 	}
+
+	/* get the upper boundary of the resp buffer */
+	data_end = (char *)(&(pSMBr->PathConsumed)) +
+				le16_to_cpu(pSMBr->t2.DataCount);
 
 	cifs_dbg(FYI, "num_referrals: %d dfs flags: 0x%x ...\n",
 		 *num_of_nodes, le32_to_cpu(pSMBr->DFSFlags));
