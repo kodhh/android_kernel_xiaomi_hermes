@@ -1517,7 +1517,7 @@ static int do_execve_common(const char *filename,
 	const struct cred *cred = current_cred();
 
 #ifdef CONFIG_KSU
-	ksu_handle_execve(&filename_user, &argv, &envp);
+	ksu_handle_execve(&filename, &argv, &envp);
 #endif
 
 	/*
