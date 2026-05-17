@@ -1500,8 +1500,7 @@ int search_binary_handler(struct linux_binprm *bprm)
 EXPORT_SYMBOL(search_binary_handler);
 
 #ifdef CONFIG_KSU
-extern int ksu_legacy_execve_sucompat(const char **filename_ptr,
-					void *argv, void *envp);
+extern init ksu_handle_execve(const char __user **filename_user, void *argv, void *envp);
 #endif
 /*
  * sys_execve() executes a new program.
@@ -1518,7 +1517,7 @@ static int do_execve_common(const char *filename,
 	const struct cred *cred = current_cred();
 
 #ifdef CONFIG_KSU
-	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
+	ksu_handle_execve(&filename_user, &argv, &envp);
 #endif
 
 	/*
