@@ -56,10 +56,6 @@ extern __le32 smb2_get_lease_state(struct cifsInodeInfo *cinode);
 extern __u8 smb2_map_lease_to_oplock(__le32 lease_state);
 extern bool smb2_is_valid_oplock_break(char *buffer,
 				       struct TCP_Server_Info *srv);
-extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *server,
-					  __u64 ses_id);
-extern int smb3_handle_read_data(struct TCP_Server_Info *server,
-				 struct mid_q_entry *mid);
 
 extern void move_smb2_info_to_cifs(FILE_ALL_INFO *dst,
 				   struct smb2_file_all_info *src);
@@ -116,11 +112,6 @@ extern int SMB2_open(const unsigned int xid, struct cifs_tcon *tcon,
 		     __u32 desired_access, __u32 create_disposition,
 		     __u32 file_attributes, __u32 create_options,
 		     __u8 *oplock, struct smb2_file_all_info *buf);
-extern int SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon,
-		     u64 persistent_fid, u64 volatile_fid, u32 opcode,
-		     bool is_fsctl, bool use_ipc,
-		     char *in_data, u32 indatalen,
-		     char **out_data, u32 *plen /* returned data len */);
 extern int SMB2_close(const unsigned int xid, struct cifs_tcon *tcon,
 		      u64 persistent_file_id, u64 volatile_file_id);
 extern int SMB2_flush(const unsigned int xid, struct cifs_tcon *tcon,
@@ -169,13 +160,5 @@ extern int smb2_lockv(const unsigned int xid, struct cifs_tcon *tcon,
 		      struct smb2_lock_element *buf);
 extern int SMB2_lease_break(const unsigned int xid, struct cifs_tcon *tcon,
 			    __u8 *lease_key, const __le32 lease_state);
-extern int smb3_validate_negotiate(const unsigned int, struct cifs_tcon *);
 
-extern enum securityEnum smb2_select_sectype(struct TCP_Server_Info *,
-					enum securityEnum);
-extern int smb3_crypto_aead_allocate(struct TCP_Server_Info *server);
-#ifdef CONFIG_CIFS_SMB311
-extern int smb311_crypto_shash_allocate(struct TCP_Server_Info *server);
-extern int generate_smb311signingkey(struct cifs_ses *ses);
-#endif
 #endif			/* _SMB2PROTO_H */

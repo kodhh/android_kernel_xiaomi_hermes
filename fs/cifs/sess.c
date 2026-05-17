@@ -37,7 +37,6 @@
  * the socket has been reestablished (so we know whether to use vc 0).
  * Called while holding the cifs_tcp_ses_lock, so do not block
  */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static bool is_first_ses_reconnect(struct cifs_ses *ses)
 {
 	struct list_head *tmp;
@@ -53,7 +52,6 @@ static bool is_first_ses_reconnect(struct cifs_ses *ses)
 	   this must be the first one we are reconnecting */
 	return true;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 /*
  *	vc number 0 is treated specially by some servers, and should be the
@@ -63,7 +61,6 @@ static bool is_first_ses_reconnect(struct cifs_ses *ses)
  *	any vc but zero (some servers reset the connection on vcnum zero)
  *
  */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static __le16 get_next_vcnum(struct cifs_ses *ses)
 {
 	__u16 vcnum = 0;
@@ -116,9 +113,7 @@ get_vc_num_exit:
 
 	return cpu_to_le16(vcnum);
 }
-#endif
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static __u32 cifs_ssetup_hdr(struct cifs_ses *ses, SESSION_SETUP_ANDX *pSMB)
 {
 	__u32 capabilities = 0;
@@ -368,7 +363,6 @@ static int decode_ascii_ssetup(char **pbcc_area, __u16 bleft,
 
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 int decode_ntlmssp_challenge(char *bcc_ptr, int blob_len,
 				    struct cifs_ses *ses)
@@ -408,7 +402,6 @@ int decode_ntlmssp_challenge(char *bcc_ptr, int blob_len,
 		return -EINVAL;
 	}
 	if (tilen) {
-		kzfree(ses->auth_key.response);
 		ses->auth_key.response = kmemdup(bcc_ptr + tioffset, tilen,
 						 GFP_KERNEL);
 		if (!ses->auth_key.response) {
@@ -573,7 +566,6 @@ setup_ntlmv2_ret:
 	return rc;
 }
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 CIFS_SessSetup(const unsigned int xid, struct cifs_ses *ses,
 	       const struct nls_table *nls_cp)
@@ -782,7 +774,6 @@ ssetup_ntlmssp_authenticate:
 			goto ssetup_exit;
 		}
 
-		kzfree(ses->auth_key.response);
 		ses->auth_key.response = kmemdup(msg->data, msg->sesskey_len,
 						 GFP_KERNEL);
 		if (!ses->auth_key.response) {
@@ -979,4 +970,3 @@ ssetup_exit:
 
 	return rc;
 }
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */

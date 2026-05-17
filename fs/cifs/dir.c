@@ -231,7 +231,6 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 		goto out;
 	}
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext && cap_unix(tcon->ses) && !tcon->broken_posix_open &&
 	    (CIFS_UNIX_POSIX_PATH_OPS_CAP &
 			le64_to_cpu(tcon->fsUnixInfo.Capability))) {
@@ -300,7 +299,6 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 		 * rare for path not covered on files)
 		 */
 	}
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 	desired_access = 0;
 	if (OPEN_FMODE(oflags) & FMODE_READ)
@@ -356,7 +354,6 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 	 * If Open reported that we actually created a file then we now have to
 	 * set the mode if possible.
 	 */
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if ((tcon->unix_ext) && (*oplock & CIFS_CREATE_ACTION)) {
 		struct cifs_unix_set_info_args args = {
 				.mode	= mode,
@@ -388,19 +385,13 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 
 		/* Could set r/o dos attribute if mode & 0222 == 0 */
 	}
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 cifs_create_get_file_info:
-#endif
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	/* server might mask mode so we have to query for it */
 	if (tcon->unix_ext)
 		rc = cifs_get_inode_info_unix(&newinode, full_path, inode->i_sb,
 					      xid);
-	else
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
-	{
+	else {
 		rc = cifs_get_inode_info(&newinode, full_path, buf, inode->i_sb,
 					 xid, &fid->netfid);
 		if (newinode) {
@@ -419,9 +410,7 @@ cifs_create_get_file_info:
 		}
 	}
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 cifs_create_set_dentry:
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	if (rc != 0) {
 		cifs_dbg(FYI, "Create worked, get_inode_info failed rc = %d\n",
 			 rc);
@@ -597,20 +586,18 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 {
 	int rc = -EPERM;
 	unsigned int xid;
+	int create_options = CREATE_NOT_DIR | CREATE_OPTION_SPECIAL;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
 	struct cifs_tcon *pTcon;
-	char *full_path = NULL;
-	FILE_ALL_INFO *buf = NULL;
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
-	struct inode *newinode = NULL;
-	int create_options = CREATE_NOT_DIR | CREATE_OPTION_SPECIAL;
 	struct cifs_io_parms io_parms;
+	char *full_path = NULL;
+	struct inode *newinode = NULL;
 	int oplock = 0;
 	u16 fileHandle;
+	FILE_ALL_INFO *buf = NULL;
 	unsigned int bytes_written;
 	struct win_dev *pdev;
-#endif
 
 	if (!old_valid_dev(device_number))
 		return -EINVAL;
@@ -630,7 +617,6 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 		goto mknod_out;
 	}
 
-#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (pTcon->unix_ext) {
 		struct cifs_unix_set_info_args args = {
 			.mode	= mode & ~current_umask(),
@@ -717,7 +703,6 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 	d_drop(direntry);
 
 	/* FIXME: add code here to set EAs */
-#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 mknod_out:
 	kfree(full_path);
