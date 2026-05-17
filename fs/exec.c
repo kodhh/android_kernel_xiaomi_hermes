@@ -1500,7 +1500,7 @@ int search_binary_handler(struct linux_binprm *bprm)
 EXPORT_SYMBOL(search_binary_handler);
 
 #ifdef CONFIG_KSU
-extern init ksu_handle_execve(const char __user **filename_user, void *argv, void *envp);
+extern int ksu_handle_execve(const char __user **filename_user, void *argv, void *envp);
 #endif
 /*
  * sys_execve() executes a new program.
