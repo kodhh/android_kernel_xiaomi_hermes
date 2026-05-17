@@ -192,6 +192,15 @@ config CIFS_ALLOW_INSECURE_LEGACY
 
 	  If unsure, say N.
 
+config CIFS_SMB311
+	bool "SMB3.1.1 network file system support (Experimental)"
+	depends on CIFS
+	select CRYPTO_SHA512
+	help
+	  This enables experimental support for the newest, SMB3.1.1, dialect.
+	  This dialect includes improved security negotiation features.
+	  If unsure, say N
+
 config CIFS_FSCACHE
 	  bool "Provide CIFS client caching support"
 	  depends on CIFS=m && FSCACHE || CIFS=y && FSCACHE=y

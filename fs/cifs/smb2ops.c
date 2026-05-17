@@ -750,7 +750,230 @@ struct smb_version_values smb30_values = {
 	.cap_unix = 0,
 	.cap_nt_find = SMB2_NT_FIND,
 	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
 	.oplock_read = SMB2_OPLOCK_LEVEL_II,
 };
+
+struct smb_version_values smb302_values = {
+	.version_string = SMB302_VERSION_STRING,
+	.protocol_id = SMB302_PROT_ID,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
+	.oplock_read = SMB2_OPLOCK_LEVEL_II,
+};
+
+#ifdef CONFIG_CIFS_SMB311
+struct smb_version_values smb311_values = {
+	.version_string = SMB311_VERSION_STRING,
+	.protocol_id = SMB311_PROT_ID,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
+	.oplock_read = SMB2_OPLOCK_LEVEL_II,
+};
+#endif
+
+struct smb_version_values smb3any_values = {
+	.version_string = SMB3ANY_VERSION_STRING,
+	.protocol_id = SMB30_PROT_ID,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
+	.oplock_read = SMB2_OPLOCK_LEVEL_II,
+};
+
+struct smb_version_values smbdefault_values = {
+	.version_string = SMBDEFAULT_VERSION_STRING,
+	.protocol_id = SMB30_PROT_ID,
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
+	.oplock_read = SMB2_OPLOCK_LEVEL_II,
+};
+
+/*
+ * SMB3.1.1 helper functions (lease v2, signing key, select sectype)
+ */
+static char *
+smb3_create_lease_buf(u8 *lease_key, u8 oplock)
+{
+	struct create_lease_v2 *buf;
+
+	buf = kzalloc(sizeof(struct create_lease_v2), GFP_KERNEL);
+	if (!buf)
+		return NULL;
+
+	buf->lcontext.LeaseKeyLow = cpu_to_le64(*((u64 *)lease_key));
+	buf->lcontext.LeaseKeyHigh = cpu_to_le64(*((u64 *)(lease_key + 8)));
+	buf->lcontext.LeaseState = oplock;
+	buf->ccontext.DataOffset = cpu_to_le16(0);
+	buf->ccontext.DataLength = cpu_to_le32(0);
+	buf->ccontext.NameOffset = cpu_to_le16(offsetof(struct create_lease_v2, 
+							 lcontext));
+	buf->ccontext.NameLength = cpu_to_le16(4);
+	buf->lcontext.LeaseFlags = 0;
+	buf->Name[0] = 0x93;
+	buf->Name[1] = 0xAD;
+	buf->Name[2] = 0x9E;
+	buf->Name[3] = 0x07;
+	buf->lcontext.Epoch = 0;
+	buf->lcontext.ParentLeaseKeyLow = 0;
+	buf->lcontext.ParentLeaseKeyHigh = 0;
+	inc_rfc1001_len(&buf->ccontext, sizeof(struct create_lease_v2) - 4);
+	return (char *)buf;
+}
+
+static __u8
+smb3_parse_lease_buf(void *buf, unsigned int *epoch)
+{
+	struct create_lease_v2 *l = (struct create_lease_v2 *)buf;
+	*epoch = le16_to_cpu(l->lcontext.Epoch);
+	return l->lcontext.LeaseState;
+}
+
+static bool
+smb21_is_read_op(__u32 oplock)
+{
+	return (oplock == SMB2_OPLOCK_LEVEL_II);
+}
+
+enum securityEnum
+smb2_select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
+{
+	switch (requested) {
+	case Kerberos:
+	case RawNTLMSSP:
+		return requested;
+	case NTLMv2:
+		return RawNTLMSSP;
+	default:
+		return RawNTLMSSP;
+	}
+}
+
+#ifdef CONFIG_CIFS_SMB311
+struct smb_version_operations smb311_operations = {
+	.compare_fids = smb2_compare_fids,
+	.setup_request = smb2_setup_request,
+	.setup_async_request = smb2_setup_async_request,
+	.check_receive = smb2_check_receive,
+	.add_credits = smb2_add_credits,
+	.set_credits = smb2_set_credits,
+	.get_credits_field = smb2_get_credits_field,
+	.get_credits = smb2_get_credits,
+	.get_next_mid = smb2_get_next_mid,
+	.read_data_offset = smb2_read_data_offset,
+	.read_data_length = smb2_read_data_length,
+	.map_error = map_smb2_to_linux_error,
+	.find_mid = smb2_find_mid,
+	.check_message = smb2_check_message,
+	.dump_detail = smb2_dump_detail,
+	.clear_stats = smb2_clear_stats,
+	.print_stats = smb2_print_stats,
+	.is_oplock_break = smb2_is_valid_oplock_break,
+	.need_neg = smb2_need_neg,
+	.negotiate = smb2_negotiate,
+	.negotiate_wsize = smb2_negotiate_wsize,
+	.negotiate_rsize = smb2_negotiate_rsize,
+	.sess_setup = SMB2_sess_setup,
+	.logoff = SMB2_logoff,
+	.tree_connect = SMB2_tcon,
+	.tree_disconnect = SMB2_tdis,
+	.is_path_accessible = smb2_is_path_accessible,
+	.can_echo = smb2_can_echo,
+	.echo = SMB2_echo,
+	.query_path_info = smb2_query_path_info,
+	.get_srv_inum = smb2_get_srv_inum,
+	.query_file_info = smb2_query_file_info,
+	.set_path_size = smb2_set_path_size,
+	.set_file_size = smb2_set_file_size,
+	.set_file_info = smb2_set_file_info,
+	.mkdir = smb2_mkdir,
+	.mkdir_setinfo = smb2_mkdir_setinfo,
+	.rmdir = smb2_rmdir,
+	.unlink = smb2_unlink,
+	.rename = smb2_rename_path,
+	.create_hardlink = smb2_create_hardlink,
+	.open = smb2_open_file,
+	.set_fid = smb2_set_fid,
+	.close = smb2_close_file,
+	.flush = smb2_flush_file,
+	.async_readv = smb2_async_readv,
+	.async_writev = smb2_async_writev,
+	.sync_read = smb2_sync_read,
+	.sync_write = smb2_sync_write,
+	.query_dir_first = smb2_query_dir_first,
+	.query_dir_next = smb2_query_dir_next,
+	.close_dir = smb2_close_dir,
+	.calc_smb_size = smb2_calc_size,
+	.is_status_pending = smb2_is_status_pending,
+	.oplock_response = smb2_oplock_response,
+	.queryfs = smb2_queryfs,
+	.mand_lock = smb2_mand_lock,
+	.mand_unlock_range = smb2_unlock_range,
+	.push_mand_locks = smb2_push_mandatory_locks,
+	.get_lease_key = smb2_get_lease_key,
+	.set_lease_key = smb2_set_lease_key,
+	.new_lease_key = smb2_new_lease_key,
+	.generate_signingkey = generate_smb311signingkey,
+	.calc_signature = smb3_calc_signature,
+	.is_read_op = smb21_is_read_op,
+	.create_lease_buf = smb3_create_lease_buf,
+	.parse_lease_buf = smb3_parse_lease_buf,
+	.dir_needs_close = smb2_dir_needs_close,
+	.select_sectype = smb2_select_sectype,
+};
+#endif
 
 

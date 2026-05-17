@@ -329,3 +329,81 @@ smb2_setup_async_request(struct TCP_Server_Info *server, struct smb_rqst *rqst)
 
 	return mid;
 }
+
+/*
+ * SP800-108 KDF using CMAC-AES (per SMB3.1.1 spec section 2.2.9)
+ * K = CMAC-AES(Ki, 0x01 || Label || 0x00 || Context || L)
+ */
+static int
+smb3_kdf(struct crypto_shash *cmacaes, const u8 *ki, u32 ki_len,
+	 const u8 *label, u32 label_len,
+	 const u8 *context, u32 context_len,
+	 u8 *derived_key, u32 derived_key_len)
+{
+	int rc;
+	struct {
+		__be32 i;
+		u8 label[256];
+		u8 zero;
+		u8 context[64];
+		__be32 L;
+	} __packed kdf_input;
+	struct shash_desc desc;
+
+	if (label_len > 255 || context_len > 64)
+		return -EINVAL;
+
+	desc.tfm = cmacaes;
+	desc.flags = 0;
+
+	memset(&kdf_input, 0, sizeof(kdf_input));
+	kdf_input.i = cpu_to_be32(1);
+	memcpy(kdf_input.label, label, label_len);
+	kdf_input.zero = 0;
+	memcpy(kdf_input.context, context, context_len);
+	kdf_input.L = cpu_to_be32(derived_key_len * 8);
+
+	rc = crypto_shash_setkey(cmacaes, ki, ki_len);
+	if (rc)
+		return rc;
+
+	rc = crypto_shash_digest(&desc, (u8 *)&kdf_input,
+				 5 + label_len + 1 + context_len + 4,
+				 derived_key);
+	if (rc)
+		return rc;
+
+	return 0;
+}
+
+int
+generate_smb311signingkey(struct cifs_ses *ses)
+{
+	struct TCP_Server_Info *server = ses->server;
+	struct cifs_secmech *sec = &server->secmech;
+	u8 *key = ses->auth_key.response;
+	u32 key_len = ses->auth_key.len;
+
+	if (!sec->cmacaes)
+		return -EOPNOTSUPP;
+
+	/* SMB3.1.1 signing key: SMBSigningKey label + preauth_sha_hash context */
+	smb3_kdf(sec->cmacaes, key, key_len,
+		 "SMBSigningKey", 14,
+		 ses->preauth_sha_hash, 64,
+		 ses->smb3signingkey, SMB3_SIGN_KEY_SIZE);
+
+	/* SMB3.1.1 encryption key (client to server): SMBC2SCipherKey */
+	smb3_kdf(sec->cmacaes, key, key_len,
+		 "SMBC2SCipherKey", 16,
+		 ses->preauth_sha_hash, 64,
+		 ses->smb3encryptionkey, SMB3_SIGN_KEY_SIZE);
+
+	/* SMB3.1.1 decryption key (server to client): SMBS2CCipherKey */
+	smb3_kdf(sec->cmacaes, key, key_len,
+		 "SMBS2CCipherKey", 16,
+		 ses->preauth_sha_hash, 64,
+		 ses->smb3decryptionkey, SMB3_SIGN_KEY_SIZE);
+
+	return 0;
+}

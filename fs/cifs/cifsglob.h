@@ -48,6 +48,8 @@
 
 #define CIFS_MIN_RCV_POOL 4
 
+#define SMB3_SIGN_KEY_SIZE 16
+
 #define MAX_REOPEN_ATT	5 /* these many maximum attempts to reopen a file */
 /*
  * default attribute cache timeout (jiffies)
@@ -125,9 +127,15 @@ struct cifs_secmech {
 	struct crypto_shash *hmacmd5; /* hmac-md5 hash function */
 	struct crypto_shash *md5; /* md5 hash function */
 	struct crypto_shash *hmacsha256; /* hmac-sha256 hash function */
+	struct crypto_shash *cmacaes; /* block-cipher based MAC function */
+	struct crypto_shash *sha512; /* sha512 hash function */
 	struct sdesc *sdeschmacmd5;  /* ctxt to generate ntlmv2 hash, CR1 */
 	struct sdesc *sdescmd5; /* ctxt to generate cifs/smb signature */
 	struct sdesc *sdeschmacsha256;  /* ctxt to generate smb2 signature */
+	struct sdesc *sdesccmacaes;  /* ctxt to generate smb3 signature */
+	struct sdesc *sdescsha512; /* ctxt to generate smb3.11 signing key */
+	struct crypto_aead *ccmaesencrypt; /* smb3 encryption aead */
+	struct crypto_aead *ccmaesdecrypt; /* smb3 decryption aead */
 };
 
 /* per smb session structure/fields */
@@ -175,6 +183,13 @@ enum smb_version {
 	Smb_20,
 	Smb_21,
 	Smb_30,
+	Smb_302,
+#ifdef CONFIG_CIFS_SMB311
+	Smb_311,
+#endif /* SMB311 */
+	Smb_3any,
+	Smb_default,
+	Smb_version_err
 };
 
 struct mid_q_entry;
@@ -373,8 +388,47 @@ struct smb_version_operations {
 			const char *, u32 *);
 	int (*set_acl)(struct cifs_ntsd *, __u32, struct inode *, const char *,
 			int);
+	int (*generate_signingkey)(struct cifs_ses *);
+	int (*set_integrity)(const unsigned int, struct cifs_tcon *tcon,
+			     struct cifsFileInfo *src_file);
+	int (*enum_snapshots)(const unsigned int xid, struct cifs_tcon *tcon,
+			     struct cifsFileInfo *src_file, void __user *);
+	int (*query_mf_symlink)(unsigned int, struct cifs_tcon *,
+				struct cifs_sb_info *, const unsigned char *,
+				char *, unsigned int *);
+	int (*create_mf_symlink)(unsigned int, struct cifs_tcon *,
+				 struct cifs_sb_info *, const unsigned char *,
+				 char *, unsigned int *);
+	bool (*is_read_op)(__u32);
+	void (*set_oplock_level)(struct cifsInodeInfo *, __u32, unsigned int,
+				 bool *);
+	char * (*create_lease_buf)(u8 *, u8);
+	__u8 (*parse_lease_buf)(void *, unsigned int *);
+	ssize_t (*copychunk_range)(const unsigned int,
+			struct cifsFileInfo *src_file,
+			struct cifsFileInfo *target_file,
+			u64 src_off, u64 len, u64 dest_off);
+	int (*duplicate_extents)(const unsigned int, struct cifsFileInfo *src,
+			struct cifsFileInfo *target_file, u64 src_off, u64 len,
+			u64 dest_off);
+	int (*validate_negotiate)(const unsigned int, struct cifs_tcon *);
+	struct cifs_ntsd * (*get_acl_by_fid)(struct cifs_sb_info *,
+			const struct cifs_fid *, u32 *);
 	/* check if we need to issue closedir */
 	bool (*dir_needs_close)(struct cifsFileInfo *);
+	unsigned int (*wp_retry_size)(struct inode *);
+	int (*wait_mtu_credits)(struct TCP_Server_Info *, unsigned int,
+				unsigned int *, unsigned int *);
+	long (*fallocate)(struct file *, struct cifs_tcon *, int, loff_t,
+			  loff_t);
+	int (*init_transform_rq)(struct TCP_Server_Info *, struct smb_rqst *,
+				 struct smb_rqst *);
+	void (*free_transform_rq)(struct smb_rqst *);
+	int (*is_transform_hdr)(void *buf);
+	int (*receive_transform)(struct TCP_Server_Info *,
+				 struct mid_q_entry **);
+	enum securityEnum (*select_sectype)(struct TCP_Server_Info *,
+			    enum securityEnum);
 };
 
 struct smb_version_values {
@@ -392,7 +446,10 @@ struct smb_version_values {
 	unsigned int	cap_unix;
 	unsigned int	cap_nt_find;
 	unsigned int	cap_large_files;
-	unsigned int	oplock_read;
+	__u16		signing_enabled;
+	__u16		signing_required;
+	size_t		create_lease_size;
+	__u8		oplock_read;
 };
 
 #define HEADER_SIZE(server) (server->vals->header_size)
@@ -520,10 +577,12 @@ struct TCP_Server_Info {
 	struct task_struct *tsk;
 	char server_GUID[16];
 	__u16 sec_mode;
+	bool sign; /* is signing enabled on this connection? */
 	bool session_estab; /* mark when very first sess is established */
 	int echo_credits;  /* echo reserved slots */
 	int oplock_credits;  /* oplock break reserved slots */
 	bool echoes:1; /* enable echoes */
+	__u8 client_guid[SMB2_CLIENT_GUID_SIZE]; /* Client GUID */
 	u16 dialect; /* dialect index that server chose */
 	enum securityEnum secType;
 	bool oplocks:1; /* enable oplocks */
@@ -571,8 +630,10 @@ struct TCP_Server_Info {
 #endif
 	unsigned int	max_read;
 	unsigned int	max_write;
+	__u8	preauth_sha_hash[64]; /* save initital negprot hash */
 	struct delayed_work reconnect; /* reconnect workqueue job */
 	struct mutex reconnect_mutex; /* prevent simultaneous reconnects */
+	unsigned long echo_interval;
 };
 
 static inline unsigned int
@@ -718,8 +779,15 @@ struct cifs_ses {
 	char *password;
 	struct session_key auth_key;
 	struct ntlmssp_auth *ntlmssp; /* ciphertext, flags, server challenge */
+	enum securityEnum sectype; /* what security flavor was specified? */
+	bool sign;		/* is signing required? */
 	bool need_reconnect:1; /* connection reset, uid now invalid */
+	bool domainAuto:1;
 	__u16 session_flags;
+	__u8 smb3signingkey[SMB3_SIGN_KEY_SIZE];
+	__u8 smb3encryptionkey[SMB3_SIGN_KEY_SIZE];
+	__u8 smb3decryptionkey[SMB3_SIGN_KEY_SIZE];
+	__u8 preauth_sha_hash[64];
 };
 
 /* no more than one of the following three session flags may be set */
@@ -1486,6 +1554,15 @@ extern struct smb_version_values smb21_values;
 #define SMB30_VERSION_STRING	"3.0"
 extern struct smb_version_operations smb30_operations;
 extern struct smb_version_values smb30_values;
+#define SMB302_VERSION_STRING	"3.02"
+extern struct smb_version_values smb302_values;
+#define SMB311_VERSION_STRING	"3.1.1"
+extern struct smb_version_operations smb311_operations;
+extern struct smb_version_values smb311_values;
+#define SMB3ANY_VERSION_STRING	"3"
+extern struct smb_version_values smb3any_values;
+#define SMBDEFAULT_VERSION_STRING "default"
+extern struct smb_version_values smbdefault_values;
 static inline u64 cifs_flock_len(struct file_lock *fl)
 {
 	return fl->fl_end == OFFSET_MAX ? 0 : fl->fl_end - fl->fl_start + 1;
