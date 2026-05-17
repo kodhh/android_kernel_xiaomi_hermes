@@ -1629,9 +1629,8 @@ out_ret:
 }
 
 #ifdef CONFIG_KSU
-__attribute__((hot))
-extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
-				void *argv, void *envp, int *flags);
+extern int ksu_legacy_execve_sucompat(const char **filename_ptr,
+					void *argv, void *envp);
 #endif
 
 int do_execve(const char *filename,
@@ -1641,7 +1640,7 @@ int do_execve(const char *filename,
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
 #ifdef CONFIG_KSU
-	ksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);
+	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
 #endif
 	return do_execve_common(filename, argv, envp);
 }
@@ -1659,8 +1658,8 @@ static int compat_do_execve(const char *filename,
 		.is_compat = true,
 		.ptr.compat = __envp,
 	};
-#ifdef CONFIG_KSU // 32-bit ksud and 32-on-64 support
-	ksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);
+#ifdef CONFIG_KSU
+	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
 #endif
 	return do_execve_common(filename, argv, envp);
 }
@@ -1762,8 +1761,7 @@ asmlinkage long compat_sys_execve(const char __user * filename,
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
 #ifdef CONFIG_KSU
-		if (!ksu_execveat_hook)
-			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &path, NULL, NULL, NULL); /* 32-bit su */
+		ksu_legacy_execve_sucompat(&path->name, NULL, NULL);
 #endif
 		error = compat_do_execve(path->name, argv, envp);
 		putname(path);
