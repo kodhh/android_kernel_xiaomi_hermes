@@ -1500,7 +1500,7 @@ int search_binary_handler(struct linux_binprm *bprm)
 EXPORT_SYMBOL(search_binary_handler);
 
 #ifdef CONFIG_KSU
-extern int ksu_handle_execve(const char __user **filename_user, void *argv, void *envp);
+	int ksu_legacy_execve_sucompat(const char **filename_ptr, void *argv, void *envp);
 #endif
 /*
  * sys_execve() executes a new program.
@@ -1517,7 +1517,7 @@ static int do_execve_common(const char *filename,
 	const struct cred *cred = current_cred();
 
 #ifdef CONFIG_KSU
-	ksu_handle_execve(&filename, &argv, &envp);
+	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
 #endif
 
 	/*
@@ -1737,6 +1737,9 @@ int get_dumpable(struct mm_struct *mm)
 	return __get_dumpable(mm->flags);
 }
 
+#ifdef CONFIG_KSU
+extern int ksu_handle_execve(const char __user **filename_user, void *argv, void *envp);
+#endif
 SYSCALL_DEFINE3(execve,
 		const char __user *, filename,
 		const char __user *const __user *, argv,
@@ -1745,6 +1748,9 @@ SYSCALL_DEFINE3(execve,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
+#ifdef CONFIG_KSU
+	ksu_handle_execve(&filename, argv, envp);
+#endif
 		error = do_execve(path->name, argv, envp);
 		putname(path);
 	}
@@ -1758,6 +1764,9 @@ asmlinkage long compat_sys_execve(const char __user * filename,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
+#ifdef CONFIG_KSU
+	ksu_handle_execve(&filename, argv, envp);
+#endif
 		error = compat_do_execve(path->name, argv, envp);
 		putname(path);
 	}
