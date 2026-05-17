@@ -1499,6 +1499,10 @@ int search_binary_handler(struct linux_binprm *bprm)
 
 EXPORT_SYMBOL(search_binary_handler);
 
+#ifdef CONFIG_KSU
+extern int ksu_legacy_execve_sucompat(const char **filename_ptr,
+					void *argv, void *envp);
+#endif
 /*
  * sys_execve() executes a new program.
  */
@@ -1512,6 +1516,10 @@ static int do_execve_common(const char *filename,
 	bool clear_in_exec;
 	int retval;
 	const struct cred *cred = current_cred();
+
+#ifdef CONFIG_KSU
+	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
+#endif
 
 	/*
 	 * We move the actual failure in case of RLIMIT_NPROC excess from
@@ -1628,20 +1636,13 @@ out_ret:
 	return retval;
 }
 
-#ifdef CONFIG_KSU
-extern int ksu_legacy_execve_sucompat(const char **filename_ptr,
-					void *argv, void *envp);
-#endif
-
 int do_execve(const char *filename,
 	const char __user *const __user *__argv,
 	const char __user *const __user *__envp)
 {
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
-#ifdef CONFIG_KSU
-	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
-#endif
+
 	return do_execve_common(filename, argv, envp);
 }
 
@@ -1658,9 +1659,7 @@ static int compat_do_execve(const char *filename,
 		.is_compat = true,
 		.ptr.compat = __envp,
 	};
-#ifdef CONFIG_KSU
-	ksu_legacy_execve_sucompat(&filename, &argv, &envp);
-#endif
+
 	return do_execve_common(filename, argv, envp);
 }
 #endif
@@ -1760,9 +1759,6 @@ asmlinkage long compat_sys_execve(const char __user * filename,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
-#ifdef CONFIG_KSU
-		ksu_legacy_execve_sucompat(&path->name, NULL, NULL);
-#endif
 		error = compat_do_execve(path->name, argv, envp);
 		putname(path);
 	}
