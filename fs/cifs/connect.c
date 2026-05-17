@@ -1119,7 +1119,7 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 		vol->vals = &smb30_values;
 		break;
 	case Smb_311:
-		vol->ops = &smb30_operations; /* currently identical with 3.0 */
+		vol->ops = &smb311_operations;
 		vol->vals = &smb311_values;
 		break;
 	default:

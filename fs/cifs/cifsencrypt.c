@@ -717,9 +717,14 @@ cifs_crypto_shash_release(struct TCP_Server_Info *server)
 	if (server->secmech.sha512)
 		crypto_free_shash(server->secmech.sha512);
 
+	if (server->secmech.cmacaes)
+		crypto_free_shash(server->secmech.cmacaes);
+
 	kfree(server->secmech.sdeschmacsha256);
 
 	kfree(server->secmech.sdescsha512);
+
+	kfree(server->secmech.sdesccmacaes);
 
 	kfree(server->secmech.sdeschmacmd5);
 
@@ -799,8 +804,29 @@ cifs_crypto_shash_allocate(struct TCP_Server_Info *server)
 	server->secmech.sdescsha512->shash.tfm = server->secmech.sha512;
 	server->secmech.sdescsha512->shash.flags = 0x0;
 
+	server->secmech.cmacaes = crypto_alloc_shash("cmac(aes)", 0, 0);
+	if (IS_ERR(server->secmech.cmacaes)) {
+		cifs_dbg(VFS, "could not allocate crypto cmac-aes\n");
+		rc = PTR_ERR(server->secmech.cmacaes);
+		goto crypto_allocate_cmacaes_fail;
+	}
+
+	size = sizeof(struct shash_desc) +
+			crypto_shash_descsize(server->secmech.cmacaes);
+	server->secmech.sdesccmacaes = kmalloc(size, GFP_KERNEL);
+	if (!server->secmech.sdesccmacaes) {
+		rc = -ENOMEM;
+		goto crypto_allocate_cmacaes_sdesc_fail;
+	}
+	server->secmech.sdesccmacaes->shash.tfm = server->secmech.cmacaes;
+	server->secmech.sdesccmacaes->shash.flags = 0x0;
+
 	return 0;
 
+crypto_allocate_cmacaes_sdesc_fail:
+	crypto_free_shash(server->secmech.cmacaes);
+
+crypto_allocate_cmacaes_fail:
 crypto_allocate_sha512_sdesc_fail:
 	crypto_free_shash(server->secmech.sha512);
 

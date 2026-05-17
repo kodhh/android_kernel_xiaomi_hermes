@@ -126,10 +126,12 @@ struct cifs_secmech {
 	struct crypto_shash *md5; /* md5 hash function */
 	struct crypto_shash *hmacsha256; /* hmac-sha256 hash function */
 	struct crypto_shash *sha512; /* sha512 hash function */
+	struct crypto_shash *cmacaes; /* block-cipher based MAC function */
 	struct sdesc *sdeschmacmd5;  /* ctxt to generate ntlmv2 hash, CR1 */
 	struct sdesc *sdescmd5; /* ctxt to generate cifs/smb signature */
 	struct sdesc *sdeschmacsha256;  /* ctxt to generate smb2 signature */
 	struct sdesc *sdescsha512; /* ctxt to generate smb3.11 signing key */
+	struct sdesc *sdesccmacaes;  /* ctxt to generate smb3 signature */
 };
 
 /* per smb session structure/fields */
@@ -177,6 +179,7 @@ enum smb_version {
 	Smb_20,
 	Smb_21,
 	Smb_30,
+	Smb_302,
 	Smb_311,
 	Smb_version_err
 };
@@ -365,6 +368,7 @@ struct smb_version_operations {
 	void (*set_lease_key)(struct inode *, struct cifs_fid *fid);
 	/* generate new lease key */
 	void (*new_lease_key)(struct cifs_fid *fid);
+	int (*generate_signingkey)(struct cifs_ses *);
 	int (*calc_signature)(struct smb_rqst *rqst,
 				   struct TCP_Server_Info *server);
 	ssize_t (*query_all_EAs)(const unsigned int, struct cifs_tcon *,
@@ -724,6 +728,7 @@ struct cifs_ses {
 	struct ntlmssp_auth *ntlmssp; /* ciphertext, flags, server challenge */
 	bool need_reconnect:1; /* connection reset, uid now invalid */
 	__u16 session_flags;
+	char smb3signingkey[SMB3_SIGNKEY_SIZE];
 };
 
 /* no more than one of the following three session flags may be set */
@@ -1491,7 +1496,7 @@ extern struct smb_version_values smb21_values;
 extern struct smb_version_operations smb30_operations;
 extern struct smb_version_values smb30_values;
 #define SMB311_VERSION_STRING	"3.1.1"
-/*extern struct smb_version_operations smb311_operations;*/ /* not needed yet */
+extern struct smb_version_operations smb311_operations;
 extern struct smb_version_values smb311_values;
 static inline u64 cifs_flock_len(struct file_lock *fl)
 {

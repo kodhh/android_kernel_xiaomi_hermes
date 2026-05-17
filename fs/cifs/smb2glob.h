@@ -51,10 +51,6 @@
 #define END_OF_CHAIN 4
 #define RELATED_REQUEST 8
 
-#define SMB2_SIGNATURE_SIZE (16)
-#define SMB2_NTLMV2_SESSKEY_SIZE (16)
-#define SMB2_HMACSHA256_SIZE (32)
-
 /* Maximum buffer size value we can send with 1 credit */
 #define SMB2_MAX_BUFFER_SIZE 65536
 

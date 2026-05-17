@@ -474,6 +474,7 @@ extern struct cifs_tcon *tconInfoAlloc(void);
 extern void tconInfoFree(struct cifs_tcon *);
 extern int cifs_crypto_shash_allocate(struct TCP_Server_Info *);
 extern void cifs_crypto_shash_release(struct TCP_Server_Info *);
+extern int generate_smb3signingkey(struct cifs_ses *);
 extern int cifs_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server,
 		   __u32 *pexpected_response_sequence_number);
 extern int cifs_sign_smbv(struct kvec *iov, int n_vec, struct TCP_Server_Info *,
