@@ -1774,9 +1774,11 @@ int cifs_revalidate_file_attr(struct file *filp)
 	if (!cifs_inode_needs_reval(inode))
 		return rc;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tlink_tcon(cfile->tlink)->unix_ext)
 		rc = cifs_get_file_info_unix(filp);
 	else
+#endif
 		rc = cifs_get_file_info(filp);
 
 	return rc;

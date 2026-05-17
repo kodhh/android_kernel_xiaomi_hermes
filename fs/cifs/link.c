@@ -180,8 +180,8 @@ CIFSFormatMFSymlink(u8 *buf, unsigned int buf_len, const char *link_str)
 	return 0;
 }
 
-static int
 #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
+static int
 CIFSCreateMFSymLink(const unsigned int xid, struct cifs_tcon *tcon,
 		    const char *fromName, const char *toName,
 		    struct cifs_sb_info *cifs_sb)

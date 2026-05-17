@@ -159,6 +159,10 @@ extern int cifs_acl_to_fattr(struct cifs_sb_info *cifs_sb,
 			      const char *path, const __u16 *pfid);
 extern int id_mode_to_cifs_acl(struct inode *inode, const char *path, __u64,
 					kuid_t, kgid_t);
+extern struct cifs_ses *sesInfoAlloc(void);
+extern void sesInfoFree(struct cifs_ses *);
+extern struct cifs_tcon *tconInfoAlloc(void);
+extern void tconInfoFree(struct cifs_tcon *);
 #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFS_SessSetup(const unsigned int xid, struct cifs_ses *ses,
 			  const struct nls_table *nls_cp);
@@ -430,9 +434,17 @@ extern int SMBNTencrypt(unsigned char *, unsigned char *, unsigned char *,
 			const struct nls_table *);
 extern int setup_ntlm_response(struct cifs_ses *, const struct nls_table *);
 extern int setup_ntlmv2_rsp(struct cifs_ses *, const struct nls_table *);
+extern int __cifs_calc_signature(struct smb_rqst *rqst,
+			struct TCP_Server_Info *server, unsigned char *sig,
+			struct shash_desc *shash);
 extern int cifs_crypto_shash_allocate(struct TCP_Server_Info *);
 extern void cifs_crypto_shash_release(struct TCP_Server_Info *);
 extern int calc_seckey(struct cifs_ses *);
+extern int cifs_alloc_hash(const char *name,
+			   struct crypto_shash **shash,
+			   struct sdesc **sdesc);
+extern void cifs_free_hash(struct crypto_shash **shash,
+			   struct sdesc **sdesc);
 
 #ifdef CONFIG_CIFS_WEAK_PW_HASH
 extern int calc_lanman_hash(const char *password, const char *cryptkey,

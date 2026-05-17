@@ -97,6 +97,7 @@ enum securityEnum {
 	RawNTLMSSP,		/* NTLMSSP without SPNEGO, NTLMv2 hash */
 /*	NTLMSSP, */ /* can use rawNTLMSSP instead of NTLMSSP via SPNEGO */
 	Kerberos,		/* Kerberos via SPNEGO */
+	Unspecified,
 };
 
 enum protocolEnum {
@@ -121,9 +122,15 @@ struct cifs_secmech {
 	struct crypto_shash *hmacmd5; /* hmac-md5 hash function */
 	struct crypto_shash *md5; /* md5 hash function */
 	struct crypto_shash *hmacsha256; /* hmac-sha256 hash function */
+	struct crypto_shash *cmacaes; /* block-cipher based MAC function */
+	struct crypto_shash *sha512; /* sha512 hash function */
 	struct sdesc *sdeschmacmd5;  /* ctxt to generate ntlmv2 hash, CR1 */
 	struct sdesc *sdescmd5; /* ctxt to generate cifs/smb signature */
 	struct sdesc *sdeschmacsha256;  /* ctxt to generate smb2 signature */
+	struct sdesc *sdesccmacaes;  /* ctxt to generate smb3 signature */
+	struct sdesc *sdescsha512; /* ctxt to generate smb3.11 signing key */
+	struct crypto_aead *ccmaesencrypt; /* smb3 encryption aead */
+	struct crypto_aead *ccmaesdecrypt; /* smb3 decryption aead */
 };
 
 /* per smb session structure/fields */
@@ -172,6 +179,13 @@ enum smb_version {
 	Smb_20,
 	Smb_21,
 	Smb_30,
+	Smb_302,
+#ifdef CONFIG_CIFS_SMB311
+	Smb_311,
+#endif
+	Smb_3any,
+	Smb_default,
+	Smb_version_err
 };
 
 struct mid_q_entry;
@@ -358,8 +372,13 @@ struct smb_version_operations {
 	void (*set_lease_key)(struct inode *, struct cifs_fid *fid);
 	/* generate new lease key */
 	void (*new_lease_key)(struct cifs_fid *fid);
+	int (*generate_signingkey)(struct cifs_ses *);
 	int (*calc_signature)(struct smb_rqst *rqst,
 				   struct TCP_Server_Info *server);
+	int (*set_integrity)(const unsigned int, struct cifs_tcon *tcon,
+			     struct cifsFileInfo *src_file);
+	int (*enum_snapshots)(const unsigned int xid, struct cifs_tcon *tcon,
+			     struct cifsFileInfo *src_file, void __user *);
 	ssize_t (*query_all_EAs)(const unsigned int, struct cifs_tcon *,
 			const unsigned char *, const unsigned char *, char *,
 			size_t, const struct nls_table *, int);
@@ -370,8 +389,48 @@ struct smb_version_operations {
 			const char *, u32 *);
 	int (*set_acl)(struct cifs_ntsd *, __u32, struct inode *, const char *,
 			int);
+	/* writepages retry size */
+	unsigned int (*wp_retry_size)(struct inode *);
+	/* get mtu credits */
+	int (*wait_mtu_credits)(struct TCP_Server_Info *, unsigned int,
+				unsigned int *, unsigned int *);
 	/* check if we need to issue closedir */
 	bool (*dir_needs_close)(struct cifsFileInfo *);
+	long (*fallocate)(struct file *, struct cifs_tcon *, int, loff_t,
+			  loff_t);
+	/* init transform request - used for encryption for now */
+	int (*init_transform_rq)(struct TCP_Server_Info *, struct smb_rqst *,
+				 struct smb_rqst *);
+	/* free transform request */
+	void (*free_transform_rq)(struct smb_rqst *);
+	int (*is_transform_hdr)(void *buf);
+	int (*receive_transform)(struct TCP_Server_Info *,
+				 struct mid_q_entry **);
+	enum securityEnum (*select_sectype)(struct TCP_Server_Info *,
+			    enum securityEnum);
+	/* dump share capabilities */
+	void (*dump_share_caps)(struct seq_file *, struct cifs_tcon *);
+	/* check if we have an (expired) session */
+	bool (*is_session_expired)(struct cifs_ses *);
+	/* handle cancelled mid callback */
+	void (*handle_cancelled_mid)(struct mid_q_entry *, struct TCP_Server_Info *);
+	/* set oplock level */
+	void (*set_oplock_level)(struct cifsInodeInfo *, __u32, unsigned int,
+				 bool);
+	/* create lease buffer */
+	char *(*create_lease_buf)(u8 *, u8);
+	/* parse lease buffer */
+	u8 (*parse_lease_buf)(void *, struct cifs_fid *);
+	/* copy chunk range */
+	ssize_t (*copychunk_range)(const unsigned int, struct cifsFileInfo *,
+				   struct cifsFileInfo *, __u64, unsigned int,
+				   struct cifs_io_parms *, unsigned int *,
+				   struct kvec *, unsigned long);
+	/* duplicate extents */
+	int (*duplicate_extents)(const unsigned int, struct cifsFileInfo *,
+				 struct cifsFileInfo *, __u64, __u64, __u64);
+	/* validate negotiate */
+	int (*validate_negotiate)(const unsigned int, struct cifs_tcon *);
 };
 
 struct smb_version_values {
@@ -390,6 +449,9 @@ struct smb_version_values {
 	unsigned int	cap_nt_find;
 	unsigned int	cap_large_files;
 	unsigned int	oplock_read;
+	__u16		signing_enabled;
+	__u16		signing_required;
+	size_t		create_lease_size;
 };
 
 #define HEADER_SIZE(server) (server->vals->header_size)
@@ -521,6 +583,7 @@ struct TCP_Server_Info {
 	int echo_credits;  /* echo reserved slots */
 	int oplock_credits;  /* oplock break reserved slots */
 	bool echoes:1; /* enable echoes */
+	__u8 client_guid[SMB2_CLIENT_GUID_SIZE]; /* Client GUID */
 	u16 dialect; /* dialect index that server chose */
 	enum securityEnum secType;
 	bool oplocks:1; /* enable oplocks */
@@ -568,6 +631,9 @@ struct TCP_Server_Info {
 #endif
 	unsigned int	max_read;
 	unsigned int	max_write;
+#ifdef CONFIG_CIFS_SMB311
+	__u8	preauth_sha_hash[64]; /* save initital negprot hash */
+#endif
 	struct delayed_work reconnect; /* reconnect workqueue job */
 	struct mutex reconnect_mutex; /* prevent simultaneous reconnects */
 };
@@ -689,6 +755,9 @@ static inline void cifs_set_net_ns(struct TCP_Server_Info *srv, struct net *net)
 /*
  * Session structure.  One of these for each uid session with a particular host
  */
+#define SMB3_SIGN_KEY_SIZE 16
+#define SMB2_CMACAES_SIZE 16
+
 struct cifs_ses {
 	struct list_head smb_ses_list;
 	struct list_head tcon_list;
@@ -717,6 +786,12 @@ struct cifs_ses {
 	struct ntlmssp_auth *ntlmssp; /* ciphertext, flags, server challenge */
 	bool need_reconnect:1; /* connection reset, uid now invalid */
 	__u16 session_flags;
+	__u8 smb3signingkey[SMB3_SIGN_KEY_SIZE];
+	__u8 smb3encryptionkey[SMB3_SIGN_KEY_SIZE];
+	__u8 smb3decryptionkey[SMB3_SIGN_KEY_SIZE];
+#ifdef CONFIG_CIFS_SMB311
+	__u8 preauth_sha_hash[64];
+#endif
 };
 
 /* no more than one of the following three session flags may be set */
@@ -922,7 +997,6 @@ struct cifs_fid {
 	__u64 persistent_fid;	/* persist file id for smb2 */
 	__u64 volatile_fid;	/* volatile file id for smb2 */
 	__u8 lease_key[SMB2_LEASE_KEY_SIZE];	/* lease key for smb2 */
-#endif
 	struct cifs_pending_open *pending_open;
 };
 
@@ -956,7 +1030,6 @@ struct cifs_io_parms {
 	__u16 netfid;
 	__u64 persistent_fid;	/* persist file id for smb2 */
 	__u64 volatile_fid;	/* volatile file id for smb2 */
-#endif
 	__u32 pid;
 	__u64 offset;
 	unsigned int length;
@@ -1040,7 +1113,8 @@ struct cifsInodeInfo {
 	u64  uniqueid;			/* server inode number */
 	u64  createtime;		/* creation time on server */
 	__u8 lease_key[SMB2_LEASE_KEY_SIZE];	/* lease key for this inode */
-#endif
+	__u32 lease_state; /* smb2 lease state (host endian) */
+	__u16 epoch; /* smb3 epoch */
 #ifdef CONFIG_CIFS_FSCACHE
 	struct fscache_cookie *fscache;
 #endif
@@ -1497,4 +1571,17 @@ extern struct smb_version_values smb21_values;
 #define SMB30_VERSION_STRING	"3.0"
 extern struct smb_version_operations smb30_operations;
 extern struct smb_version_values smb30_values;
+#define SMB302_VERSION_STRING	"3.02"
+extern struct smb_version_values smb302_values;
+#define SMB311_VERSION_STRING	"3.11"
+#define ALT_SMB311_VERSION_STRING	"SMB3.11"
+#ifdef CONFIG_CIFS_SMB311
+extern struct smb_version_operations smb311_operations;
+extern struct smb_version_values smb311_values;
+#endif
+#define SMB3ANY_VERSION_STRING	"3any"
+extern struct smb_version_values smb3any_values;
+#define SMBDEFAULT_VERSION_STRING	"default"
+extern struct smb_version_values smbdefault_values;
+
 #endif	/* _CIFS_GLOB_H */

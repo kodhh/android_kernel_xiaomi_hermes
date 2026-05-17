@@ -157,4 +157,14 @@ extern int smb2_lockv(const unsigned int xid, struct cifs_tcon *tcon,
 extern int SMB2_lease_break(const unsigned int xid, struct cifs_tcon *tcon,
 			    __u8 *lease_key, const __le32 lease_state);
 
+extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *, __u64);
+extern struct cifs_tcon *smb2_find_smb_tcon(struct TCP_Server_Info *, __u64,
+					    __u32);
+extern int smb3_crypto_aead_allocate(struct TCP_Server_Info *);
+extern int generate_smb30signingkey(struct cifs_ses *);
+#ifdef CONFIG_CIFS_SMB311
+extern int smb311_crypto_shash_allocate(struct TCP_Server_Info *server);
+extern int generate_smb311signingkey(struct cifs_ses *);
+#endif
+
 #endif			/* _SMB2PROTO_H */

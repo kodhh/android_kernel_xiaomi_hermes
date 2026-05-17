@@ -31,6 +31,56 @@
 #include <linux/random.h>
 #include <linux/highmem.h>
 
+int __cifs_calc_signature(struct smb_rqst *rqst,
+			struct TCP_Server_Info *server, unsigned char *sig,
+			struct shash_desc *shash)
+{
+	int i;
+	int rc;
+	struct kvec *iov = rqst->rq_iov;
+	int n_vec = rqst->rq_nvec;
+
+	if (n_vec < 2 || iov[0].iov_len != 4)
+		return -EIO;
+
+	for (i = 1; i < n_vec; i++) {
+		if (iov[i].iov_len == 0)
+			continue;
+		if (iov[i].iov_base == NULL) {
+			cifs_dbg(VFS, "null iovec entry\n");
+			return -EIO;
+		}
+		if (i == 1 && iov[1].iov_len <= 4)
+			break; /* nothing to sign or corrupt header */
+		rc = crypto_shash_update(shash,
+					 iov[i].iov_base, iov[i].iov_len);
+		if (rc) {
+			cifs_dbg(VFS, "%s: Could not update with payload\n",
+				 __func__);
+			return rc;
+		}
+	}
+
+	/* now hash over the rq_pages array */
+	for (i = 0; i < rqst->rq_npages; i++) {
+		void *kaddr = kmap(rqst->rq_pages[i]);
+		size_t len = rqst->rq_pagesz;
+
+		if (i == rqst->rq_npages - 1)
+			len = rqst->rq_tailsz;
+
+		crypto_shash_update(shash, kaddr, len);
+
+		kunmap(rqst->rq_pages[i]);
+	}
+
+	rc = crypto_shash_final(shash, sig);
+	if (rc)
+		cifs_dbg(VFS, "%s: Could not generate hash\n", __func__);
+
+	return rc;
+}
+
 /*
  * Calculate and return the CIFS signature based on the mac key and SMB PDU.
  * The 16 byte signature must be allocated by the caller. Note we only use the
@@ -796,4 +846,42 @@ crypto_allocate_md5_fail:
 	crypto_free_shash(server->secmech.hmacmd5);
 
 	return rc;
+}
+
+int
+cifs_alloc_hash(const char *name,
+		struct crypto_shash **shash,
+		struct sdesc **sdesc)
+{
+	int rc;
+	unsigned int size;
+
+	*shash = crypto_alloc_shash(name, 0, 0);
+	if (IS_ERR(*shash)) {
+		cifs_dbg(VFS, "could not allocate crypto %s\n", name);
+		return PTR_ERR(*shash);
+	}
+
+	size = sizeof(struct shash_desc) + crypto_shash_descsize(*shash);
+	*sdesc = kmalloc(size, GFP_KERNEL);
+	if (!*sdesc) {
+		cifs_dbg(VFS, "no memory left to allocate crypto %s\n", name);
+		crypto_free_shash(*shash);
+		return -ENOMEM;
+	}
+
+	(*sdesc)->shash.tfm = *shash;
+	(*sdesc)->shash.flags = 0x0;
+	return 0;
+}
+
+void
+cifs_free_hash(struct crypto_shash **shash,
+	       struct sdesc **sdesc)
+{
+	kfree(*sdesc);
+	*sdesc = NULL;
+	if (*shash)
+		crypto_free_shash(*shash);
+	*shash = NULL;
 }

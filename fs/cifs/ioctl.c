@@ -49,7 +49,7 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 	cifs_sb = CIFS_SB(inode->i_sb);
 
 	switch (command) {
-#ifdef CONFIG_CIFS_POSIX
+#if defined(CONFIG_CIFS_POSIX) && defined(CONFIG_CIFS_ALLOW_INSECURE_LEGACY)
 		case FS_IOC_GETFLAGS:
 			if (pSMBFile == NULL)
 				break;
@@ -85,7 +85,7 @@ long cifs_ioctl(struct file *filep, unsigned int command, unsigned long arg)
 			}
 			cifs_dbg(FYI, "set flags not implemented yet\n");
 			break;
-#endif /* CONFIG_CIFS_POSIX */
+#endif /* CONFIG_CIFS_POSIX && CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 		default:
 			cifs_dbg(FYI, "unsupported ioctl\n");
 			break;
