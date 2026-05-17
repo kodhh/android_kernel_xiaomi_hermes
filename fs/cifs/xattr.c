@@ -194,7 +194,7 @@ int cifs_setxattr(struct dentry *direntry, const char *ea_name,
 		temp = strncmp(ea_name, POSIX_ACL_XATTR_ACCESS,
 			strlen(POSIX_ACL_XATTR_ACCESS));
 		if (temp == 0) {
-#ifdef CONFIG_CIFS_POSIX
+#if defined(CONFIG_CIFS_POSIX) && defined(CONFIG_CIFS_ALLOW_INSECURE_LEGACY)
 			if (sb->s_flags & MS_POSIXACL)
 				rc = CIFSSMBSetPosixACL(xid, pTcon, full_path,
 					ea_value, (const int)value_size,
@@ -207,7 +207,7 @@ int cifs_setxattr(struct dentry *direntry, const char *ea_name,
 #endif
 		} else if (strncmp(ea_name, POSIX_ACL_XATTR_DEFAULT,
 				   strlen(POSIX_ACL_XATTR_DEFAULT)) == 0) {
-#ifdef CONFIG_CIFS_POSIX
+#if defined(CONFIG_CIFS_POSIX) && defined(CONFIG_CIFS_ALLOW_INSECURE_LEGACY)
 			if (sb->s_flags & MS_POSIXACL)
 				rc = CIFSSMBSetPosixACL(xid, pTcon, full_path,
 					ea_value, (const int)value_size,
@@ -299,7 +299,7 @@ ssize_t cifs_getxattr(struct dentry *direntry, const char *ea_name,
 					CIFS_MOUNT_MAP_SPECIAL_CHR);
 	} else if (strncmp(ea_name, POSIX_ACL_XATTR_ACCESS,
 			  strlen(POSIX_ACL_XATTR_ACCESS)) == 0) {
-#ifdef CONFIG_CIFS_POSIX
+#if defined(CONFIG_CIFS_POSIX) && defined(CONFIG_CIFS_ALLOW_INSECURE_LEGACY)
 		if (sb->s_flags & MS_POSIXACL)
 			rc = CIFSSMBGetPosixACL(xid, pTcon, full_path,
 				ea_value, buf_size, ACL_TYPE_ACCESS,
@@ -308,10 +308,10 @@ ssize_t cifs_getxattr(struct dentry *direntry, const char *ea_name,
 					CIFS_MOUNT_MAP_SPECIAL_CHR);
 #else
 		cifs_dbg(FYI, "Query POSIX ACL not supported yet\n");
-#endif /* CONFIG_CIFS_POSIX */
+#endif /* CONFIG_CIFS_POSIX && CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	} else if (strncmp(ea_name, POSIX_ACL_XATTR_DEFAULT,
 			  strlen(POSIX_ACL_XATTR_DEFAULT)) == 0) {
-#ifdef CONFIG_CIFS_POSIX
+#if defined(CONFIG_CIFS_POSIX) && defined(CONFIG_CIFS_ALLOW_INSECURE_LEGACY)
 		if (sb->s_flags & MS_POSIXACL)
 			rc = CIFSSMBGetPosixACL(xid, pTcon, full_path,
 				ea_value, buf_size, ACL_TYPE_DEFAULT,
@@ -320,7 +320,7 @@ ssize_t cifs_getxattr(struct dentry *direntry, const char *ea_name,
 					CIFS_MOUNT_MAP_SPECIAL_CHR);
 #else
 		cifs_dbg(FYI, "Query POSIX default ACL not supported yet\n");
-#endif /* CONFIG_CIFS_POSIX */
+#endif /* CONFIG_CIFS_POSIX && CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	} else if (strncmp(ea_name, CIFS_XATTR_CIFS_ACL,
 				strlen(CIFS_XATTR_CIFS_ACL)) == 0) {
 #ifdef CONFIG_CIFS_ACL

@@ -28,9 +28,7 @@
 #include "cifsacl.h"
 #include <crypto/internal/hash.h>
 #include <linux/scatterlist.h>
-#ifdef CONFIG_CIFS_SMB2
 #include "smb2pdu.h"
-#endif
 
 #define CIFS_MAGIC_NUMBER 0xFF534D42      /* the first four bytes of SMB PDUs */
 
@@ -523,11 +521,9 @@ struct TCP_Server_Info {
 	char server_GUID[16];
 	__u16 sec_mode;
 	bool session_estab; /* mark when very first sess is established */
-#ifdef CONFIG_CIFS_SMB2
 	int echo_credits;  /* echo reserved slots */
 	int oplock_credits;  /* oplock break reserved slots */
 	bool echoes:1; /* enable echoes */
-#endif
 	u16 dialect; /* dialect index that server chose */
 	enum securityEnum secType;
 	bool oplocks:1; /* enable oplocks */
@@ -573,12 +569,10 @@ struct TCP_Server_Info {
 	atomic_t in_send; /* requests trying to send */
 	atomic_t num_waiters;   /* blocked waiting to get in sendrecv */
 #endif
-#ifdef CONFIG_CIFS_SMB2
 	unsigned int	max_read;
 	unsigned int	max_write;
 	struct delayed_work reconnect; /* reconnect workqueue job */
 	struct mutex reconnect_mutex; /* prevent simultaneous reconnects */
-#endif /* CONFIG_CIFS_SMB2 */
 };
 
 static inline unsigned int
@@ -725,9 +719,7 @@ struct cifs_ses {
 	struct session_key auth_key;
 	struct ntlmssp_auth *ntlmssp; /* ciphertext, flags, server challenge */
 	bool need_reconnect:1; /* connection reset, uid now invalid */
-#ifdef CONFIG_CIFS_SMB2
 	__u16 session_flags;
-#endif /* CONFIG_CIFS_SMB2 */
 };
 
 /* no more than one of the following three session flags may be set */
@@ -787,12 +779,10 @@ struct cifs_tcon {
 			atomic_t num_acl_get;
 			atomic_t num_acl_set;
 		} cifs_stats;
-#ifdef CONFIG_CIFS_SMB2
 		struct {
 			atomic_t smb2_com_sent[NUMBER_OF_SMB2_COMMANDS];
 			atomic_t smb2_com_failed[NUMBER_OF_SMB2_COMMANDS];
 		} smb2_stats;
-#endif /* CONFIG_CIFS_SMB2 */
 	} stats;
 #ifdef CONFIG_CIFS_STATS2
 	unsigned long long time_writes;
@@ -824,14 +814,12 @@ struct cifs_tcon {
 	bool local_lease:1; /* check leases (only) on local system not remote */
 	bool broken_posix_open; /* e.g. Samba server versions < 3.3.2, 3.2.9 */
 	bool need_reconnect:1; /* connection reset, tid now invalid */
-#ifdef CONFIG_CIFS_SMB2
-	bool print:1;		/* set if connection to printer share */
+		bool print:1;		/* set if connection to printer share */
 	__u32 capabilities;
 	__u32 share_flags;
 	__u32 maximal_access;
 	__u32 vol_serial_number;
 	__le64 vol_create_time;
-#endif /* CONFIG_CIFS_SMB2 */
 #ifdef CONFIG_CIFS_FSCACHE
 	u64 resource_id;		/* server resource id */
 	struct fscache_cookie *fscache;	/* cookie for share */
@@ -923,11 +911,9 @@ struct cifs_search_info {
 
 struct cifs_fid {
 	__u16 netfid;
-#ifdef CONFIG_CIFS_SMB2
 	__u64 persistent_fid;	/* persist file id for smb2 */
 	__u64 volatile_fid;	/* volatile file id for smb2 */
 	__u8 lease_key[SMB2_LEASE_KEY_SIZE];	/* lease key for smb2 */
-#endif
 	struct cifs_pending_open *pending_open;
 };
 
@@ -959,10 +945,8 @@ struct cifsFileInfo {
 
 struct cifs_io_parms {
 	__u16 netfid;
-#ifdef CONFIG_CIFS_SMB2
 	__u64 persistent_fid;	/* persist file id for smb2 */
 	__u64 volatile_fid;	/* volatile file id for smb2 */
-#endif
 	__u32 pid;
 	__u64 offset;
 	unsigned int length;
@@ -1045,9 +1029,7 @@ struct cifsInodeInfo {
 	u64  server_eof;		/* current file size on server -- protected by i_lock */
 	u64  uniqueid;			/* server inode number */
 	u64  createtime;		/* creation time on server */
-#ifdef CONFIG_CIFS_SMB2
 	__u8 lease_key[SMB2_LEASE_KEY_SIZE];	/* lease key for this inode */
-#endif
 #ifdef CONFIG_CIFS_FSCACHE
 	struct fscache_cookie *fscache;
 #endif

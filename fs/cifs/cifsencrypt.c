@@ -269,9 +269,7 @@ int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
 {
 	int i;
 	int rc;
-	char password_with_pad[CIFS_ENCPWD_SIZE];
-
-	memset(password_with_pad, 0, CIFS_ENCPWD_SIZE);
+	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
 	if (password)
 		strncpy(password_with_pad, password, CIFS_ENCPWD_SIZE);
 
@@ -330,6 +328,7 @@ build_avpair_blob(struct cifs_ses *ses, const struct nls_table *nls_cp)
 	 * ( for NTLMSSP_AV_NB_DOMAIN_NAME followed by NTLMSSP_AV_EOL ) +
 	 * unicode length of a netbios domain name
 	 */
+	kzfree(ses->auth_key.response);
 	ses->auth_key.len = size + 2 * dlen;
 	ses->auth_key.response = kzalloc(ses->auth_key.len, GFP_KERNEL);
 	if (!ses->auth_key.response) {
@@ -715,7 +714,8 @@ cifs_crypto_shash_release(struct TCP_Server_Info *server)
 	if (server->secmech.hmacmd5)
 		crypto_free_shash(server->secmech.hmacmd5);
 
-	kfree(server->secmech.sdeschmacsha256);
+
+
 
 	kfree(server->secmech.sdeschmacmd5);
 
