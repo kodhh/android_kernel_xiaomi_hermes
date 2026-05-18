@@ -200,7 +200,11 @@ ARCH		?= arm
 CROSS_COMPILE	?= arm-eabi-
 else
 ARCH		?= arm64
+ifneq ($(shell which aarch64-linux-gnu-gcc 2>/dev/null),)
+CROSS_COMPILE	?= aarch64-linux-gnu-
+else
 CROSS_COMPILE	?= aarch64-linux-android-
+endif
 endif
 
 # Architecture as present in compile.h
@@ -384,6 +388,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
+		   -Wno-misleading-indentation \
 		   -fno-delete-null-pointer-checks \
 		   -Werror=format -Werror=int-to-pointer-cast -Werror=pointer-to-int-cast \
 		   -mtune=cortex-a53 \
@@ -605,12 +610,26 @@ KBUILD_CFLAGS	+= $(call cc-option,-ffunction-sections,)
 KBUILD_CFLAGS	+= $(call cc-option,-fdata-sections,)
 endif
 
+# Needed to unbreak GCC 7.x and above
+KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
+
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
 else
 KBUILD_CFLAGS += -O3 \
                  --param=inline-unit-growth=30 \
-                 --param=large-function-growth=300
+                 --param=large-function-growth=300 \
+                 -fgraphite-identity \
+                 -floop-interchange \
+                 -floop-nest-optimize \
+                 -ftree-loop-distribution \
+                 -fivopts \
+                 -fsplit-paths \
+                 -frename-registers \
+                 -fbranch-target-load-optimize \
+                 --param l2-cache-size=512 \
+                 --param l1-cache-size=32 \
+                 --param l1-cache-line-size=64
 endif
 
 include $(srctree)/arch/$(SRCARCH)/Makefile

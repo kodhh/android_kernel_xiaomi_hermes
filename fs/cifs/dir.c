@@ -674,10 +674,13 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	cifs_dbg(FYI, "Full path: %s inode = 0x%p\n",
 		 full_path, direntry->d_inode);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (pTcon->unix_ext) {
 		rc = cifs_get_inode_info_unix(&newInode, full_path,
 					      parent_dir_inode->i_sb, xid);
-	} else {
+	} else
+#endif
+	{
 		rc = cifs_get_inode_info(&newInode, full_path, NULL,
 				parent_dir_inode->i_sb, xid, NULL);
 	}

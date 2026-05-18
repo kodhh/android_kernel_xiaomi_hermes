@@ -157,6 +157,17 @@ extern int smb2_lockv(const unsigned int xid, struct cifs_tcon *tcon,
 extern int SMB2_lease_break(const unsigned int xid, struct cifs_tcon *tcon,
 			    __u8 *lease_key, const __le32 lease_state);
 
+extern int SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon,
+		      u64 persistent_fid, u64 volatile_fid, u32 opcode,
+		      bool is_fsctl, char *in_data, u32 in_len,
+		      char **out_data, u32 *out_len);
+extern int SMB2_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
+				u64 persistent_fid, u64 volatile_fid,
+				__le16 compression_level);
+extern int SMB2_QFS_attr(const unsigned int xid, struct cifs_tcon *tcon,
+			 u64 persistent_fid, u64 volatile_fid, int level);
+extern void smb2_cancelled_close_fid(struct work_struct *work);
+
 extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *, __u64);
 extern struct cifs_tcon *smb2_find_smb_tcon(struct TCP_Server_Info *, __u64,
 					    __u32);

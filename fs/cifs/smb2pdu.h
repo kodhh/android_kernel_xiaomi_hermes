@@ -841,6 +841,8 @@ struct smb2_lease_ack {
 #define FS_FULL_SIZE_INFORMATION	7 /* Query */
 #define FS_OBJECT_ID_INFORMATION	8 /* Query, Set */
 #define FS_DRIVER_PATH_INFORMATION	9 /* Query */
+#define FS_VOLUME_FLAGS_INFORMATION	10 /* Query */
+#define FS_SECTOR_SIZE_INFORMATION	11 /* SMB3 or later. Query */
 
 struct smb2_fs_full_size_info {
 	__le64 TotalAllocationUnits;
@@ -954,6 +956,45 @@ struct smb2_file_eof_info { /* encoding of request for level 10 */
 
 #define NO_FILE_ID 0xFFFFFFFFFFFFFFFFULL /* general ioctls to srv not to file */
 
+#define SMB2_0_IOCTL_IS_FSCTL		0x00000001
+
+struct smb2_ioctl_req {
+	struct smb2_hdr hdr;
+	__le16 StructureSize;	/* Must be 57 */
+	__u16 Reserved;
+	__le32 CtlCode;
+	__u64  PersistentFileId; /* opaque endianness */
+	__u64  VolatileFileId; /* opaque endianness */
+	__le32 InputOffset;
+	__le32 InputCount;
+	__le32 MaxInputResponse;
+	__le32 OutputOffset;
+	__le32 OutputCount;
+	__le32 MaxOutputResponse;
+	__le32 Flags;
+	__u32  Reserved2;
+	__u8   Buffer[0];
+} __packed;
+
+struct smb2_ioctl_rsp {
+	struct smb2_hdr hdr;
+	__le16 StructureSize;	/* Must be 57 */
+	__u16 Reserved;
+	__le32 CtlCode;
+	__u64  PersistentFileId; /* opaque endianness */
+	__u64  VolatileFileId; /* opaque endianness */
+	__le32 InputOffset;
+	__le32 InputCount;
+	__le32 OutputOffset;
+	__le32 OutputCount;
+	__le32 Flags;
+	__u32  Reserved2;
+} __packed;
+
+struct compress_ioctl {
+	__le16 CompressionState;
+} __packed;
+
 struct duplicate_extents_to_file {
 	__u64 PersistentFileHandle;
 	__u64 VolatileFileHandle;
@@ -1056,5 +1097,16 @@ struct smb3_fs_ss_info {
 #define SSINFO_FLAGS_PARTITION_ALIGNED_ON_DEVICE 0x00000002
 #define SSINFO_FLAGS_NO_SEEK_PENALTY		0x00000004
 #define SSINFO_FLAGS_TRIM_ENABLED		0x00000008
+
+#define MAX_VOL_LABEL_LEN 128
+
+struct smb3_fs_vol_info {
+	__le64 VolumeCreationTime;
+	__le64 VolumeSerialNumber;
+	__le64 VolumeLabelLength; /* in bytes */
+	__u8	SupportsObjects;
+	__u8	Reserved;
+	__u8	VolumeLabel[0]; /* variable len */
+} __packed;
 
 #endif				/* _SMB2PDU_H */

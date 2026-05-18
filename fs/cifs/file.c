@@ -241,10 +241,12 @@ cifs_nt_open(char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
 	if (rc)
 		goto out;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext)
 		rc = cifs_get_inode_info_unix(&inode, full_path, inode->i_sb,
 					      xid);
 	else
+#endif
 		rc = cifs_get_inode_info(&inode, full_path, buf, inode->i_sb,
 					 xid, &fid->netfid);
 
@@ -722,10 +724,12 @@ reopen_success:
 		rc = filemap_write_and_wait(inode->i_mapping);
 		mapping_set_error(inode->i_mapping, rc);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		if (tcon->unix_ext)
 			rc = cifs_get_inode_info_unix(&inode, full_path,
 						      inode->i_sb, xid);
 		else
+#endif
 			rc = cifs_get_inode_info(&inode, full_path, NULL,
 						 inode->i_sb, xid, NULL);
 	}
@@ -3736,3 +3740,15 @@ const struct address_space_operations cifs_addr_ops_smallbuf = {
 	.invalidatepage = cifs_invalidate_page,
 	.launder_page = cifs_launder_page,
 };
+
+void
+cifs_writedata_release(struct kref *refcount)
+{
+	struct cifs_writedata *wdata = container_of(refcount,
+					struct cifs_writedata, refcount);
+
+	if (wdata->cfile)
+		cifsFileInfo_put(wdata->cfile);
+
+	kfree(wdata);
+}

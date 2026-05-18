@@ -379,6 +379,15 @@ int cifs_get_inode_info_unix(struct inode **pinode,
 }
 #endif
 
+#ifndef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
+int cifs_get_inode_info_unix(struct inode **pinode,
+			     const unsigned char *full_path,
+			     struct super_block *sb, unsigned int xid)
+{
+	return -EOPNOTSUPP;
+}
+#endif
+
 #ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static int
 cifs_sfu_type(struct cifs_fattr *fattr, const unsigned char *path,
@@ -928,9 +937,11 @@ struct inode *cifs_root_iget(struct super_block *sb)
 
 	xid = get_xid();
 	convert_delimiter(path, CIFS_DIR_SEP(cifs_sb));
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext)
 		rc = cifs_get_inode_info_unix(&inode, path, sb, xid);
 	else
+#endif
 		rc = cifs_get_inode_info(&inode, path, NULL, sb, xid, NULL);
 
 	if (!inode) {
@@ -1812,9 +1823,11 @@ int cifs_revalidate_dentry_attr(struct dentry *dentry)
 		 full_path, inode, inode->i_count.counter,
 		 dentry, dentry->d_time, jiffies);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (cifs_sb_master_tcon(CIFS_SB(sb))->unix_ext)
 		rc = cifs_get_inode_info_unix(&inode, full_path, sb, xid);
 	else
+#endif
 		rc = cifs_get_inode_info(&inode, full_path, NULL, sb,
 					 xid, NULL);
 

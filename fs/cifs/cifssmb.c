@@ -87,30 +87,7 @@ static struct {
 #endif /* CONFIG_CIFS_WEAK_PW_HASH */
 #endif /* CIFS_POSIX */
 
-/*
- * Mark as invalid, all open files on tree connections since they
- * were closed when session to server was lost.
- */
-void
-cifs_mark_open_files_invalid(struct cifs_tcon *tcon)
-{
-	struct cifsFileInfo *open_file = NULL;
-	struct list_head *tmp;
-	struct list_head *tmp1;
-
-	/* list all files open on tree connection and mark them invalid */
-	spin_lock(&cifs_file_list_lock);
-	list_for_each_safe(tmp, tmp1, &tcon->openFileList) {
-		open_file = list_entry(tmp, struct cifsFileInfo, tlist);
-		open_file->invalidHandle = true;
-		open_file->oplock_break_cancelled = true;
-	}
-	spin_unlock(&cifs_file_list_lock);
-	/*
-	 * BB Add call to invalidate_inodes(sb) for all superblocks mounted
-	 * to this tcon.
-	 */
-}
+/* cifs_mark_open_files_invalid moved to misc.c */
 
 /* reconnect the socket, tcon, and smb session if needed */
 static int
@@ -1385,156 +1362,7 @@ openRetry:
 	return rc;
 }
 
-/*
- * Discard any remaining data in the current SMB. To do this, we borrow the
- * current bigbuf.
- */
-static int
-discard_remaining_data(struct TCP_Server_Info *server)
-{
-	unsigned int rfclen = get_rfc1002_length(server->smallbuf);
-	int remaining = rfclen + 4 - server->total_read;
-
-	while (remaining > 0) {
-		int length;
-
-		length = cifs_read_from_socket(server, server->bigbuf,
-				min_t(unsigned int, remaining,
-				    CIFSMaxBufSize + MAX_HEADER_SIZE(server)));
-		if (length < 0)
-			return length;
-		server->total_read += length;
-		remaining -= length;
-	}
-
-	return 0;
-}
-
-static int
-cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid)
-{
-	int length;
-	struct cifs_readdata *rdata = mid->callback_data;
-
-	length = discard_remaining_data(server);
-	dequeue_mid(mid, rdata->result);
-	return length;
-}
-
-int
-cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
-{
-	int length, len;
-	unsigned int data_offset, data_len;
-	struct cifs_readdata *rdata = mid->callback_data;
-	char *buf = server->smallbuf;
-	unsigned int buflen = get_rfc1002_length(buf) + 4;
-
-	cifs_dbg(FYI, "%s: mid=%llu offset=%llu bytes=%u\n",
-		 __func__, mid->mid, rdata->offset, rdata->bytes);
-
-	/*
-	 * read the rest of READ_RSP header (sans Data array), or whatever we
-	 * can if there's not enough data. At this point, we've read down to
-	 * the Mid.
-	 */
-	len = min_t(unsigned int, buflen, server->vals->read_rsp_size) -
-							HEADER_SIZE(server) + 1;
-
-	rdata->iov.iov_base = buf + HEADER_SIZE(server) - 1;
-	rdata->iov.iov_len = len;
-
-	length = cifs_readv_from_socket(server, &rdata->iov, 1, len);
-	if (length < 0)
-		return length;
-	server->total_read += length;
-
-	if (server->ops->is_status_pending &&
-	    server->ops->is_status_pending(buf, server, 0)) {
-		discard_remaining_data(server);
-		return -1;
-	}
-
-	/* Was the SMB read successful? */
-	rdata->result = server->ops->map_error(buf, false);
-	if (rdata->result != 0) {
-		cifs_dbg(FYI, "%s: server returned error %d\n",
-			 __func__, rdata->result);
-		return cifs_readv_discard(server, mid);
-	}
-
-	/* Is there enough to get to the rest of the READ_RSP header? */
-	if (server->total_read < server->vals->read_rsp_size) {
-		cifs_dbg(FYI, "%s: server returned short header. got=%u expected=%zu\n",
-			 __func__, server->total_read,
-			 server->vals->read_rsp_size);
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	data_offset = server->ops->read_data_offset(buf) + 4;
-	if (data_offset < server->total_read) {
-		/*
-		 * win2k8 sometimes sends an offset of 0 when the read
-		 * is beyond the EOF. Treat it as if the data starts just after
-		 * the header.
-		 */
-		cifs_dbg(FYI, "%s: data offset (%u) inside read response header\n",
-			 __func__, data_offset);
-		data_offset = server->total_read;
-	} else if (data_offset > MAX_CIFS_SMALL_BUFFER_SIZE) {
-		/* data_offset is beyond the end of smallbuf */
-		cifs_dbg(FYI, "%s: data offset (%u) beyond end of smallbuf\n",
-			 __func__, data_offset);
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	cifs_dbg(FYI, "%s: total_read=%u data_offset=%u\n",
-		 __func__, server->total_read, data_offset);
-
-	len = data_offset - server->total_read;
-	if (len > 0) {
-		/* read any junk before data into the rest of smallbuf */
-		rdata->iov.iov_base = buf + server->total_read;
-		rdata->iov.iov_len = len;
-		length = cifs_readv_from_socket(server, &rdata->iov, 1, len);
-		if (length < 0)
-			return length;
-		server->total_read += length;
-	}
-
-	/* set up first iov for signature check */
-	rdata->iov.iov_base = buf;
-	rdata->iov.iov_len = server->total_read;
-	cifs_dbg(FYI, "0: iov_base=%p iov_len=%zu\n",
-		 rdata->iov.iov_base, rdata->iov.iov_len);
-
-	/* how much data is in the response? */
-	data_len = server->ops->read_data_length(buf);
-	if (data_offset + data_len > buflen) {
-		/* data_len is corrupt -- discard frame */
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	length = rdata->read_into_pages(server, rdata, data_len);
-	if (length < 0)
-		return length;
-
-	server->total_read += length;
-	rdata->bytes = length;
-
-	cifs_dbg(FYI, "total_read=%u buflen=%u remaining=%u\n",
-		 server->total_read, buflen, data_len);
-
-	/* discard anything left over */
-	if (server->total_read < buflen)
-		return cifs_readv_discard(server, mid);
-
-	dequeue_mid(mid, false);
-	return length;
-}
+/* discard_remaining_data, cifs_readv_discard, cifs_readv_receive moved to transport.c */
 
 static void
 cifs_readv_callback(struct mid_q_entry *mid)
@@ -1887,17 +1715,7 @@ CIFSSMBWrite(const unsigned int xid, struct cifs_io_parms *io_parms,
 	return rc;
 }
 
-void
-cifs_writedata_release(struct kref *refcount)
-{
-	struct cifs_writedata *wdata = container_of(refcount,
-					struct cifs_writedata, refcount);
-
-	if (wdata->cfile)
-		cifsFileInfo_put(wdata->cfile);
-
-	kfree(wdata);
-}
+/* cifs_writedata_release moved to file.c */
 
 /*
  * Write failed with a retryable error. Resend the write request. It's also

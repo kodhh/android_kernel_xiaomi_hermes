@@ -593,3 +593,19 @@ cifs_add_pending_open(struct cifs_fid *fid, struct tcon_link *tlink,
 	cifs_add_pending_open_locked(fid, tlink, open);
 	spin_unlock(&cifs_file_list_lock);
 }
+
+void
+cifs_mark_open_files_invalid(struct cifs_tcon *tcon)
+{
+	struct cifsFileInfo *open_file = NULL;
+	struct list_head *tmp;
+	struct list_head *tmp1;
+
+	spin_lock(&cifs_file_list_lock);
+	list_for_each_safe(tmp, tmp1, &tcon->openFileList) {
+		open_file = list_entry(tmp, struct cifsFileInfo, tlist);
+		open_file->invalidHandle = true;
+		open_file->oplock_break_cancelled = true;
+	}
+	spin_unlock(&cifs_file_list_lock);
+}

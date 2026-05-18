@@ -89,24 +89,7 @@
 #define FSCTL_VALIDATE_NEGOTIATE_INFO 0x00140204
 #endif
 
-struct close_cancelled_open {
-	struct cifs_fid fid;
-	struct cifs_tcon *tcon;
-	struct work_struct work;
-};
-
-/* Forward declarations for extern functions not yet in smb2proto.h */
-extern int SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon,
-		      u64 persistent_fid, u64 volatile_fid, u32 opcode,
-		      bool is_fsctl, char *in_data, u32 in_len,
-		      char **out_data, u32 *out_len);
-extern int SMB2_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
-				u64 persistent_fid, u64 volatile_fid,
-				__le16 compression_level);
-extern int SMB2_QFS_attr(const unsigned int xid, struct cifs_tcon *tcon,
-			 u64 persistent_fid, u64 volatile_fid, int level);
-extern void smb2_cancelled_close_fid(struct work_struct *work);
-
+/* Functions declared in smb2proto.h */
 static int
 change_conf(struct TCP_Server_Info *server)
 {

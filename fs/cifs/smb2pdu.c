@@ -46,6 +46,17 @@
 #include "smb2status.h"
 #include "smb2glob.h"
 #include "cifspdu.h"
+#include "smbfsctl.h"
+
+#ifndef FSCTL_SRV_COPYCHUNK_WRITE
+#define FSCTL_SRV_COPYCHUNK_WRITE 0x001440F3
+#endif
+#ifndef FSCTL_SRV_COPYCHUNK
+#define FSCTL_SRV_COPYCHUNK 0x001440F2
+#endif
+#ifndef FSCTL_VALIDATE_NEGOTIATE_INFO
+#define FSCTL_VALIDATE_NEGOTIATE_INFO 0x00140204
+#endif
 
 /*
  *  The following table defines the expected "StructureSize" of SMB2 requests
@@ -2357,5 +2368,228 @@ SMB2_lease_break(const unsigned int xid, struct cifs_tcon *tcon,
 		cifs_dbg(FYI, "Send error in Lease Break = %d\n", rc);
 	}
 
+	return rc;
+}
+
+void
+smb2_cancelled_close_fid(struct work_struct *work)
+{
+	struct close_cancelled_open *cancelled = container_of(work,
+					struct close_cancelled_open, work);
+
+	if (cancelled->tcon)
+		SMB2_close(0, cancelled->tcon, cancelled->fid.persistent_fid,
+			   cancelled->fid.volatile_fid);
+	kfree(cancelled);
+}
+
+int
+SMB2_ioctl(const unsigned int xid, struct cifs_tcon *tcon, u64 persistent_fid,
+	   u64 volatile_fid, u32 opcode, bool is_fsctl,
+	   char *in_data, u32 indatalen,
+	   char **out_data, u32 *plen)
+{
+	struct smb2_ioctl_req *req;
+	struct smb2_ioctl_rsp *rsp;
+	struct cifs_ses *ses;
+	struct kvec iov[2];
+	int resp_buftype;
+	int n_iov;
+	int rc = 0;
+	int flags = 0;
+
+	cifs_dbg(FYI, "SMB2 IOCTL\n");
+
+	if (out_data != NULL)
+		*out_data = NULL;
+
+	if (plen)
+		*plen = 0;
+
+	if (tcon)
+		ses = tcon->ses;
+	else
+		return -EIO;
+
+	if (!ses || !(ses->server))
+		return -EIO;
+
+	rc = small_smb2_init(SMB2_IOCTL, tcon, (void **) &req);
+	if (rc)
+		return rc;
+
+	req->CtlCode = cpu_to_le32(opcode);
+	req->PersistentFileId = persistent_fid;
+	req->VolatileFileId = volatile_fid;
+
+	if (indatalen) {
+		req->InputCount = cpu_to_le32(indatalen);
+		req->InputOffset =
+		       cpu_to_le32(offsetof(struct smb2_ioctl_req, Buffer) - 4);
+		iov[1].iov_base = in_data;
+		iov[1].iov_len = indatalen;
+		n_iov = 2;
+	} else
+		n_iov = 1;
+
+	req->OutputOffset = 0;
+	req->OutputCount = 0;
+
+	req->MaxOutputResponse = cpu_to_le32(CIFSMaxBufSize);
+
+	if (is_fsctl)
+		req->Flags = cpu_to_le32(SMB2_0_IOCTL_IS_FSCTL);
+	else
+		req->Flags = 0;
+
+	iov[0].iov_base = (char *)req;
+
+	if (indatalen) {
+		iov[0].iov_len = get_rfc1002_length(req) + 4 - 1;
+		inc_rfc1001_len(req, indatalen - 1);
+	} else
+		iov[0].iov_len = get_rfc1002_length(req) + 4;
+
+	if (opcode == FSCTL_VALIDATE_NEGOTIATE_INFO)
+		req->hdr.Flags |= SMB2_FLAGS_SIGNED;
+
+	rc = SendReceive2(xid, ses, iov, n_iov, &resp_buftype, flags);
+	rsp = (struct smb2_ioctl_rsp *)iov[0].iov_base;
+
+	if ((rc != 0) && (rc != -EINVAL)) {
+		cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
+		goto ioctl_exit;
+	} else if (rc == -EINVAL) {
+		if ((opcode != FSCTL_SRV_COPYCHUNK) &&
+		    (opcode != FSCTL_SRV_COPYCHUNK_WRITE)) {
+			cifs_stats_fail_inc(tcon, SMB2_IOCTL_HE);
+			goto ioctl_exit;
+		}
+	}
+
+	if ((plen == NULL) || (out_data == NULL))
+		goto ioctl_exit;
+
+	*plen = le32_to_cpu(rsp->OutputCount);
+
+	if (*plen == 0)
+		goto ioctl_exit;
+	else if (*plen > CIFSMaxBufSize || *plen > 0xFF00) {
+		cifs_dbg(VFS, "srv returned invalid ioctl length: %d\n", *plen);
+		*plen = 0;
+		rc = -EIO;
+		goto ioctl_exit;
+	}
+
+	if (get_rfc1002_length(rsp) - *plen < le32_to_cpu(rsp->OutputOffset)) {
+		cifs_dbg(VFS, "Malformed ioctl resp: len %d offset %d\n", *plen,
+			le32_to_cpu(rsp->OutputOffset));
+		*plen = 0;
+		rc = -EIO;
+		goto ioctl_exit;
+	}
+
+	*out_data = kmalloc(*plen, GFP_KERNEL);
+	if (*out_data == NULL) {
+		rc = -ENOMEM;
+		goto ioctl_exit;
+	}
+
+	memcpy(*out_data, (char *)&rsp->hdr + le32_to_cpu(rsp->OutputOffset), *plen);
+ioctl_exit:
+	free_rsp_buf(resp_buftype, rsp);
+	return rc;
+}
+
+int
+SMB2_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
+		     u64 persistent_fid, u64 volatile_fid,
+		     __le16 compression_level)
+{
+	int rc;
+	struct  compress_ioctl fsctl_input;
+	char *ret_data = NULL;
+
+	fsctl_input.CompressionState = compression_level;
+
+	rc = SMB2_ioctl(xid, tcon, persistent_fid, volatile_fid,
+			FSCTL_SET_COMPRESSION, true,
+			(char *)&fsctl_input,
+			2, &ret_data, NULL);
+
+	cifs_dbg(FYI, "set compression rc %d\n", rc);
+
+	return rc;
+}
+
+int
+SMB2_QFS_attr(const unsigned int xid, struct cifs_tcon *tcon,
+	      u64 persistent_fid, u64 volatile_fid, int level)
+{
+	struct smb2_query_info_rsp *rsp = NULL;
+	struct kvec iov;
+	int rc = 0;
+	int resp_buftype, max_len, min_len;
+	struct cifs_ses *ses = tcon->ses;
+	unsigned int rsp_len, offset;
+	int flags = 0;
+
+	if (level == FS_DEVICE_INFORMATION) {
+		max_len = sizeof(FILE_SYSTEM_DEVICE_INFO);
+		min_len = sizeof(FILE_SYSTEM_DEVICE_INFO);
+	} else if (level == FS_ATTRIBUTE_INFORMATION) {
+		max_len = sizeof(FILE_SYSTEM_ATTRIBUTE_INFO);
+		min_len = MIN_FS_ATTR_INFO_SIZE;
+	} else if (level == FS_SECTOR_SIZE_INFORMATION) {
+		max_len = sizeof(struct smb3_fs_ss_info);
+		min_len = sizeof(struct smb3_fs_ss_info);
+	} else if (level == FS_VOLUME_INFORMATION) {
+		max_len = sizeof(struct smb3_fs_vol_info) + MAX_VOL_LABEL_LEN;
+		min_len = sizeof(struct smb3_fs_vol_info);
+	} else {
+		cifs_dbg(FYI, "Invalid qfsinfo level %d\n", level);
+		return -EINVAL;
+	}
+
+	rc = build_qfs_info_req(&iov, tcon, level, max_len,
+				persistent_fid, volatile_fid);
+	if (rc)
+		return rc;
+
+	rc = SendReceive2(xid, ses, &iov, 1, &resp_buftype, flags);
+	if (rc) {
+		cifs_stats_fail_inc(tcon, SMB2_QUERY_INFO_HE);
+		goto qfsattr_exit;
+	}
+	rsp = (struct smb2_query_info_rsp *)iov.iov_base;
+
+	rsp_len = le32_to_cpu(rsp->OutputBufferLength);
+	offset = le16_to_cpu(rsp->OutputBufferOffset);
+	rc = validate_buf(offset, rsp_len, &rsp->hdr, min_len);
+	if (rc)
+		goto qfsattr_exit;
+
+	if (level == FS_ATTRIBUTE_INFORMATION)
+		memcpy(&tcon->fsAttrInfo, 4 + offset
+			+ (char *)&rsp->hdr, min_t(unsigned int,
+			rsp_len, max_len));
+	else if (level == FS_DEVICE_INFORMATION)
+		memcpy(&tcon->fsDevInfo, 4 + offset
+			+ (char *)&rsp->hdr, sizeof(FILE_SYSTEM_DEVICE_INFO));
+	else if (level == FS_SECTOR_SIZE_INFORMATION) {
+		struct smb3_fs_ss_info *ss_info = (struct smb3_fs_ss_info *)
+			(4 + offset + (char *)&rsp->hdr);
+		tcon->ss_flags = le32_to_cpu(ss_info->Flags);
+		tcon->perf_sector_size =
+			le32_to_cpu(ss_info->PhysicalBytesPerSectorForPerf);
+	} else if (level == FS_VOLUME_INFORMATION) {
+		struct smb3_fs_vol_info *vol_info = (struct smb3_fs_vol_info *)
+			(offset + (char *)rsp);
+		tcon->vol_serial_number = vol_info->VolumeSerialNumber;
+		tcon->vol_create_time = vol_info->VolumeCreationTime;
+	}
+
+qfsattr_exit:
+	free_rsp_buf(resp_buftype, iov.iov_base);
 	return rc;
 }

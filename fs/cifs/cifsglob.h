@@ -890,6 +890,8 @@ struct cifs_tcon {
 	__u32 capabilities;
 	__u32 share_flags;
 	__u32 maximal_access;
+	__u32 ss_flags;
+	__u32 perf_sector_size;
 	__u32 vol_serial_number;
 	__le64 vol_create_time;
 #ifdef CONFIG_CIFS_FSCACHE
@@ -998,6 +1000,12 @@ struct cifs_fid {
 	__u64 volatile_fid;	/* volatile file id for smb2 */
 	__u8 lease_key[SMB2_LEASE_KEY_SIZE];	/* lease key for smb2 */
 	struct cifs_pending_open *pending_open;
+};
+
+struct close_cancelled_open {
+	struct cifs_fid fid;
+	struct cifs_tcon *tcon;
+	struct work_struct work;
 };
 
 struct cifs_fid_locks {

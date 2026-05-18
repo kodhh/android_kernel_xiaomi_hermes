@@ -2193,6 +2193,8 @@ typedef struct {
 	char FileSystemName[52]; /* do not have to save this - get subset? */
 } __attribute__((packed)) FILE_SYSTEM_ATTRIBUTE_INFO;
 
+#define MIN_FS_ATTR_INFO_SIZE 12
+
 /******************************************************************************/
 /* QueryFileInfo/QueryPathinfo (also for SetPath/SetFile) data buffer formats */
 /******************************************************************************/

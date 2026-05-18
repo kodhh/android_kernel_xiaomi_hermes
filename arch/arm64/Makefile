@@ -26,6 +26,13 @@ cc-name ?= gcc
 
 ifeq ($(CONFIG_COMPAT_VDSO), y)
   CROSS_COMPILE_ARM32 ?= $(CONFIG_CROSS_COMPILE_ARM32:"%"=%)
+  ifeq ($(CROSS_COMPILE_ARM32),)
+    ifneq ($(shell which arm-linux-gnueabi-gcc 2>/dev/null),)
+      CROSS_COMPILE_ARM32 := arm-linux-gnueabi-
+    else ifneq ($(shell which arm-eabi-gcc 2>/dev/null),)
+      CROSS_COMPILE_ARM32 := arm-eabi-
+    endif
+  endif
 
   # Check that the user has provided a valid prefix for the 32-bit toolchain.
   # To prevent selecting the system $(cc-name) by default, the prefix is not
