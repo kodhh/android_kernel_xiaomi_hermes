@@ -388,7 +388,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
-		   -Wno-misleading-indentation \
+		   $(call cc-option,-Wno-misleading-indentation) \
 		   -fno-delete-null-pointer-checks \
 		   -Werror=format -Werror=int-to-pointer-cast -Werror=pointer-to-int-cast \
 		   -mtune=cortex-a53 \
@@ -612,27 +612,36 @@ endif
 
 # Needed to unbreak GCC 7.x and above
 KBUILD_CFLAGS   += $(call cc-option,-fno-store-merging,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning,format-truncation,)
+KBUILD_CFLAGS	+= $(call cc-disable-warning,format-overflow,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,array-bounds,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,nonnull,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,int-in-bool-context,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,address-of-packed-member,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,attribute-alias,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,stringop-truncation,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,sizeof-pointer-memaccess,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,packed-not-aligned,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,stringop-overflow,)
+KBUILD_CFLAGS   += $(call cc-disable-warning,zero-length-bounds,)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os $(call cc-disable-warning,maybe-uninitialized,)
+KBUILD_CFLAGS	+= -Os
 else
 KBUILD_CFLAGS += -O3 \
                  --param=inline-unit-growth=30 \
-                 --param=large-function-growth=300 \
-                 -fgraphite-identity \
-                 -floop-interchange \
-                 -floop-nest-optimize \
-                 -ftree-loop-distribution \
-                 -fivopts \
-                 -fsplit-paths \
-                 -frename-registers \
-                 -fbranch-target-load-optimize \
-                 --param l2-cache-size=512 \
-                 --param l1-cache-size=32 \
-                 --param l1-cache-line-size=64
+                 --param=large-function-growth=300
 endif
 
+# conserve stack if available
+KBUILD_CFLAGS   += $(call cc-option,-fconserve-stack)
+
 include $(srctree)/arch/$(SRCARCH)/Makefile
+
+# avoid data races
+KBUILD_CFLAGS	+= $(call cc-option,--param=allow-store-data-races=0)
+KBUILD_CFLAGS	+= $(call cc-option,-fno-allow-store-data-races)
 
 ifdef CONFIG_READABLE_ASM
 # Disable optimizations that make assembler listings hard to read.
