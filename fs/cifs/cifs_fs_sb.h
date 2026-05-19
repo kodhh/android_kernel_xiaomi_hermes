@@ -21,6 +21,7 @@
 #define _CIFS_FS_SB_H
 
 #include <linux/backing-dev.h>
+#include <linux/types.h>
 
 #define CIFS_MOUNT_NO_PERM      1 /* do not do client vfs_perm check */
 #define CIFS_MOUNT_SET_UID      2 /* set current's euid in create etc. */
@@ -71,5 +72,6 @@ struct cifs_sb_info {
 	struct delayed_work prune_tlinks;
 	struct rcu_head rcu;
 	char *prepath;
+	struct backing_dev_info bdi;
 };
 #endif				/* _CIFS_FS_SB_H */

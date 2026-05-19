@@ -139,9 +139,10 @@ cifs_read_super(struct super_block *sb)
 	sb->s_magic = CIFS_MAGIC_NUMBER;
 	sb->s_op = &cifs_super_ops;
 	sb->s_xattr = cifs_xattr_handlers;
-	sb->s_bdi = &default_backing_dev_info;
+	rc = bdi_setup_and_register(&cifs_sb->bdi, "cifs", BDI_CAP_MAP_COPY);
 	if (rc)
 		goto out_no_root;
+	sb->s_bdi = &cifs_sb->bdi;
 	/* tune readahead according to rsize */
 	sb->s_bdi->ra_pages = cifs_sb->rsize / PAGE_SIZE;
 
@@ -183,6 +184,7 @@ static void cifs_kill_sb(struct super_block *sb)
 {
 	struct cifs_sb_info *cifs_sb = CIFS_SB(sb);
 	kill_anon_super(sb);
+	bdi_destroy(&cifs_sb->bdi);
 	cifs_umount(cifs_sb);
 }
 
