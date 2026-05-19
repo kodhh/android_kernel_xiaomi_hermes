@@ -180,7 +180,7 @@ ENTRY(cpu_do_switch_mm)
 	ret
 ENDPROC(cpu_do_switch_mm)
 
-	.section ".text.init", #alloc, #execinstr
+	.section ".text.init", "ax"
 
 /*
  *	__cpu_setup

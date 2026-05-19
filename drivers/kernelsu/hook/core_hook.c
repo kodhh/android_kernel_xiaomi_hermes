@@ -88,12 +88,14 @@ static int hook_setprocattr(struct task_struct *p, char *name, void *value, size
 #endif
 
 static int (*orig_inode_rename) (struct inode *old_dir, struct dentry *old_dentry,
-			     struct inode *new_dir, struct dentry *new_dentry) = NULL;
+			     struct inode *new_dir, struct dentry *new_dentry,
+			     unsigned int flags) = NULL;
 static int hook_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
-			    struct inode *new_inode, struct dentry *new_dentry)
+			    struct inode *new_inode, struct dentry *new_dentry,
+			    unsigned int flags)
 {
 	ksu_inode_rename(old_inode, old_dentry, new_inode, new_dentry);
-	return orig_inode_rename(old_inode, old_dentry, new_inode, new_dentry);
+	return orig_inode_rename(old_inode, old_dentry, new_inode, new_dentry, flags);
 }
 
 static int (*orig_task_fix_setuid) (struct cred *new, const struct cred *old, int flags) = NULL;

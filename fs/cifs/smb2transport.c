@@ -141,6 +141,11 @@ smb2_find_smb_sess_tcon_unlocked(struct cifs_ses *ses, __u32  tid)
 	return NULL;
 }
 
+/*
+ * Obtain tcon corresponding to the tid in the given
+ * cifs_ses
+ */
+
 struct cifs_tcon *
 smb2_find_smb_tcon(struct TCP_Server_Info *server, __u64 ses_id, __u32  tid)
 {
@@ -166,17 +171,17 @@ smb2_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 	unsigned char smb2_signature[SMB2_HMACSHA256_SIZE];
 	unsigned char *sigptr = smb2_signature;
 	struct kvec *iov = rqst->rq_iov;
-	struct smb2_hdr *hdr = (struct smb2_hdr *)iov[0].iov_base;
+	struct smb2_sync_hdr *shdr = (struct smb2_sync_hdr *)iov[1].iov_base;
 	struct cifs_ses *ses;
 
-	ses = smb2_find_smb_ses(server, hdr->SessionId);
+	ses = smb2_find_smb_ses(server, shdr->SessionId);
 	if (!ses) {
 		cifs_dbg(VFS, "%s: Could not find session\n", __func__);
 		return 0;
 	}
 
 	memset(smb2_signature, 0x0, SMB2_HMACSHA256_SIZE);
-	memset(hdr->Signature, 0x0, SMB2_SIGNATURE_SIZE);
+	memset(shdr->Signature, 0x0, SMB2_SIGNATURE_SIZE);
 
 	rc = smb2_crypto_shash_allocate(server);
 	if (rc) {
@@ -201,7 +206,7 @@ smb2_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 		&server->secmech.sdeschmacsha256->shash);
 
 	if (!rc)
-		memcpy(hdr->Signature, sigptr, SMB2_SIGNATURE_SIZE);
+		memcpy(shdr->Signature, sigptr, SMB2_SIGNATURE_SIZE);
 
 	return rc;
 }
@@ -324,6 +329,10 @@ generate_smb3signingkey(struct cifs_ses *ses,
 
 #ifdef CONFIG_CIFS_DEBUG_DUMP_KEYS
 	cifs_dbg(VFS, "%s: dumping generated AES session keys\n", __func__);
+	/*
+	 * The session id is opaque in terms of endianness, so we can't
+	 * print it as a long long. we dump it as we got it on the wire
+	 */
 	cifs_dbg(VFS, "Session Id    %*ph\n", (int)sizeof(ses->Suid),
 			&ses->Suid);
 	cifs_dbg(VFS, "Session Key   %*ph\n",
@@ -403,17 +412,17 @@ smb3_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 	unsigned char smb3_signature[SMB2_CMACAES_SIZE];
 	unsigned char *sigptr = smb3_signature;
 	struct kvec *iov = rqst->rq_iov;
-	struct smb2_hdr *hdr = (struct smb2_hdr *)iov[0].iov_base;
+	struct smb2_sync_hdr *shdr = (struct smb2_sync_hdr *)iov[1].iov_base;
 	struct cifs_ses *ses;
 
-	ses = smb2_find_smb_ses(server, hdr->SessionId);
+	ses = smb2_find_smb_ses(server, shdr->SessionId);
 	if (!ses) {
 		cifs_dbg(VFS, "%s: Could not find session\n", __func__);
 		return 0;
 	}
 
 	memset(smb3_signature, 0x0, SMB2_CMACAES_SIZE);
-	memset(hdr->Signature, 0x0, SMB2_SIGNATURE_SIZE);
+	memset(shdr->Signature, 0x0, SMB2_SIGNATURE_SIZE);
 
 	rc = crypto_shash_setkey(server->secmech.cmacaes,
 		ses->smb3signingkey, SMB2_CMACAES_SIZE);
@@ -423,6 +432,11 @@ smb3_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 		return rc;
 	}
 
+	/*
+	 * we already allocate sdesccmacaes when we init smb3 signing key,
+	 * so unlike smb2 case we do not have to check here if secmech are
+	 * initialized
+	 */
 	rc = crypto_shash_init(&server->secmech.sdesccmacaes->shash);
 	if (rc) {
 		cifs_dbg(VFS, "%s: Could not init cmac aes\n", __func__);
@@ -433,9 +447,230 @@ smb3_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 				   &server->secmech.sdesccmacaes->shash);
 
 	if (!rc)
-		memcpy(hdr->Signature, sigptr, SMB2_SIGNATURE_SIZE);
+		memcpy(shdr->Signature, sigptr, SMB2_SIGNATURE_SIZE);
 
 	return rc;
+}
+
+/* must be called with server->srv_mutex held */
+static int
+smb2_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server)
+{
+	int rc = 0;
+	struct smb2_sync_hdr *shdr =
+			(struct smb2_sync_hdr *)rqst->rq_iov[1].iov_base;
+
+	if (!(shdr->Flags & SMB2_FLAGS_SIGNED) ||
+	    server->tcpStatus == CifsNeedNegotiate)
+		return rc;
+
+	if (!server->session_estab) {
+		strncpy(shdr->Signature, "BSRSPYL", 8);
+		return rc;
+	}
+
+	rc = server->ops->calc_signature(rqst, server);
+
+	return rc;
+}
+
+int
+smb2_verify_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
+{
+	unsigned int rc;
+	char server_response_sig[16];
+	struct smb2_sync_hdr *shdr =
+			(struct smb2_sync_hdr *)rqst->rq_iov[1].iov_base;
+
+	if ((shdr->Command == SMB2_NEGOTIATE) ||
+	    (shdr->Command == SMB2_SESSION_SETUP) ||
+	    (shdr->Command == SMB2_OPLOCK_BREAK) ||
+	    (!server->session_estab))
+		return 0;
+
+	/*
+	 * BB what if signatures are supposed to be on for session but
+	 * server does not send one? BB
+	 */
+
+	/* Do not need to verify session setups with signature "BSRSPYL " */
+	if (memcmp(shdr->Signature, "BSRSPYL ", 8) == 0)
+		cifs_dbg(FYI, "dummy signature received for smb command 0x%x\n",
+			 shdr->Command);
+
+	/*
+	 * Save off the origiginal signature so we can modify the smb and check
+	 * our calculated signature against what the server sent.
+	 */
+	memcpy(server_response_sig, shdr->Signature, SMB2_SIGNATURE_SIZE);
+
+	memset(shdr->Signature, 0, SMB2_SIGNATURE_SIZE);
+
+	mutex_lock(&server->srv_mutex);
+	rc = server->ops->calc_signature(rqst, server);
+	mutex_unlock(&server->srv_mutex);
+
+	if (rc)
+		return rc;
+
+	if (memcmp(server_response_sig, shdr->Signature, SMB2_SIGNATURE_SIZE))
+		return -EACCES;
+	else
+		return 0;
+}
+
+/*
+ * Set message id for the request. Should be called after wait_for_free_request
+ * and when srv_mutex is held.
+ */
+static inline void
+smb2_seq_num_into_buf(struct TCP_Server_Info *server,
+		      struct smb2_sync_hdr *shdr)
+{
+	unsigned int i, num = le16_to_cpu(shdr->CreditCharge);
+
+	shdr->MessageId = get_next_mid64(server);
+	/* skip message numbers according to CreditCharge field */
+	for (i = 1; i < num; i++)
+		get_next_mid(server);
+}
+
+static struct mid_q_entry *
+smb2_mid_entry_alloc(const struct smb2_sync_hdr *shdr,
+		     struct TCP_Server_Info *server)
+{
+	struct mid_q_entry *temp;
+
+	if (server == NULL) {
+		cifs_dbg(VFS, "Null TCP session in smb2_mid_entry_alloc\n");
+		return NULL;
+	}
+
+	temp = mempool_alloc(cifs_mid_poolp, GFP_NOFS);
+	memset(temp, 0, sizeof(struct mid_q_entry));
+	kref_init(&temp->refcount);
+	temp->mid = le64_to_cpu(shdr->MessageId);
+	temp->pid = current->pid;
+	temp->command = shdr->Command; /* Always LE */
+	temp->when_alloc = jiffies;
+	temp->server = server;
+
+	/*
+	 * The default is for the mid to be synchronous, so the
+	 * default callback just wakes up the current task.
+	 */
+	temp->callback = cifs_wake_up_task;
+	temp->callback_data = current;
+
+	atomic_inc(&midCount);
+	temp->mid_state = MID_REQUEST_ALLOCATED;
+	return temp;
+}
+
+static int
+smb2_get_mid_entry(struct cifs_ses *ses, struct smb2_sync_hdr *shdr,
+		   struct mid_q_entry **mid)
+{
+	if (ses->server->tcpStatus == CifsExiting)
+		return -ENOENT;
+
+	if (ses->server->tcpStatus == CifsNeedReconnect) {
+		cifs_dbg(FYI, "tcp session dead - return to caller to retry\n");
+		return -EAGAIN;
+	}
+
+	if (ses->status == CifsNew) {
+		if ((shdr->Command != SMB2_SESSION_SETUP) &&
+		    (shdr->Command != SMB2_NEGOTIATE))
+			return -EAGAIN;
+		/* else ok - we are setting up session */
+	}
+
+	if (ses->status == CifsExiting) {
+		if (shdr->Command != SMB2_LOGOFF)
+			return -EAGAIN;
+		/* else ok - we are shutting down the session */
+	}
+
+	*mid = smb2_mid_entry_alloc(shdr, ses->server);
+	if (*mid == NULL)
+		return -ENOMEM;
+	spin_lock(&GlobalMid_Lock);
+	list_add_tail(&(*mid)->qhead, &ses->server->pending_mid_q);
+	spin_unlock(&GlobalMid_Lock);
+	return 0;
+}
+
+int
+smb2_check_receive(struct mid_q_entry *mid, struct TCP_Server_Info *server,
+		   bool log_error)
+{
+	unsigned int len = get_rfc1002_length(mid->resp_buf);
+	struct kvec iov[2];
+	struct smb_rqst rqst = { .rq_iov = iov,
+				 .rq_nvec = 2 };
+
+	iov[0].iov_base = (char *)mid->resp_buf;
+	iov[0].iov_len = 4;
+	iov[1].iov_base = (char *)mid->resp_buf + 4;
+	iov[1].iov_len = len;
+
+	dump_smb(mid->resp_buf, min_t(u32, 80, len));
+	/* convert the length into a more usable form */
+	if (len > 24 && server->sign && !mid->decrypted) {
+		int rc;
+
+		rc = smb2_verify_signature(&rqst, server);
+		if (rc)
+			cifs_dbg(VFS, "SMB signature verification returned error = %d\n",
+				 rc);
+	}
+
+	return map_smb2_to_linux_error(mid->resp_buf, log_error);
+}
+
+struct mid_q_entry *
+smb2_setup_request(struct cifs_ses *ses, struct smb_rqst *rqst)
+{
+	int rc;
+	struct smb2_sync_hdr *shdr =
+			(struct smb2_sync_hdr *)rqst->rq_iov[1].iov_base;
+	struct mid_q_entry *mid;
+
+	smb2_seq_num_into_buf(ses->server, shdr);
+
+	rc = smb2_get_mid_entry(ses, shdr, &mid);
+	if (rc)
+		return ERR_PTR(rc);
+	rc = smb2_sign_rqst(rqst, ses->server);
+	if (rc) {
+		cifs_delete_mid(mid);
+		return ERR_PTR(rc);
+	}
+	return mid;
+}
+
+struct mid_q_entry *
+smb2_setup_async_request(struct TCP_Server_Info *server, struct smb_rqst *rqst)
+{
+	int rc;
+	struct smb2_sync_hdr *shdr =
+			(struct smb2_sync_hdr *)rqst->rq_iov[1].iov_base;
+	struct mid_q_entry *mid;
+
+	smb2_seq_num_into_buf(server, shdr);
+
+	mid = smb2_mid_entry_alloc(shdr, server);
+	if (mid == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	rc = smb2_sign_rqst(rqst, server);
+	if (rc) {
+		DeleteMidQEntry(mid);
+		return ERR_PTR(rc);
+	}
+
+	return mid;
 }
 
 int
@@ -466,211 +701,4 @@ smb3_crypto_aead_allocate(struct TCP_Server_Info *server)
 	}
 
 	return 0;
-}
-
-/* must be called with server->srv_mutex held */
-static int
-smb2_sign_rqst(struct smb_rqst *rqst, struct TCP_Server_Info *server)
-{
-	int rc = 0;
-	struct smb2_hdr *smb2_pdu = rqst->rq_iov[0].iov_base;
-
-	if (!(smb2_pdu->Flags & SMB2_FLAGS_SIGNED) ||
-	    server->tcpStatus == CifsNeedNegotiate)
-		return rc;
-
-	if (!server->session_estab) {
-		strncpy(smb2_pdu->Signature, "BSRSPYL", 8);
-		return rc;
-	}
-
-	rc = server->ops->calc_signature(rqst, server);
-
-	return rc;
-}
-
-int
-smb2_verify_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
-{
-	unsigned int rc;
-	char server_response_sig[16];
-	struct smb2_hdr *smb2_pdu = (struct smb2_hdr *)rqst->rq_iov[0].iov_base;
-
-	if ((smb2_pdu->Command == SMB2_NEGOTIATE) ||
-	    (smb2_pdu->Command == SMB2_OPLOCK_BREAK) ||
-	    (!server->session_estab))
-		return 0;
-
-	/*
-	 * BB what if signatures are supposed to be on for session but
-	 * server does not send one? BB
-	 */
-
-	/* Do not need to verify session setups with signature "BSRSPYL " */
-	if (memcmp(smb2_pdu->Signature, "BSRSPYL ", 8) == 0)
-		cifs_dbg(FYI, "dummy signature received for smb command 0x%x\n",
-			 smb2_pdu->Command);
-
-	/*
-	 * Save off the origiginal signature so we can modify the smb and check
-	 * our calculated signature against what the server sent.
-	 */
-	memcpy(server_response_sig, smb2_pdu->Signature, SMB2_SIGNATURE_SIZE);
-
-	memset(smb2_pdu->Signature, 0, SMB2_SIGNATURE_SIZE);
-
-	mutex_lock(&server->srv_mutex);
-	rc = server->ops->calc_signature(rqst, server);
-	mutex_unlock(&server->srv_mutex);
-
-	if (rc)
-		return rc;
-
-	if (memcmp(server_response_sig, smb2_pdu->Signature,
-		   SMB2_SIGNATURE_SIZE))
-		return -EACCES;
-	else
-		return 0;
-}
-
-/*
- * Set message id for the request. Should be called after wait_for_free_request
- * and when srv_mutex is held.
- */
-static inline void
-smb2_seq_num_into_buf(struct TCP_Server_Info *server, struct smb2_hdr *hdr)
-{
-	hdr->MessageId = get_next_mid(server);
-}
-
-static struct mid_q_entry *
-smb2_mid_entry_alloc(const struct smb2_hdr *smb_buffer,
-		     struct TCP_Server_Info *server)
-{
-	struct mid_q_entry *temp;
-
-	if (server == NULL) {
-		cifs_dbg(VFS, "Null TCP session in smb2_mid_entry_alloc\n");
-		return NULL;
-	}
-
-	temp = mempool_alloc(cifs_mid_poolp, GFP_NOFS);
-	if (temp == NULL)
-		return temp;
-	else {
-		memset(temp, 0, sizeof(struct mid_q_entry));
-		temp->mid = smb_buffer->MessageId;	/* always LE */
-		temp->pid = current->pid;
-		temp->command = smb_buffer->Command;	/* Always LE */
-		temp->when_alloc = jiffies;
-		temp->server = server;
-
-		/*
-		 * The default is for the mid to be synchronous, so the
-		 * default callback just wakes up the current task.
-		 */
-		temp->callback = cifs_wake_up_task;
-		temp->callback_data = current;
-	}
-
-	atomic_inc(&midCount);
-	temp->mid_state = MID_REQUEST_ALLOCATED;
-	return temp;
-}
-
-static int
-smb2_get_mid_entry(struct cifs_ses *ses, struct smb2_hdr *buf,
-		   struct mid_q_entry **mid)
-{
-	if (ses->server->tcpStatus == CifsExiting)
-		return -ENOENT;
-
-	if (ses->server->tcpStatus == CifsNeedReconnect) {
-		cifs_dbg(FYI, "tcp session dead - return to caller to retry\n");
-		return -EAGAIN;
-	}
-
-	if (ses->status != CifsGood) {
-		/* check if SMB2 session is bad because we are setting it up */
-		if ((buf->Command != SMB2_SESSION_SETUP) &&
-		    (buf->Command != SMB2_NEGOTIATE))
-			return -EAGAIN;
-		/* else ok - we are setting up session */
-	}
-	*mid = smb2_mid_entry_alloc(buf, ses->server);
-	if (*mid == NULL)
-		return -ENOMEM;
-	spin_lock(&GlobalMid_Lock);
-	list_add_tail(&(*mid)->qhead, &ses->server->pending_mid_q);
-	spin_unlock(&GlobalMid_Lock);
-	return 0;
-}
-
-int
-smb2_check_receive(struct mid_q_entry *mid, struct TCP_Server_Info *server,
-		   bool log_error)
-{
-	unsigned int len = get_rfc1002_length(mid->resp_buf);
-	struct kvec iov;
-	struct smb_rqst rqst = { .rq_iov = &iov,
-				 .rq_nvec = 1 };
-
-	iov.iov_base = (char *)mid->resp_buf;
-	iov.iov_len = get_rfc1002_length(mid->resp_buf) + 4;
-
-	dump_smb(mid->resp_buf, min_t(u32, 80, len));
-	/* convert the length into a more usable form */
-	if ((len > 24) &&
-	    (server->sec_mode & (SECMODE_SIGN_REQUIRED|SECMODE_SIGN_ENABLED))) {
-		int rc;
-
-		rc = smb2_verify_signature(&rqst, server);
-		if (rc)
-			cifs_dbg(VFS, "SMB signature verification returned error = %d\n",
-				 rc);
-	}
-
-	return map_smb2_to_linux_error(mid->resp_buf, log_error);
-}
-
-struct mid_q_entry *
-smb2_setup_request(struct cifs_ses *ses, struct smb_rqst *rqst)
-{
-	int rc;
-	struct smb2_hdr *hdr = (struct smb2_hdr *)rqst->rq_iov[0].iov_base;
-	struct mid_q_entry *mid;
-
-	smb2_seq_num_into_buf(ses->server, hdr);
-
-	rc = smb2_get_mid_entry(ses, hdr, &mid);
-	if (rc)
-		return ERR_PTR(rc);
-	rc = smb2_sign_rqst(rqst, ses->server);
-	if (rc) {
-		cifs_delete_mid(mid);
-		return ERR_PTR(rc);
-	}
-	return mid;
-}
-
-struct mid_q_entry *
-smb2_setup_async_request(struct TCP_Server_Info *server, struct smb_rqst *rqst)
-{
-	int rc;
-	struct smb2_hdr *hdr = (struct smb2_hdr *)rqst->rq_iov[0].iov_base;
-	struct mid_q_entry *mid;
-
-	smb2_seq_num_into_buf(server, hdr);
-
-	mid = smb2_mid_entry_alloc(hdr, server);
-	if (mid == NULL)
-		return ERR_PTR(-ENOMEM);
-
-	rc = smb2_sign_rqst(rqst, server);
-	if (rc) {
-		DeleteMidQEntry(mid);
-		return ERR_PTR(rc);
-	}
-
-	return mid;
 }
