@@ -12,7 +12,6 @@
 #include <linux/xattr.h>
 #include <linux/security.h>
 #include <linux/cred.h>
-#include <linux/atomic.h>
 #include "overlayfs.h"
 
 void ovl_cleanup(struct inode *wdir, struct dentry *wdentry)
@@ -20,7 +19,7 @@ void ovl_cleanup(struct inode *wdir, struct dentry *wdentry)
 	int err;
 
 	dget(wdentry);
-	if (S_ISDIR(wdentry->d_inode->i_mode))
+	if (d_is_dir(wdentry))
 		err = ovl_do_rmdir(wdir, wdentry);
 	else
 		err = ovl_do_unlink(wdir, wdentry);
@@ -36,10 +35,8 @@ struct dentry *ovl_lookup_temp(struct dentry *workdir, struct dentry *dentry)
 {
 	struct dentry *temp;
 	char name[20];
-	static atomic_t temp_id = ATOMIC_INIT(0);
 
-	/* counter is allowed to wrap, since temp dentries are ephemeral */
-	snprintf(name, sizeof(name), "#%x", atomic_inc_return(&temp_id));
+	snprintf(name, sizeof(name), "#%lx", (unsigned long) dentry);
 
 	temp = lookup_one_len(name, workdir, strlen(name));
 	if (!IS_ERR(temp) && temp->d_inode) {
@@ -110,10 +107,6 @@ int ovl_create_real(struct inode *dir, struct dentry *newdentry,
 		}
 	}
 	if (!err && WARN_ON(!newdentry->d_inode)) {
-		/*
-		 * Not quite sure if non-instantiated dentry is legal or not.
-		 * VFS doesn't seem to care so check and warn here.
-		 */
 		err = -ENOENT;
 	}
 	return err;
@@ -271,8 +264,8 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 	if (err)
 		goto out_cleanup;
 
-	ovl_cleanup_whiteouts(opaquedir, list);
-	ovl_cleanup(wdir, opaquedir);
+	ovl_cleanup_whiteouts(upper, list);
+	ovl_cleanup(wdir, upper);
 	unlock_rename(workdir, upperdir);
 
 	/* dentry's upper doesn't match now, get rid of it */
@@ -360,7 +353,7 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 		if (err)
 			goto out_cleanup;
 
-		ovl_cleanup(wdir, newdentry);
+		ovl_cleanup(wdir, upper);
 	} else {
 		err = ovl_do_rename(wdir, newdentry, udir, upper, 0);
 		if (err)
@@ -407,30 +400,24 @@ static int ovl_create_or_link(struct dentry *dentry, int mode, dev_t rdev,
 	if (!ovl_dentry_is_opaque(dentry)) {
 		err = ovl_create_upper(dentry, inode, &stat, link, hardlink);
 	} else {
-		const struct cred *old_cred, *hold_cred = NULL;
+		const struct cred *old_cred;
 		struct cred *override_cred;
-
-		old_cred = ovl_override_creds(dentry->d_sb);
 
 		err = -ENOMEM;
 		override_cred = prepare_creds();
-		if (override_cred) {
-			const struct cred *our_cred;
+		if (!override_cred)
+			goto out_iput;
 
-			our_cred = old_cred;
-			if (!our_cred)
-				our_cred = current_cred();
-			override_cred->fsuid = our_cred->fsuid;
-			override_cred->fsgid = our_cred->fsgid;
-			hold_cred = override_creds(override_cred);
-			put_cred(override_cred);
+		cap_raise(override_cred->cap_effective, CAP_SYS_ADMIN);
+		cap_raise(override_cred->cap_effective, CAP_DAC_OVERRIDE);
+		cap_raise(override_cred->cap_effective, CAP_FOWNER);
+		old_cred = override_creds(override_cred);
 
-			err = ovl_create_over_whiteout(dentry, inode, &stat,
-						       link, hardlink);
-		}
-		ovl_revert_creds(old_cred ?: hold_cred);
-		if (old_cred && hold_cred)
-			put_cred(hold_cred);
+		err = ovl_create_over_whiteout(dentry, inode, &stat, link,
+					       hardlink);
+
+		revert_creds(old_cred);
+		put_cred(override_cred);
 	}
 
 	if (!err)
@@ -578,7 +565,7 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 			goto kill_whiteout;
 
 		if (is_dir)
-			ovl_cleanup(wdir, whiteout);
+			ovl_cleanup(wdir, upper);
 	}
 	ovl_dentry_version_inc(dentry->d_parent);
 out_d_drop:
@@ -660,11 +647,25 @@ static int ovl_do_remove(struct dentry *dentry, bool is_dir)
 	if (OVL_TYPE_PURE_UPPER(type)) {
 		err = ovl_remove_upper(dentry, is_dir);
 	} else {
-		const struct cred *old_cred = ovl_override_creds(dentry->d_sb);
+		const struct cred *old_cred;
+		struct cred *override_cred;
+
+		err = -ENOMEM;
+		override_cred = prepare_creds();
+		if (!override_cred)
+			goto out_drop_write;
+
+		cap_raise(override_cred->cap_effective, CAP_SYS_ADMIN);
+		cap_raise(override_cred->cap_effective, CAP_DAC_OVERRIDE);
+		cap_raise(override_cred->cap_effective, CAP_FOWNER);
+		cap_raise(override_cred->cap_effective, CAP_FSETID);
+		cap_raise(override_cred->cap_effective, CAP_CHOWN);
+		old_cred = override_creds(override_cred);
 
 		err = ovl_remove_and_whiteout(dentry, is_dir);
 
-		ovl_revert_creds(old_cred);
+		revert_creds(old_cred);
+		put_cred(override_cred);
 	}
 out_drop_write:
 	ovl_drop_write(dentry);
@@ -699,10 +700,11 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 	bool new_create = false;
 	bool cleanup_whiteout = false;
 	bool overwrite = !(flags & RENAME_EXCHANGE);
-	bool is_dir = S_ISDIR(old->d_inode->i_mode);
+	bool is_dir = d_is_dir(old);
 	bool new_is_dir = false;
 	struct dentry *opaquedir = NULL;
 	const struct cred *old_cred = NULL;
+	struct cred *override_cred = NULL;
 
 	err = -EINVAL;
 	if (flags & ~(RENAME_EXCHANGE | RENAME_NOREPLACE))
@@ -725,7 +727,7 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 		if (err)
 			goto out;
 
-		if (S_ISDIR(new->d_inode->i_mode))
+		if (d_is_dir(new))
 			new_is_dir = true;
 
 		new_type = ovl_path_type(new);
@@ -771,8 +773,19 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 	old_opaque = !OVL_TYPE_PURE_UPPER(old_type);
 	new_opaque = !OVL_TYPE_PURE_UPPER(new_type);
 
-	if (old_opaque || new_opaque)
-		old_cred = ovl_override_creds(old->d_sb);
+	if (old_opaque || new_opaque) {
+		err = -ENOMEM;
+		override_cred = prepare_creds();
+		if (!override_cred)
+			goto out_drop_write;
+
+		cap_raise(override_cred->cap_effective, CAP_SYS_ADMIN);
+		cap_raise(override_cred->cap_effective, CAP_DAC_OVERRIDE);
+		cap_raise(override_cred->cap_effective, CAP_FOWNER);
+		cap_raise(override_cred->cap_effective, CAP_FSETID);
+		cap_raise(override_cred->cap_effective, CAP_CHOWN);
+		old_cred = override_creds(override_cred);
+	}
 
 	if (overwrite && OVL_TYPE_MERGE_OR_LOWER(new_type) && new_is_dir) {
 		opaquedir = ovl_check_empty_and_clear(new);
@@ -851,7 +864,7 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 		BUG_ON(flags & ~RENAME_EXCHANGE);
 		err = vfs_rename(old_upperdir->d_inode, olddentry,
 				 new_upperdir->d_inode, newdentry,
-				NULL, flags);
+				 NULL, flags);
 	}
 
 	if (err) {
@@ -874,7 +887,7 @@ static int ovl_rename2(struct inode *olddir, struct dentry *old,
 	}
 
 	if (cleanup_whiteout)
-		ovl_cleanup(old_upperdir->d_inode, olddentry);
+		ovl_cleanup(old_upperdir->d_inode, newdentry);
 
 	ovl_dentry_version_inc(old->d_parent);
 	ovl_dentry_version_inc(new->d_parent);
@@ -884,7 +897,10 @@ out_dput:
 out_unlock:
 	unlock_rename(new_upperdir, old_upperdir);
 out_revert_creds:
-	ovl_revert_creds(old_cred);
+	if (old_opaque || new_opaque) {
+		revert_creds(old_cred);
+		put_cred(override_cred);
+	}
 out_drop_write:
 	ovl_drop_write(old);
 out:

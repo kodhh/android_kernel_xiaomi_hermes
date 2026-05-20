@@ -9,7 +9,6 @@
 
 #include <linux/fs.h>
 #include <linux/slab.h>
-#include <linux/cred.h>
 #include <linux/xattr.h>
 #include "overlayfs.h"
 
@@ -41,95 +40,10 @@ out_dput_parent:
 	return err;
 }
 
-/*
- * xattr handlers for sb->s_xattr - used by security modules (SELinux)
- * to access xattrs on the underlying real inodes.
- */
-
-static int ovl_own_xattr_get(struct dentry *dentry, const char *name,
-			      void *buffer, size_t size, int handler_flags)
-{
-	return -EOPNOTSUPP;
-}
-
-static int ovl_own_xattr_set(struct dentry *dentry, const char *name,
-			      const void *buffer, size_t size, int flags,
-			      int handler_flags)
-{
-	return -EOPNOTSUPP;
-}
-
-static const struct xattr_handler ovl_own_xattr_handler = {
-	.prefix = OVL_XATTR_PRE_NAME,
-	.get = ovl_own_xattr_get,
-	.set = ovl_own_xattr_set,
-};
-
-static int ovl_other_xattr_get(struct dentry *dentry, const char *name,
-				void *buffer, size_t size, int handler_flags)
-{
-	struct path realpath;
-
-	ovl_path_real(dentry, &realpath);
-	return vfs_getxattr(realpath.dentry, name, buffer, size);
-}
-
-static int ovl_other_xattr_set(struct dentry *dentry, const char *name,
-				const void *buffer, size_t size, int flags,
-				int handler_flags)
-{
-	struct path realpath;
-	int err;
-
-	err = ovl_want_write(dentry);
-	if (err)
-		return err;
-
-	ovl_path_real(dentry, &realpath);
-
-	if (!OVL_TYPE_UPPER(ovl_path_type(dentry))) {
-		err = ovl_copy_up(dentry);
-		if (err)
-			goto out_drop_write;
-		ovl_path_upper(dentry, &realpath);
-	}
-
-	err = vfs_setxattr(realpath.dentry, name, buffer, size, flags);
-
-out_drop_write:
-	ovl_drop_write(dentry);
-	return err;
-}
-
-static const struct xattr_handler ovl_other_xattr_handler = {
-	.prefix = "",
-	.get = ovl_other_xattr_get,
-	.set = ovl_other_xattr_set,
-};
-
-const struct xattr_handler *ovl_xattr_handlers[] = {
-	&ovl_own_xattr_handler,
-	&ovl_other_xattr_handler,
-	NULL
-};
-
 int ovl_setattr(struct dentry *dentry, struct iattr *attr)
 {
 	int err;
 	struct dentry *upperdentry;
-
-	/*
-	 * Check for permissions before trying to copy-up.  This is redundant
-	 * since it will be rechecked later by ->setattr() on upper dentry.  But
-	 * without this, copy-up can be triggered by just about anybody.
-	 *
-	 * We don't initialize inode->size, which just means that
-	 * inode_newsize_ok() will always check against MAX_LFS_FILESIZE and not
-	 * check for a swapfile (which this won't be anyway).
-	 */
-	err = inode_change_ok(dentry->d_inode, attr);
-	if (err)
-		return err;
 
 	err = ovl_want_write(dentry);
 	if (err)
@@ -162,7 +76,6 @@ int ovl_permission(struct inode *inode, int mask)
 	struct ovl_entry *oe;
 	struct dentry *alias = NULL;
 	struct inode *realinode;
-	const struct cred *old_cred;
 	struct dentry *realdentry;
 	bool is_upper;
 	int err;
@@ -172,10 +85,6 @@ int ovl_permission(struct inode *inode, int mask)
 	} else if (mask & MAY_NOT_BLOCK) {
 		return -ECHILD;
 	} else {
-		/*
-		 * For non-directories find an alias and get the info
-		 * from there.
-		 */
 		alias = d_find_any_alias(inode);
 		if (WARN_ON(!alias))
 			return -ENOENT;
@@ -185,7 +94,6 @@ int ovl_permission(struct inode *inode, int mask)
 
 	realdentry = ovl_entry_real(oe, &is_upper);
 
-	/* Careful in RCU walk mode */
 	realinode = ACCESS_ONCE(realdentry->d_inode);
 	if (!realinode) {
 		WARN_ON(!(mask & MAY_NOT_BLOCK));
@@ -196,45 +104,13 @@ int ovl_permission(struct inode *inode, int mask)
 	if (mask & MAY_WRITE) {
 		umode_t mode = realinode->i_mode;
 
-		/*
-		 * Writes will always be redirected to upper layer, so
-		 * ignore lower layer being read-only.
-		 *
-		 * If the overlay itself is read-only then proceed
-		 * with the permission check, don't return EROFS.
-		 * This will only happen if this is the lower layer of
-		 * another overlayfs.
-		 *
-		 * If upper fs becomes read-only after the overlay was
-		 * constructed return EROFS to prevent modification of
-		 * upper layer.
-		 */
 		err = -EROFS;
 		if (is_upper && !IS_RDONLY(inode) && IS_RDONLY(realinode) &&
 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
 			goto out_dput;
 	}
 
-	/*
-	 * Check overlay inode with the creds of task and underlying inode
-	 * with creds of mounter
-	 */
-	err = generic_permission(inode, mask);
-	if (err)
-		goto out_dput;
-
-	/* With default_permissions, let VFS handle permission checking */
-	{
-		struct super_block *sb = inode->i_sb;
-		struct ovl_fs *ofs = sb->s_fs_info;
-
-		if (!ofs->config.default_permissions) {
-			old_cred = ovl_override_creds(sb);
-			err = __inode_permission(realinode, mask);
-			ovl_revert_creds(old_cred);
-		}
-	}
-
+	err = __inode_permission(realinode, mask);
 out_dput:
 	dput(alias);
 	return err;
@@ -442,37 +318,33 @@ static bool ovl_open_need_copy_up(int flags, enum ovl_path_type type,
 	return true;
 }
 
-static int ovl_dentry_open(struct dentry *dentry, struct file *file,
-		    const struct cred *cred)
+struct inode *ovl_d_select_inode(struct dentry *dentry, unsigned file_flags)
 {
 	int err;
 	struct path realpath;
 	enum ovl_path_type type;
-	bool want_write = false;
+
+	if (d_is_dir(dentry))
+		return d_backing_inode(dentry);
 
 	type = ovl_path_real(dentry, &realpath);
-	if (ovl_open_need_copy_up(file->f_flags, type, realpath.dentry)) {
-		want_write = true;
+	if (ovl_open_need_copy_up(file_flags, type, realpath.dentry)) {
 		err = ovl_want_write(dentry);
 		if (err)
-			goto out;
+			return ERR_PTR(err);
 
-		if (file->f_flags & O_TRUNC)
+		if (file_flags & O_TRUNC)
 			err = ovl_copy_up_last(dentry, NULL, true);
 		else
 			err = ovl_copy_up(dentry);
+		ovl_drop_write(dentry);
 		if (err)
-			goto out_drop_write;
+			return ERR_PTR(err);
 
 		ovl_path_upper(dentry, &realpath);
 	}
 
-	err = vfs_open(&realpath, file, cred);
-out_drop_write:
-	if (want_write)
-		ovl_drop_write(dentry);
-out:
-	return err;
+	return d_backing_inode(realpath.dentry);
 }
 
 static const struct inode_operations ovl_file_inode_operations = {
@@ -483,7 +355,6 @@ static const struct inode_operations ovl_file_inode_operations = {
 	.getxattr	= ovl_getxattr,
 	.listxattr	= ovl_listxattr,
 	.removexattr	= ovl_removexattr,
-	.dentry_open	= ovl_dentry_open,
 };
 
 static const struct inode_operations ovl_symlink_inode_operations = {

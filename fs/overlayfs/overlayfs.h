@@ -8,28 +8,8 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/xattr.h>
 
 struct ovl_entry;
-
-struct ovl_config {
-	char *lowerdir;
-	char *upperdir;
-	char *workdir;
-	bool default_permissions;
-	bool override_creds;
-};
-
-/* private information held for overlayfs's superblock */
-struct ovl_fs {
-	struct vfsmount *upper_mnt;
-	unsigned numlower;
-	struct vfsmount **lower_mnt;
-	struct dentry *workdir;
-	long lower_namelen;
-	struct ovl_config config;
-	const struct cred *creator_cred;
-};
 
 enum ovl_path_type {
 	__OVL_PATH_PURE		= (1 << 0),
@@ -46,6 +26,15 @@ enum ovl_path_type {
 #define OVL_XATTR_PRE_NAME "trusted.overlay."
 #define OVL_XATTR_PRE_LEN  16
 #define OVL_XATTR_OPAQUE   OVL_XATTR_PRE_NAME"opaque"
+
+/* Compatibility for kernels without d_is_dir / d_backing_inode */
+#ifndef d_is_dir
+#define d_is_dir(d)		((d)->d_inode && S_ISDIR((d)->d_inode->i_mode))
+#endif
+
+#ifndef d_backing_inode
+#define d_backing_inode(d)	((d)->d_inode)
+#endif
 
 static inline int ovl_do_rmdir(struct inode *dir, struct dentry *dentry)
 {
@@ -170,8 +159,6 @@ void ovl_drop_write(struct dentry *dentry);
 bool ovl_dentry_is_opaque(struct dentry *dentry);
 void ovl_dentry_set_opaque(struct dentry *dentry, bool opaque);
 bool ovl_is_whiteout(struct dentry *dentry);
-const struct cred *ovl_override_creds(struct super_block *sb);
-void ovl_revert_creds(const struct cred *oldcred);
 void ovl_dentry_update(struct dentry *dentry, struct dentry *upperdentry);
 struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 			  unsigned int flags);
@@ -195,15 +182,14 @@ ssize_t ovl_getxattr(struct dentry *dentry, const char *name,
 		     void *value, size_t size);
 ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size);
 int ovl_removexattr(struct dentry *dentry, const char *name);
+struct inode *ovl_d_select_inode(struct dentry *dentry, unsigned file_flags);
 
 struct inode *ovl_new_inode(struct super_block *sb, umode_t mode,
 			    struct ovl_entry *oe);
-extern const struct xattr_handler *ovl_xattr_handlers[];
 static inline void ovl_copyattr(struct inode *from, struct inode *to)
 {
 	to->i_uid = from->i_uid;
 	to->i_gid = from->i_gid;
-	to->i_mode = from->i_mode;
 }
 
 /* dir.c */
