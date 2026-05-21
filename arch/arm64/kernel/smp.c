@@ -199,23 +199,23 @@ asmlinkage void secondary_start_kernel(void)
 	 */
 	cpuinfo_store_cpu();
 
+	smp_store_cpu_info(cpu);
+    aee_rr_rec_hoplug(cpu, 9, 0);
+
+	/*
+	 * Enable GIC and timers.
+	 */
+	notify_cpu_starting(cpu);
+    aee_rr_rec_hoplug(cpu, 10, 0);
+
 	/*
 	 * OK, now it's safe to let the boot CPU continue.  Wait for
 	 * the CPU migration code to notice that the CPU is online
 	 * before we continue.
 	 */
 	set_cpu_online(cpu, true);
-    aee_rr_rec_hoplug(cpu, 9, 0);
-	complete(&cpu_running);
-    aee_rr_rec_hoplug(cpu, 10, 0);
-
-	smp_store_cpu_info(cpu);
     aee_rr_rec_hoplug(cpu, 11, 0);
-
-	/*
-	 * Enable GIC and timers.
-	 */
-	notify_cpu_starting(cpu);
+	complete(&cpu_running);
     aee_rr_rec_hoplug(cpu, 12, 0);
 
 	local_dbg_enable();

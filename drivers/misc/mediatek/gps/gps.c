@@ -887,16 +887,16 @@ static int mt3326_gps_probe(struct platform_device *dev)
 	devobj = kzalloc(sizeof(*devobj), GFP_KERNEL);
 	if (!devobj) {
 		GPS_ERR("-ENOMEM\n");
-		err = -ENOMEM;
-		goto error;
+		return -ENOMEM;
 	}
+	platform_set_drvdata(dev, devobj);
 
 	mt3326_gps_hw_init(hw);
 	GPS_DBG("Registering chardev\n");
 	ret = alloc_chrdev_region(&devobj->devno, 0, 1, GPS_DEVNAME);
 	if (ret) {
 		GPS_ERR("alloc_chrdev_region fail: %d\n", ret);
-		goto error;
+		goto err_free_devobj;
 	} else {
 		GPS_DBG("major: %d, minor: %d\n", MAJOR(devobj->devno), MINOR(devobj->devno));
 	}
@@ -905,21 +905,26 @@ static int mt3326_gps_probe(struct platform_device *dev)
 	err = cdev_add(&devobj->chdev, devobj->devno, 1);
 	if (err) {
 		GPS_ERR("cdev_add fail: %d\n", err);
-		goto error;
+		goto err_unreg_region;
 	}
-	drvobj = kmalloc(sizeof(*drvobj), GFP_KERNEL);
+	drvobj = kzalloc(sizeof(*drvobj), GFP_KERNEL);
 	if (!drvobj) {
 		err = -ENOMEM;
-		goto error;
+		goto err_cdev_del;
 	}
-	memset(drvobj, 0, sizeof(*drvobj));
 
 	devobj->cls = class_create(THIS_MODULE, "gpsdrv");
 	if (IS_ERR(devobj->cls)) {
-		GPS_ERR("Unable to create class, err = %d\n", (int)PTR_ERR(devobj->cls));
-		goto error;
+		err = PTR_ERR(devobj->cls);
+		GPS_ERR("Unable to create class, err = %d\n", err);
+		goto err_free_drvobj;
 	}
 	devobj->dev = device_create(devobj->cls, NULL, devobj->devno, drvobj, "gps");
+	if (IS_ERR(devobj->dev)) {
+		err = PTR_ERR(devobj->dev);
+		GPS_ERR("device_create fail: %d\n", err);
+		goto err_class_destroy;
+	}
 	devobj->hw = hw;
 	drvobj->hw = hw;
 	drvobj->pwrctl = 0;
@@ -932,7 +937,7 @@ static int mt3326_gps_probe(struct platform_device *dev)
 
 	err = mt3326_gps_create_attr(devobj->dev);
 	if (err)
-		goto error;
+		goto err_device_destroy;
 
 	/*initialize members */
 	spin_lock_init(&gps_private.lock);
@@ -943,19 +948,23 @@ static int mt3326_gps_probe(struct platform_device *dev)
 	gps_private.dat_pos = 0;
 	memset(gps_private.dat_buf, 0x00, sizeof(gps_private.dat_buf));
 
-	/*set platform data:
-	   a new device created for gps */
-	platform_set_drvdata(dev, devobj);
-
 	GPS_DBG("Done\n");
 	return 0;
 
-error:
-	if (err == 0)
-		cdev_del(&devobj->chdev);
-	if (ret == 0)
-		unregister_chrdev_region(devobj->devno, 1);
-	return -1;
+err_device_destroy:
+	device_destroy(devobj->cls, devobj->devno);
+err_class_destroy:
+	class_destroy(devobj->cls);
+err_free_drvobj:
+	kfree(drvobj);
+err_cdev_del:
+	cdev_del(&devobj->chdev);
+err_unreg_region:
+	unregister_chrdev_region(devobj->devno, 1);
+err_free_devobj:
+	kfree(devobj);
+	platform_set_drvdata(dev, NULL);
+	return err;
 }
 
 /*****************************************************************************/
@@ -963,31 +972,23 @@ static int mt3326_gps_remove(struct platform_device *dev)
 {
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
 	struct gps_drv_obj *drvobj;
-	int err;
 
-	if (!devobj) {
-		GPS_ERR("null pointer: %p\n", devobj);
+	if (!devobj)
 		return -1;
-	}
+
 	drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
 
-	if (!drvobj) {
-		GPS_ERR("null pointer: %p\n", drvobj);
-		return -1;
-	}
-
 	GPS_DBG("Unregistering chardev\n");
-	kfree(devobj);
-
 	cdev_del(&devobj->chdev);
 	unregister_chrdev_region(devobj->devno, 1);
 
 	mt3326_gps_hw_exit(devobj->hw);
-	err = mt3326_gps_delete_attr(devobj->dev);
-	if (err)
-		GPS_ERR("delete attr fails: %d\n", err);
+	mt3326_gps_delete_attr(devobj->dev);
 	device_destroy(devobj->cls, devobj->devno);
 	class_destroy(devobj->cls);
+	kfree(drvobj);
+	kfree(devobj);
+	platform_set_drvdata(dev, NULL);
 	GPS_DBG("Done\n");
 	return 0;
 }
