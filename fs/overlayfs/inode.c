@@ -110,7 +110,12 @@ int ovl_permission(struct inode *inode, int mask)
 			goto out_dput;
 	}
 
+	err = generic_permission(inode, mask);
+	if (err)
+		goto out_dput;
+
 	err = __inode_permission(realinode, mask);
+
 out_dput:
 	dput(alias);
 	return err;
