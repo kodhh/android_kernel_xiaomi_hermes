@@ -3118,14 +3118,28 @@ static int selinux_inode_listsecurity(struct inode *inode, char *buffer, size_t 
 	return len;
 }
 
+static void selinux_inode_getsecid(const struct inode *inode, u32 *secid)
+{
+	struct inode_security_struct *isec = inode->i_security;
+	*secid = isec->sid;
+}
+
 static int selinux_inode_copy_up(struct dentry *src, struct cred **new)
 {
-	struct inode_security_struct *isec;
+	u32 sid;
 	struct task_security_struct *tsec;
+	struct cred *new_creds = *new;
 
-	isec = src->d_inode->i_security;
-	tsec = (*new)->security;
-	tsec->create_sid = isec->sid;
+	if (new_creds == NULL) {
+		new_creds = prepare_creds();
+		if (!new_creds)
+			return -ENOMEM;
+	}
+
+	tsec = new_creds->security;
+	selinux_inode_getsecid(d_inode(src), &sid);
+	tsec->create_sid = sid;
+	*new = new_creds;
 	return 0;
 }
 
@@ -3134,12 +3148,6 @@ static int selinux_inode_copy_up_xattr(const char *name)
 	if (strcmp(name, XATTR_SECURITY_PREFIX XATTR_SELINUX_SUFFIX) == 0)
 		return 1;
 	return -EOPNOTSUPP;
-}
-
-static void selinux_inode_getsecid(const struct inode *inode, u32 *secid)
-{
-	struct inode_security_struct *isec = inode->i_security;
-	*secid = isec->sid;
 }
 
 /* file security operations */
