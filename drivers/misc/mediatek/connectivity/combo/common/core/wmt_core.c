@@ -990,7 +990,7 @@ static INT32 opfunc_pwr_on(P_WMT_OP pWmtOp)
 	iRet = wmt_core_ctrl(WMT_CTRL_HW_PWR_ON, &ctrlPa1, &ctrlPa2);
 	if (iRet) {
 		WMT_ERR_FUNC("WMT-CORE: WMT_CTRL_HW_PWR_ON fail iRet(%d)\n", iRet);
-		if (0 < retry--) {
+		if (0 == retry--) {
 			WMT_INFO_FUNC("WMT-CORE: retry (%d)\n", retry);
 			goto pwr_on_rty;
 		}
