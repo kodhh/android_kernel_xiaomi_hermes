@@ -1074,9 +1074,6 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	else if (ufs->numlower)
 		security_sb_clone_mnt_opts(ufs->lower_mnt[0]->mnt_sb, sb);
 
-	sb->s_xattr = ovl_xattr_handlers;
-	sb->s_flags |= MS_POSIXACL;
-
 	return 0;
 
 out_free_oe:
