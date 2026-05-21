@@ -1068,6 +1068,12 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_root = root_dentry;
 	sb->s_fs_info = ufs;
 
+	/* Copy attributes from the real root inode (i_mode needs permission bits) */
+	if (ufs->upper_mnt)
+		ovl_copyattr(upperpath.dentry->d_inode, root_dentry->d_inode);
+	else if (ufs->numlower)
+		ovl_copyattr(stack[0].dentry->d_inode, root_dentry->d_inode);
+
 	/* Clone security mount options (SELinux) from the underlying filesystem */
 	if (ufs->upper_mnt)
 		security_sb_clone_mnt_opts(ufs->upper_mnt->mnt_sb, sb);
