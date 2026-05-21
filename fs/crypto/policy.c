@@ -169,6 +169,10 @@ int fscrypt_has_permitted_context(struct inode *parent, struct inode *child)
 	    !S_ISLNK(child->i_mode))
 		return 1;
 
+	/* No restrictions if parent filesystem doesn't support encryption */
+	if (!cops)
+		return 1;
+
 	/* No restrictions if the parent directory is unencrypted */
 	if (!cops->is_encrypted(parent))
 		return 1;
