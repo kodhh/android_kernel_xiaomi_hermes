@@ -1240,15 +1240,17 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	ovl_inode_init(d_inode(root_dentry), realinode, !!upperpath.dentry);
 	ovl_copyattr(realinode, d_inode(root_dentry));
 
+	sb->s_root = root_dentry;
+
 	/* Clone security mount options from upper or lower superblock.
 	 * This ensures SELinux uses xattr-based labeling.
+	 * Must be done after sb->s_root is set so that sb_finish_set_opts
+	 * can traverse the superblock's inode list safely.
 	 */
 	if (ufs->upper_mnt)
 		security_sb_clone_mnt_opts(ufs->upper_mnt->mnt_sb, sb);
 	else if (ufs->numlower)
 		security_sb_clone_mnt_opts(ufs->lower_mnt[0]->mnt_sb, sb);
-
-	sb->s_root = root_dentry;
 	return 0;
 
 out_free_oe:
