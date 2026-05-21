@@ -1068,6 +1068,15 @@ static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_root = root_dentry;
 	sb->s_fs_info = ufs;
 
+	/* Clone security mount options (SELinux) from the underlying filesystem */
+	if (ufs->upper_mnt)
+		security_sb_clone_mnt_opts(ufs->upper_mnt->mnt_sb, sb);
+	else if (ufs->numlower)
+		security_sb_clone_mnt_opts(ufs->lower_mnt[0]->mnt_sb, sb);
+
+	sb->s_xattr = ovl_xattr_handlers;
+	sb->s_flags |= MS_POSIXACL;
+
 	return 0;
 
 out_free_oe:

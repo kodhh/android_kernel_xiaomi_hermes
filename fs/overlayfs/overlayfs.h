@@ -8,6 +8,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/xattr.h>
 
 struct ovl_entry;
 
@@ -184,12 +185,15 @@ ssize_t ovl_listxattr(struct dentry *dentry, char *list, size_t size);
 int ovl_removexattr(struct dentry *dentry, const char *name);
 struct inode *ovl_d_select_inode(struct dentry *dentry, unsigned file_flags);
 
+extern const struct xattr_handler *ovl_xattr_handlers[];
+
 struct inode *ovl_new_inode(struct super_block *sb, umode_t mode,
 			    struct ovl_entry *oe);
 static inline void ovl_copyattr(struct inode *from, struct inode *to)
 {
 	to->i_uid = from->i_uid;
 	to->i_gid = from->i_gid;
+	to->i_mode = from->i_mode;
 }
 
 /* dir.c */
