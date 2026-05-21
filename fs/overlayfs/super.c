@@ -191,6 +191,10 @@ void ovl_path_lower(struct dentry *dentry, struct path *path)
 int ovl_want_write(struct dentry *dentry)
 {
 	struct ovl_fs *ofs = dentry->d_sb->s_fs_info;
+
+	if (dentry->d_sb->s_flags & MS_RDONLY)
+		return -EROFS;
+
 	return mnt_want_write(ofs->upper_mnt);
 }
 
