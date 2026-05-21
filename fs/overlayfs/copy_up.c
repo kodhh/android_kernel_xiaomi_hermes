@@ -53,6 +53,13 @@ int ovl_copy_xattr(struct dentry *old, struct dentry *new)
 	}
 
 	for (name = buf; name < (buf + list_size); name += strlen(name) + 1) {
+		error = security_inode_copy_up_xattr(name);
+		if (error < 0 && error != -EOPNOTSUPP)
+			goto out_free_value;
+		if (error == 1) {
+			error = 0;
+			continue;
+		}
 		size = vfs_getxattr(old, name, value, XATTR_SIZE_MAX);
 		if (size <= 0) {
 			error = size;
@@ -204,6 +211,8 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	struct dentry *upper = NULL;
 	umode_t mode = stat->mode;
 	int err;
+	const struct cred *old_creds = NULL;
+	struct cred *new_creds = NULL;
 
 	newdentry = ovl_lookup_temp(workdir, dentry);
 	err = PTR_ERR(newdentry);
@@ -216,10 +225,22 @@ static int ovl_copy_up_locked(struct dentry *workdir, struct dentry *upperdir,
 	if (IS_ERR(upper))
 		goto out1;
 
+	err = security_inode_copy_up(dentry, &new_creds);
+	if (err < 0)
+		goto out2;
+
+	if (new_creds)
+		old_creds = override_creds(new_creds);
+
 	/* Can't properly set mode on creation because of the umask */
 	stat->mode &= S_IFMT;
 	err = ovl_create_real(wdir, newdentry, stat, link, NULL, true);
 	stat->mode = mode;
+
+	if (new_creds) {
+		revert_creds(old_creds);
+		put_cred(new_creds);
+	}
 	if (err)
 		goto out2;
 
