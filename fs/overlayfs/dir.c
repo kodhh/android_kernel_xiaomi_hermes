@@ -240,9 +240,8 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 				      struct list_head *list)
 {
 	struct dentry *workdir = ovl_workdir(dentry);
-	struct inode *wdir = workdir->d_inode;
-	struct dentry *upperdir = ovl_dentry_upper(dentry->d_parent);
-	struct inode *udir = upperdir->d_inode;
+	struct dentry *upperdir;
+	struct inode *wdir, *udir;
 	struct path upperpath;
 	struct dentry *upper;
 	struct dentry *opaquedir;
@@ -251,6 +250,9 @@ static struct dentry *ovl_clear_empty(struct dentry *dentry,
 
 	if (WARN_ON(!workdir))
 		return ERR_PTR(-EROFS);
+	wdir = workdir->d_inode;
+	upperdir = ovl_dentry_upper(dentry->d_parent);
+	udir = upperdir->d_inode;
 
 	err = ovl_lock_rename_workdir(workdir, upperdir);
 	if (err)
@@ -377,9 +379,8 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 				    struct dentry *hardlink)
 {
 	struct dentry *workdir = ovl_workdir(dentry);
-	struct inode *wdir = workdir->d_inode;
-	struct dentry *upperdir = ovl_dentry_upper(dentry->d_parent);
-	struct inode *udir = upperdir->d_inode;
+	struct dentry *upperdir;
+	struct inode *wdir, *udir;
 	struct dentry *upper;
 	struct dentry *newdentry;
 	int err;
@@ -387,6 +388,9 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 
 	if (WARN_ON(!workdir))
 		return -EROFS;
+	wdir = workdir->d_inode;
+	upperdir = ovl_dentry_upper(dentry->d_parent);
+	udir = upperdir->d_inode;
 
 	if (!hardlink) {
 		err = posix_acl_create(&acl, GFP_KERNEL, &stat->mode);
@@ -599,9 +603,8 @@ out:
 static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 {
 	struct dentry *workdir = ovl_workdir(dentry);
-	struct inode *wdir = workdir->d_inode;
-	struct dentry *upperdir = ovl_dentry_upper(dentry->d_parent);
-	struct inode *udir = upperdir->d_inode;
+	struct dentry *upperdir;
+	struct inode *wdir, *udir;
 	struct dentry *whiteout;
 	struct dentry *upper;
 	struct dentry *opaquedir = NULL;
@@ -610,6 +613,9 @@ static int ovl_remove_and_whiteout(struct dentry *dentry, bool is_dir)
 
 	if (WARN_ON(!workdir))
 		return -EROFS;
+	wdir = workdir->d_inode;
+	upperdir = ovl_dentry_upper(dentry->d_parent);
+	udir = upperdir->d_inode;
 
 	if (is_dir) {
 		opaquedir = ovl_check_empty_and_clear(dentry);
