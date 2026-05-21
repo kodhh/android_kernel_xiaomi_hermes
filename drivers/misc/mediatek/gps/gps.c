@@ -920,6 +920,7 @@ static int mt3326_gps_probe(struct platform_device *dev)
 		goto error;
 	}
 	devobj->dev = device_create(devobj->cls, NULL, devobj->devno, drvobj, "gps");
+	devobj->hw = hw;
 	drvobj->hw = hw;
 	drvobj->pwrctl = 0;
 	drvobj->suspend = 0;
@@ -961,11 +962,17 @@ error:
 static int mt3326_gps_remove(struct platform_device *dev)
 {
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
-	struct gps_drv_obj *drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+	struct gps_drv_obj *drvobj;
 	int err;
 
-	if (!devobj || !drvobj) {
-		GPS_ERR("null pointer: %p, %p\n", devobj, drvobj);
+	if (!devobj) {
+		GPS_ERR("null pointer: %p\n", devobj);
+		return -1;
+	}
+	drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+
+	if (!drvobj) {
+		GPS_ERR("null pointer: %p\n", drvobj);
 		return -1;
 	}
 
@@ -989,6 +996,10 @@ static int mt3326_gps_remove(struct platform_device *dev)
 static void mt3326_gps_shutdown(struct platform_device *dev)
 {
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
+	if (!devobj) {
+		GPS_ERR("null pointer!!\n");
+		return;
+	}
 	GPS_DBG("Shutting down\n");
 	mt3326_gps_hw_exit(devobj->hw);
 }
@@ -1000,10 +1011,16 @@ static int mt3326_gps_suspend(struct platform_device *dev, pm_message_t state)
 {
 	int err = 0;
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
-	struct gps_drv_obj *drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+	struct gps_drv_obj *drvobj;
 
-	if (!devobj || !drvobj) {
-		GPS_ERR("null pointer: %p, %p\n", devobj, drvobj);
+	if (!devobj) {
+		GPS_ERR("null pointer: %p\n", devobj);
+		return -1;
+	}
+	drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+
+	if (!drvobj) {
+		GPS_ERR("null pointer: %p\n", drvobj);
 		return -1;
 	}
 
@@ -1017,7 +1034,18 @@ static int mt3326_gps_suspend(struct platform_device *dev, pm_message_t state)
 static int mt3326_gps_resume(struct platform_device *dev)
 {
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
-	struct gps_drv_obj *drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+	struct gps_drv_obj *drvobj;
+
+	if (!devobj) {
+		GPS_ERR("null pointer: %p\n", devobj);
+		return -1;
+	}
+	drvobj = (struct gps_drv_obj *)dev_get_drvdata(devobj->dev);
+
+	if (!drvobj) {
+		GPS_ERR("null pointer: %p\n", drvobj);
+		return -1;
+	}
 
 	GPS_DBG("");
 	return mt3326_gps_dev_resume(drvobj);
