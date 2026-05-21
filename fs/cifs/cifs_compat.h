@@ -59,7 +59,9 @@ static inline int kstrtobool_from_user(const char __user *s, size_t count,
 #endif
 
 /* file_dentry compat */
+#ifndef file_dentry
 #define file_dentry(file) ((file)->f_path.dentry)
+#endif
 
 /* inode_lock/unlock compat (3.10 uses i_mutex) */
 #define inode_lock(inode)   mutex_lock(&(inode)->i_mutex)

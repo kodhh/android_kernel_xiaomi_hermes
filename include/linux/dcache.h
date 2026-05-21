@@ -159,6 +159,7 @@ struct dentry_operations {
 	struct vfsmount *(*d_automount)(struct path *);
 	int (*d_manage)(struct dentry *, bool);
 	struct inode *(*d_select_inode)(struct dentry *, unsigned);
+	struct dentry *(*d_real)(struct dentry *, struct inode *);
 	void (*d_canonical_path)(const struct path *, struct path *);
 } ____cacheline_aligned;
 
@@ -215,6 +216,7 @@ struct dentry_operations {
 #define DCACHE_OP_SELECT_INODE		0x02000000 /* Unioned entry: dcache op selects inode */
 
 #define DCACHE_ENCRYPTED_WITH_KEY	0x04000000 /* dir is encrypted with a valid key */
+#define DCACHE_OP_REAL			0x08000000
 
 extern seqlock_t rename_lock;
 
@@ -420,5 +422,25 @@ static inline bool d_mountpoint(struct dentry *dentry)
 }
 
 extern int sysctl_vfs_cache_pressure;
+
+#ifndef d_inode
+#define d_inode(dentry) ((dentry)->d_inode)
+#endif
+
+static inline struct dentry *d_real(struct dentry *dentry)
+{
+	if (unlikely(dentry->d_flags & DCACHE_OP_REAL))
+		return dentry->d_op->d_real(dentry, NULL);
+	else
+		return dentry;
+}
+
+static inline struct inode *d_real_inode(struct dentry *dentry)
+{
+	if (unlikely(dentry->d_flags & DCACHE_OP_REAL))
+		return d_inode(dentry->d_op->d_real(dentry, NULL));
+	else
+		return d_inode(dentry);
+}
 
 #endif	/* __LINUX_DCACHE_H */
