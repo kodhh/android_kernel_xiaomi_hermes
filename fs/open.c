@@ -301,9 +301,8 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
 }
 
 #ifdef CONFIG_KSU
-__attribute__((hot)) 
-extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
-				int *mode, int *flags);
+extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
+			                    int *flags);
 #endif
 /*
  * access() needs to use the real uid/gid, not the effective uid/gid.
@@ -673,18 +672,28 @@ int open_check_o_direct(struct file *f)
 }
 
 static int do_dentry_open(struct file *f,
-			  struct inode *inode,
 			  int (*open)(struct inode *, struct file *),
 			  const struct cred *cred)
 {
 	static const struct file_operations empty_fops = {};
+	struct inode *inode;
 	int error;
 
 	f->f_mode = OPEN_FMODE(f->f_flags) | FMODE_LSEEK |
 				FMODE_PREAD | FMODE_PWRITE;
 
+	if (unlikely(f->f_flags & O_PATH))
+		f->f_mode = FMODE_PATH;
+
 	path_get(&f->f_path);
-	f->f_inode = inode;
+	inode = f->f_inode = f->f_path.dentry->d_inode;
+
+	if (inode->i_op->dentry_open) {
+		struct path orig_path = f->f_path;
+		error = inode->i_op->dentry_open(f->f_path.dentry, f, cred);
+		path_put(&orig_path);
+		return error;
+	}
 
 	if (f->f_mode & FMODE_WRITE && !special_file(inode->i_mode)) {
 		error = __get_file_write_access(inode, f->f_path.mnt);
@@ -695,7 +704,7 @@ static int do_dentry_open(struct file *f,
 
 	f->f_mapping = inode->i_mapping;
 
-	if (unlikely(f->f_flags & O_PATH)) {
+	if (unlikely(f->f_mode & FMODE_PATH)) {
 		f->f_op = &empty_fops;
 		return 0;
 	}
@@ -730,6 +739,12 @@ cleanup_all:
 	fops_put(f->f_op);
 	if (f->f_mode & FMODE_WRITE) {
 		if (!special_file(inode->i_mode)) {
+			/*
+			 * We don't consider this a real
+			 * mnt_want/drop_write() pair
+			 * because it all happenend right
+			 * here, so just reset the state.
+			 */
 			put_write_access(inode);
 			file_reset_write(f);
 			__mnt_drop_write(f->f_path.mnt);
@@ -759,17 +774,10 @@ int finish_open(struct file *file, struct dentry *dentry,
 		int *opened)
 {
 	int error;
-	struct inode *inode = dentry->d_inode;
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
 
 	file->f_path.dentry = dentry;
-	if (dentry->d_flags & DCACHE_OP_SELECT_INODE) {
-		inode = dentry->d_op->d_select_inode(dentry, file->f_flags);
-		if (IS_ERR(inode))
-			return PTR_ERR(inode);
-	}
-	error = do_dentry_open(file, inode, open,
-			       current_cred());
+	error = do_dentry_open(file, open, current_cred());
 	if (!error)
 		*opened |= FILE_OPENED;
 
@@ -799,20 +807,17 @@ char *file_path(struct file *filp, char *buf, int buflen)
 }
 EXPORT_SYMBOL(file_path);
 
-int vfs_open(const struct path *path, struct file *file,
+int vfs_open(const struct path *path, struct file *filp,
 	     const struct cred *cred)
 {
-	struct dentry *dentry = path->dentry;
-	struct inode *inode = dentry->d_inode;
+	struct inode *inode = path->dentry->d_inode;
 
-	file->f_path = *path;
-	if (dentry->d_flags & DCACHE_OP_SELECT_INODE) {
-		inode = dentry->d_op->d_select_inode(dentry, file->f_flags);
-		if (IS_ERR(inode))
-			return PTR_ERR(inode);
+	if (inode->i_op->dentry_open)
+		return inode->i_op->dentry_open(path->dentry, filp, cred);
+	else {
+		filp->f_path = *path;
+		return do_dentry_open(filp, NULL, cred);
 	}
-
-	return do_dentry_open(file, inode, NULL, cred);
 }
 EXPORT_SYMBOL(vfs_open);
 
@@ -831,7 +836,7 @@ struct file *dentry_open(const struct path *path, int flags,
 	if (!IS_ERR(f)) {
 		f->f_flags = flags;
 		f->f_path = *path;
-		error = do_dentry_open(f, f->f_path.dentry->d_inode, NULL, cred);
+		error = do_dentry_open(f, NULL, cred);
 		if (!error) {
 			/* from now on we need fput() to dispose of f */
 			error = open_check_o_direct(f);
