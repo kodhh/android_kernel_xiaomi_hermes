@@ -265,7 +265,7 @@ static struct seq_operations gsGpuTracingReadOps =
 };
 
 
-static IMG_INT GpuTracingSet(const IMG_CHAR *buffer, size_t count, loff_t uiPosition, void *data)
+static ssize_t GpuTracingSet(const char __user *buffer, size_t count, loff_t uiPosition, void *data)
 {
 	IMG_CHAR cFirstChar;
 
@@ -405,7 +405,7 @@ PVRSRV_ERROR PVRGpuTraceInit(void)
 	return PVRDebugFSCreateEntry("gpu_tracing_on",
 				      NULL,
 				      &gsGpuTracingReadOps,
-				      (PVRSRV_ENTRY_WRITE_FUNC *)GpuTracingSet,
+				      GpuTracingSet,
 				      NULL,
 				      &gpsPVRDebugFSGpuTracingOnEntry);
 }

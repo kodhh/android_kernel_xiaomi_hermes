@@ -70,7 +70,7 @@
         seq_printf(m, "%u\n", var);                                                 \
         return 0;                                                                   \
     }                                                                               \
-    static int hps_## name ## _proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)  \
+    static ssize_t hps_## name ## _proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)  \
     {                                                                               \
         int len = 0, name = 0;                                                      \
         char desc[32];                                                              \
@@ -102,7 +102,7 @@
         seq_printf(m, "%u\n", var);                                                 \
         return 0;                                                                   \
     }                                                                               \
-    static int hps_## name ## _proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)  \
+    static ssize_t hps_## name ## _proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)  \
     {                                                                               \
         int len = 0, name = 0;                                                      \
         char desc[32];                                                              \
@@ -294,7 +294,7 @@ static int hps_num_base_perf_serv_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_num_base_perf_serv_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_num_base_perf_serv_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, little_num_base_perf_serv = 0, big_num_base_perf_serv = 0;
     char desc[32];
@@ -397,7 +397,7 @@ static int hps_num_limit_thermal_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_num_limit_thermal_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_num_limit_thermal_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, little_num_limit_thermal = 0, big_num_limit_thermal = 0;
     char desc[32];
@@ -480,7 +480,7 @@ static int hps_num_limit_low_battery_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_num_limit_low_battery_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_num_limit_low_battery_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, little_num_limit_low_battery = 0, big_num_limit_low_battery = 0;
     char desc[32];
@@ -563,7 +563,7 @@ static int hps_num_limit_ultra_power_saving_proc_show(struct seq_file *m, void *
     return 0;
 }
 
-static int hps_num_limit_ultra_power_saving_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_num_limit_ultra_power_saving_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, little_num_limit_ultra_power_saving = 0, big_num_limit_ultra_power_saving = 0;
     char desc[32];
@@ -646,7 +646,7 @@ static int hps_num_limit_power_serv_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_num_limit_power_serv_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_num_limit_power_serv_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, little_num_limit_power_serv = 0, big_num_limit_power_serv = 0;
     char desc[32];
@@ -749,7 +749,7 @@ static int hps_test0_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_test0_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_test0_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, test0 = 0;
     char desc[32];
@@ -821,7 +821,7 @@ static int hps_test1_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_test1_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_test1_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0, test1 = 0;
     char desc[32];
@@ -893,7 +893,7 @@ static int hps_memory_debug_proc_show(struct seq_file *m, void *v)
     return 0;
 }
 
-static int hps_memory_debug_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t hps_memory_debug_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
     int len = 0;
     char desc[32];

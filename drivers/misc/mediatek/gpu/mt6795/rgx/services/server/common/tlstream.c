@@ -208,7 +208,7 @@ TLStreamCreate(IMG_HANDLE *phStream,
     }
 
 	/* Remember producer supplied CB and data for later */
-	psTmp->pfProducerCallback = (IMG_VOID(*)(IMG_VOID))pfProducerCB;
+	psTmp->pfProducerCallback = pfProducerCB;
 	psTmp->pvProducerUserData = pvProducerUD;
 
 	/* Round the requested bytes to a multiple of array elements' size, eg round 3 to 4 */
@@ -819,7 +819,7 @@ TLStreamAcquireReadPos(PTL_STREAM psStream, IMG_UINT32* puiReadOffset)
 		PVRSRV_ERROR eRc;
 		IMG_UINT32   ui32Resp = 0;
 
-		eRc = ((TL_STREAM_SOURCECB)psStream->pfProducerCallback)(psStream, TL_SOURCECB_OP_CLIENT_EOS,
+		eRc = psStream->pfProducerCallback(psStream, TL_SOURCECB_OP_CLIENT_EOS,
 				&ui32Resp, psStream->pvProducerUserData);
 		PVR_LOG_IF_ERROR(eRc, "TLStream->pfProducerCallback");
 

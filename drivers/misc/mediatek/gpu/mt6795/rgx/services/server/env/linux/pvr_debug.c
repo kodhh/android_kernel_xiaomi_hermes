@@ -809,7 +809,7 @@ static int _DebugStatusSeqShow(struct seq_file *psSeqFile, void *pvData)
 	return 0;
 }
 
-static IMG_INT DebugStatusSet(const char __user *pcBuffer,
+static ssize_t DebugStatusSet(const char __user *pcBuffer,
 			     size_t uiCount,
 			     loff_t uiPosition,
 			     void *pvData)
@@ -1107,7 +1107,7 @@ static struct seq_operations gsDebugLevelReadOps =
 };
 
 
-static IMG_INT DebugLevelSet(const char __user *pcBuffer,
+static ssize_t DebugLevelSet(const char __user *pcBuffer,
 			     size_t uiCount,
 			     loff_t uiPosition,
 			     void *pvData)
@@ -1182,7 +1182,7 @@ int PVRDebugCreateDebugFSEntries(void)
 	iResult = PVRDebugFSCreateEntry("status",
 					NULL,
 					&gsDebugStatusReadOps,
-					(PVRSRV_ENTRY_WRITE_FUNC *)DebugStatusSet,
+					DebugStatusSet,
 					psPVRSRVData,
 					&gpsStatusDebugFSEntry);
 	if (iResult != 0)
@@ -1218,7 +1218,7 @@ int PVRDebugCreateDebugFSEntries(void)
 	iResult = PVRDebugFSCreateEntry("debug_level",
 					NULL,
 					&gsDebugLevelReadOps,
-					(PVRSRV_ENTRY_WRITE_FUNC *)DebugLevelSet,
+					DebugLevelSet,
 					&gPVRDebugLevel,
 					&gpsDebugLevelDebugFSEntry);
 	if (iResult != 0)

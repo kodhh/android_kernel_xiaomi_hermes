@@ -48,6 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvr_tlcommon.h"
 #include "device.h"
 #include "lock.h"
+#include "tlstream.h"
 
 /* Forward declarations */
 typedef struct _TL_SNODE_* PTL_SNODE;
@@ -88,7 +89,7 @@ typedef struct _TL_STREAM_
                                                            using this flag will need to manually signal when
                                                            appropriate using the TLStreamSync() API */
 
-	IMG_VOID			(*pfProducerCallback)(IMG_VOID); /*!< Optional producer callback of type TL_STREAM_SOURCECB */
+	TL_STREAM_SOURCECB	pfProducerCallback; /*!< Optional producer callback of type TL_STREAM_SOURCECB */
 	IMG_PVOID			pvProducerUserData;	             /*!< Producer callback user data */
 
 	volatile IMG_UINT32 ui32Read; 				/*!< Pointer to the beginning of available data */

@@ -112,7 +112,7 @@ static DISP_MODULE_ENUM  pm_get_dsi_handle(DSI_INDEX dsi_id)
 		return DISP_MODULE_UNKNOWN;
 }
 extern int m4u_mva_map_kernel(unsigned int mva, unsigned int size,
-			      unsigned int *map_va, unsigned int *map_size);
+			      unsigned long *map_va, unsigned int *map_size);
 extern int m4u_mva_unmap_kernel(unsigned int mva, unsigned int size, unsigned int va);
 
 int fbconfig_get_esd_check(DSI_INDEX dsi_id, UINT32 cmd, UINT8 *buffer, UINT32 num)
@@ -190,7 +190,7 @@ static void free_list_memory(void)
 
 }
 
-static ssize_t fbconfig_open(struct inode *inode, struct file *file)
+static int fbconfig_open(struct inode *inode, struct file *file)
 {
 	PM_TOOL_T *pm_params;
 	file->private_data = inode->i_private;
