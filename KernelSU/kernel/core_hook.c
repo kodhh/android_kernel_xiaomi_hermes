@@ -8,7 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
 #ifdef CONFIG_KSU_LSM_SECURITY_HOOKS
-#include <linux/lsm_hooks.h>
+#include <linux/security.h>
 #endif
 #include <linux/mm.h>
 #include <linux/nsproxy.h>
