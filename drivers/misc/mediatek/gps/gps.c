@@ -997,7 +997,7 @@ static int mt3326_gps_remove(struct platform_device *dev)
 static void mt3326_gps_shutdown(struct platform_device *dev)
 {
 	struct gps_dev_obj *devobj = (struct gps_dev_obj *)platform_get_drvdata(dev);
-	if (!devobj) {
+	if (!devobj || !devobj->hw) {
 		GPS_ERR("null pointer!!\n");
 		return;
 	}
