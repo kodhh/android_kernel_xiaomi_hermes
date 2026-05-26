@@ -333,11 +333,12 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 	}
 
 	file = *file_ptr;
-	if (IS_ERR(file)) {
+	if (!file || IS_ERR(file)) {
 		return 0;
 	}
 
-	if (!S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
+	if (!file->f_path.dentry || !file->f_path.dentry->d_inode ||
+	    !S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
 		return 0;
 	}
 
@@ -390,6 +391,10 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 	// we've succeed to insert ksud.rc, now we need to proxy the read and modify the result!
 	// But, we can not modify the file_operations directly, because it's in read-only memory.
 	// We just replace the whole file_operations with a proxy one.
+	if (unlikely(!file->f_op)) {
+		pr_err("f_op is NULL!\n");
+		return 0;
+	}
 	memcpy(&fops_proxy, file->f_op, sizeof(struct file_operations));
 	orig_read = file->f_op->read;
 	if (orig_read) {

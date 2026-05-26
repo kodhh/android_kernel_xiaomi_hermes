@@ -16,6 +16,10 @@ static int transive_to_domain(const char *domain)
 	int error;
 
 	cred = (struct cred *)__task_cred(current);
+	if (!cred) {
+		pr_err("cred == NULL!\n");
+		return -1;
+	}
 
 	tsec = cred->security;
 	if (!tsec) {
@@ -94,6 +98,9 @@ bool getenforce()
 static inline u32 current_sid(void)
 {
 	const struct task_security_struct *tsec = current_security();
+	if (!tsec) {
+		return 0;
+	}
 
 	return tsec->sid;
 }

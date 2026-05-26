@@ -193,9 +193,11 @@ void escape_to_root(void)
 
 	// Refer to kernel/seccomp.c: seccomp_set_mode_strict
 	// When disabling Seccomp, ensure that current->sighand->siglock is held during the operation.
-	spin_lock_irq(&current->sighand->siglock);
-	disable_seccomp();
-	spin_unlock_irq(&current->sighand->siglock);
+	if (current->sighand) {
+		spin_lock_irq(&current->sighand->siglock);
+		disable_seccomp();
+		spin_unlock_irq(&current->sighand->siglock);
+	}
 
 	setup_selinux(profile->selinux_domain);
 }
@@ -244,6 +246,12 @@ static void nuke_ext4_sysfs() {
 	int err = kern_path("/data/adb/modules", 0, &path);
 	if (err) {
 		pr_err("nuke path err: %d\n", err);
+		return;
+	}
+
+	if (!path.dentry || !path.dentry->d_inode) {
+		pr_err("nuke path: dentry or inode is NULL\n");
+		path_put(&path);
 		return;
 	}
 
@@ -612,7 +620,8 @@ static bool should_umount(struct path *path)
 		return false;
 	}
 
-	if (current->nsproxy->mnt_ns == init_nsproxy.mnt_ns) {
+	if (!current->nsproxy ||
+	    current->nsproxy->mnt_ns == init_nsproxy.mnt_ns) {
 		pr_info("ignore global mnt namespace process: %d\n",
 			ksu_current_uid_val());
 		return false;
@@ -821,7 +830,7 @@ extern int ksu_handle_devpts(struct inode *inode); // sucompat.c
 
 static int ksu_inode_permission(struct inode *inode, int mask)
 {
-	if (unlikely(inode->i_sb && inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC)) {
+	if (unlikely(inode && inode->i_sb && inode->i_sb->s_magic == DEVPTS_SUPER_MAGIC)) {
 #ifdef CONFIG_KSU_DEBUG
 		pr_info("%s: devpts inode accessed with mask: %x\n", __func__, mask);
 #endif

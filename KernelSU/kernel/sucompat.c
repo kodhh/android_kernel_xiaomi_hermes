@@ -271,6 +271,8 @@ static int pts_unix98_lookup_pre(struct kprobe *p, struct pt_regs *regs)
 	struct inode *inode;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
 	struct file *file = (struct file *)PT_REGS_PARM2(regs);
+	if (!file || !file->f_path.dentry || !file->f_path.dentry->d_inode)
+		return 0;
 	inode = file->f_path.dentry->d_inode;
 #else
 	inode = (struct inode *)PT_REGS_PARM2(regs);
