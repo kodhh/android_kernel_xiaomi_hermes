@@ -423,10 +423,6 @@ static inline bool d_mountpoint(struct dentry *dentry)
 
 extern int sysctl_vfs_cache_pressure;
 
-#ifndef d_inode
-#define d_inode(dentry) ((dentry)->d_inode)
-#endif
-
 static inline struct dentry *d_real(struct dentry *dentry)
 {
 	if (unlikely(dentry->d_flags & DCACHE_OP_REAL))
