@@ -481,6 +481,8 @@ int btrfs_parse_options(struct btrfs_root *root, char *options)
 
 			if (p[algo_len] >= '1' && p[algo_len] <= '9')
 				level = simple_strtoul(p + algo_len, NULL, 10);
+			else if (p[algo_len] == ':')
+				level = simple_strtoul(p + algo_len + 1, NULL, 10);
 
 			if (strcmp(algorithm, "zlib") == 0) {
 				compress_type = "zlib";
