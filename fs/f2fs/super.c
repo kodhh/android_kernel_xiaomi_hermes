@@ -1577,6 +1577,8 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 	unsigned int sit_segs, nat_segs;
 	unsigned int sit_bitmap_size, nat_bitmap_size;
 	unsigned int log_blocks_per_seg;
+	unsigned int blocks_per_seg;
+	unsigned int cp_pack_start_sum, cp_payload;
 	block_t user_block_count;
 	int i, j;
 
@@ -1587,6 +1589,7 @@ int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 	nat_segs = le32_to_cpu(raw_super->segment_count_nat);
 	fsmeta += nat_segs;
 	fsmeta += le32_to_cpu(ckpt->rsvd_segment_count);
+	blocks_per_seg = sbi->blocks_per_seg;
 	fsmeta += le32_to_cpu(raw_super->segment_count_ssa);
 
 	if (unlikely(fsmeta >= total))
@@ -1735,8 +1738,7 @@ static int init_percpu_info(struct f2fs_sb_info *sbi)
 	if (err)
 		return err;
 
-	err = percpu_counter_init(&sbi->total_valid_inode_count, 0,
-							GFP_KERNEL);
+	err = percpu_counter_init(&sbi->total_valid_inode_count, 0);
 	if (err)
 		percpu_counter_destroy(&sbi->alloc_valid_block_count);
 

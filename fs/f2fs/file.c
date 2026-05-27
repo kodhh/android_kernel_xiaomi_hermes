@@ -1055,13 +1055,13 @@ static int __exchange_data_block(struct inode *src_inode,
 	while (len) {
 		olen = min((pgoff_t)4 * ADDRS_PER_BLOCK, len);
 
-		src_blkaddr = f2fs_kvzalloc(sizeof(block_t) * olen, GFP_KERNEL);
+		src_blkaddr = kzalloc(sizeof(block_t) * olen, GFP_KERNEL);
 		if (!src_blkaddr)
 			return -ENOMEM;
 
-		do_replace = f2fs_kvzalloc(sizeof(int) * olen, GFP_KERNEL);
+		do_replace = kzalloc(sizeof(int) * olen, GFP_KERNEL);
 		if (!do_replace) {
-			f2fs_kvfree(src_blkaddr);
+			kfree(src_blkaddr);
 			return -ENOMEM;
 		}
 
@@ -1079,15 +1079,15 @@ static int __exchange_data_block(struct inode *src_inode,
 		dst += olen;
 		len -= olen;
 
-		f2fs_kvfree(src_blkaddr);
-		f2fs_kvfree(do_replace);
+		kfree(src_blkaddr);
+		kfree(do_replace);
 	}
 	return 0;
 
 roll_back:
 	__roll_back_blkaddrs(src_inode, src_blkaddr, do_replace, src, len);
-	f2fs_kvfree(src_blkaddr);
-	f2fs_kvfree(do_replace);
+	kfree(src_blkaddr);
+	kfree(do_replace);
 	return ret;
 }
 

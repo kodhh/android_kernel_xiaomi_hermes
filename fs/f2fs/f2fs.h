@@ -2218,22 +2218,17 @@ static inline bool is_valid_data_blkaddr(struct f2fs_sb_info *sbi,
 	return true;
 }
 
+#define __is_meta_io(fio) (PAGE_TYPE_OF_BIO(fio->type) == META &&	\
+				(!is_read_io(fio->op) || fio->is_meta))
+
 static inline void *f2fs_kvzalloc(size_t size, gfp_t flags)
 {
-	void *ret;
-
-	ret = kzalloc(size, flags | __GFP_NOWARN);
-	if (!ret)
-		ret = __vmalloc(size, flags | __GFP_ZERO, PAGE_KERNEL);
-	return ret;
+	return f2fs_kvmalloc(size, flags | __GFP_ZERO);
 }
 
 static inline void f2fs_kvfree(void *ptr)
 {
-	if (is_vmalloc_addr(ptr))
-		vfree(ptr);
-	else
-		kfree(ptr);
+	kvfree(ptr);
 }
 
 #define get_inode_mode(i) \
