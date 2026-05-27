@@ -2694,11 +2694,6 @@ extern void setattr_copy(struct inode *inode, const struct iattr *attr);
 
 extern int file_update_time(struct file *file);
 
-static inline struct inode *d_inode(const struct dentry *dentry)
-{
-	return dentry->d_inode;
-}
-
 #ifndef d_really_is_negative
 #define d_really_is_negative(dentry)	((dentry)->d_inode == NULL)
 #endif
