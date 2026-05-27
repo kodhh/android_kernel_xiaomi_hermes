@@ -1189,7 +1189,7 @@ static int btrfs_show_options(struct seq_file *seq, struct dentry *dentry)
 		if (btrfs_test_opt(root, FORCE_COMPRESS))
 			seq_printf(seq, ",compress-force=%s", compress_type);
 		else if (info->compress_level)
-			seq_printf(seq, ",compress=%s%u", compress_type,
+			seq_printf(seq, ",compress=%s:%u", compress_type,
 				   info->compress_level);
 		else
 			seq_printf(seq, ",compress=%s", compress_type);
