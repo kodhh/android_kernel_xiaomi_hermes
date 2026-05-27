@@ -1871,6 +1871,7 @@ enum {
 	FI_DO_DEFRAG,		/* indicate defragment is running */
 	FI_DIRTY_FILE,		/* indicate regular/symlink has dirty pages */
 	FI_HOT_DATA,		/* indicate file is hot */
+	FI_PIN_FILE,		/* indicate file should not be gced */
 	FI_PROJ_INHERIT,	/* indicate file inherits projectid */
 };
 
