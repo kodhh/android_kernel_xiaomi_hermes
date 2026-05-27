@@ -35,6 +35,13 @@ struct posix_acl *btrfs_get_acl(struct inode *inode, int type)
 	char *value = NULL;
 	struct posix_acl *acl;
 
+	if (!IS_POSIXACL(inode))
+		return NULL;
+
+	acl = get_cached_acl(inode, type);
+	if (acl != ACL_NOT_CACHED)
+		return acl;
+
 	switch (type) {
 	case ACL_TYPE_ACCESS:
 		name = POSIX_ACL_XATTR_ACCESS;
@@ -56,7 +63,6 @@ struct posix_acl *btrfs_get_acl(struct inode *inode, int type)
 	if (size > 0) {
 		acl = posix_acl_from_xattr(&init_user_ns, value, size);
 	} else if (size == -ENOENT || size == -ENODATA || size == 0) {
-		/* FIXME, who returns -ENOENT?  I think nobody */
 		acl = NULL;
 	} else {
 		acl = ERR_PTR(-EIO);
@@ -78,6 +84,12 @@ static int __btrfs_set_acl(struct btrfs_trans_handle *trans,
 	int ret, size = 0;
 	const char *name;
 	char *value = NULL;
+
+	if (acl) {
+		ret = posix_acl_valid(acl);
+		if (ret < 0)
+			return ret;
+	}
 
 	switch (type) {
 	case ACL_TYPE_ACCESS:
@@ -139,40 +151,46 @@ int btrfs_set_acl(struct inode *inode, struct posix_acl *acl, int type)
 int btrfs_init_acl(struct btrfs_trans_handle *trans,
 		   struct inode *inode, struct inode *dir)
 {
-	struct posix_acl *default_acl, *acl;
+	struct posix_acl *acl = NULL;
 	int ret = 0;
 
 	/* this happens with subvols */
 	if (!dir)
 		return 0;
 
-	/* 3.10 posix_acl_create takes (acl, gfp, mode) */
-	acl = NULL;
-	ret = posix_acl_create(&acl, GFP_NOFS, &inode->i_mode);
-	if (ret)
-		return ret;
+	if (!S_ISLNK(inode->i_mode)) {
+		if (IS_POSIXACL(dir)) {
+			acl = btrfs_get_acl(dir, ACL_TYPE_DEFAULT);
+			if (IS_ERR(acl))
+				return PTR_ERR(acl);
+		}
 
-	if (acl) {
-		ret = __btrfs_set_acl(trans, inode, acl, ACL_TYPE_ACCESS);
-		posix_acl_release(acl);
-		if (ret)
-			return ret;
+		if (!acl)
+			inode->i_mode &= ~current_umask();
 	}
 
-	/* Inherit default ACL from parent directory (replaces 4.4's
-	 * two-return-ACL version of posix_acl_create) */
-	default_acl = btrfs_get_acl(dir, ACL_TYPE_DEFAULT);
-	if (default_acl && !IS_ERR(default_acl)) {
-		ret = __btrfs_set_acl(trans, inode, default_acl,
-				      ACL_TYPE_DEFAULT);
-		posix_acl_release(default_acl);
-		if (ret)
+	if (IS_POSIXACL(dir) && acl) {
+		if (S_ISDIR(inode->i_mode)) {
+			ret = __btrfs_set_acl(trans, inode, acl,
+					      ACL_TYPE_DEFAULT);
+			if (ret)
+				goto failed;
+		}
+		ret = posix_acl_create(&acl, GFP_NOFS, &inode->i_mode);
+		if (ret < 0)
 			return ret;
-	}
 
-	if (!acl) {
-		if (IS_ERR_OR_NULL(default_acl))
+		if (ret > 0) {
+			ret = __btrfs_set_acl(trans, inode, acl,
+					      ACL_TYPE_ACCESS);
+		} else {
 			cache_no_acl(inode);
+		}
+	} else {
+		cache_no_acl(inode);
 	}
-	return 0;
+failed:
+	posix_acl_release(acl);
+
+	return ret;
 }
