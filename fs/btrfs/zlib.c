@@ -68,8 +68,13 @@ static struct list_head *zlib_alloc_workspace(unsigned int level)
 
 	if (level >= 1 && level <= 9)
 		workspace->level = level;
-	else
-		workspace->level = 3;
+	else {
+		unsigned int extracted = (level & 0xF0) >> 4;
+		if (extracted >= 1 && extracted <= 9)
+			workspace->level = extracted;
+		else
+			workspace->level = 3;
+	}
 
 	return &workspace->list;
 fail:

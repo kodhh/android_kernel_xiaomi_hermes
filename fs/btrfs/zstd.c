@@ -74,8 +74,13 @@ static struct list_head *zstd_alloc_workspace(unsigned int level)
 		workspace->level = ZSTD_BTRFS_DEFAULT_LEVEL;
 	else if (level >= 1 && level <= 22)
 		workspace->level = level;
-	else
-		workspace->level = ZSTD_BTRFS_DEFAULT_LEVEL;
+	else {
+		unsigned int extracted = (level & 0xF0) >> 4;
+		if (extracted >= 1 && extracted <= 22)
+			workspace->level = extracted;
+		else
+			workspace->level = ZSTD_BTRFS_DEFAULT_LEVEL;
+	}
 
 	INIT_LIST_HEAD(&workspace->list);
 
