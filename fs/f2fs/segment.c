@@ -284,8 +284,10 @@ static int __revoke_inmem_pages(struct inode *inode,
 		}
 next:
 		/* we don't need to invalidate this in the sccessful status */
-		if (drop || recover)
+		if (drop || recover) {
 			ClearPageUptodate(page);
+			clear_cold_data(page);
+		}
 		set_page_private(page, 0);
 		ClearPagePrivate(page);
 		f2fs_put_page(page, 1);
@@ -628,6 +630,8 @@ int create_flush_cmd_control(struct f2fs_sb_info *sbi)
 	init_waitqueue_head(&fcc->flush_wait_queue);
 	init_llist_head(&fcc->issue_list);
 	SM_I(sbi)->fcc_info = fcc;
+	if (!test_opt(sbi, FLUSH_MERGE))
+		return err;
 init_thread:
 	fcc->f2fs_issue_flush = kthread_run(issue_flush_thread, sbi,
 				"f2fs_flush-%u:%u", MAJOR(dev), MINOR(dev));
@@ -1682,7 +1686,7 @@ bool is_checkpointed_data(struct f2fs_sb_info *sbi, block_t blkaddr)
 	struct seg_entry *se;
 	bool is_cp = false;
 
-	if (!is_valid_blkaddr(blkaddr))
+	if (!is_valid_data_blkaddr(sbi, blkaddr))
 		return true;
 
 	mutex_lock(&sit_i->sentry_lock);
@@ -2456,7 +2460,7 @@ void f2fs_wait_on_encrypted_page_writeback(struct f2fs_sb_info *sbi,
 {
 	struct page *cpage;
 
-	if (!is_valid_blkaddr(blkaddr))
+	if (!is_valid_data_blkaddr(sbi, blkaddr))
 		return;
 
 	cpage = find_lock_page(META_MAPPING(sbi), blkaddr);
@@ -3398,7 +3402,7 @@ int build_segment_manager(struct f2fs_sb_info *sbi)
 
 	INIT_LIST_HEAD(&sm_info->sit_entry_set);
 
-	if (test_opt(sbi, FLUSH_MERGE) && !f2fs_readonly(sbi->sb)) {
+	if (!f2fs_readonly(sbi->sb)) {
 		err = create_flush_cmd_control(sbi);
 		if (err)
 			return err;

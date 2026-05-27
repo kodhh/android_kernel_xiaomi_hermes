@@ -637,11 +637,9 @@ static inline void verify_block_addr(struct f2fs_io_info *fio, block_t blk_addr)
 
 	if (PAGE_TYPE_OF_BIO(fio->type) == META &&
 				(!is_read_io(fio->op) || fio->is_meta))
-		BUG_ON(blk_addr < SEG0_BLKADDR(sbi) ||
-				blk_addr >= MAIN_BLKADDR(sbi));
+		verify_blkaddr(sbi, blk_addr, META_GENERIC);
 	else
-		BUG_ON(blk_addr < MAIN_BLKADDR(sbi) ||
-				blk_addr >= MAX_BLKADDR(sbi));
+		verify_blkaddr(sbi, blk_addr, DATA_GENERIC);
 }
 
 /*

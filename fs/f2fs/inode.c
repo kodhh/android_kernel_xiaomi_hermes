@@ -60,11 +60,12 @@ static void __get_inode_rdev(struct inode *inode, struct f2fs_inode *ri)
 	}
 }
 
-static bool __written_first_block(struct f2fs_inode *ri)
+static bool __written_first_block(struct f2fs_sb_info *sbi,
+					struct f2fs_inode *ri)
 {
 	block_t addr = le32_to_cpu(ri->i_addr[0]);
 
-	if (is_valid_blkaddr(addr))
+	if (is_valid_data_blkaddr(sbi, addr))
 		return true;
 	return false;
 }
@@ -129,6 +130,22 @@ static bool sanity_check_inode(struct inode *inode, struct page *node_page)
 		return false;
 	}
 
+	if (F2FS_I(inode)->extent_tree) {
+		struct extent_info *ei = &F2FS_I(inode)->extent_tree->largest;
+
+		if (ei->len &&
+			(!f2fs_is_valid_blkaddr(sbi, ei->blk, DATA_GENERIC) ||
+			!f2fs_is_valid_blkaddr(sbi, ei->blk + ei->len - 1,
+							DATA_GENERIC))) {
+			set_sbi_flag(sbi, SBI_NEED_FSCK);
+			f2fs_msg(sbi->sb, KERN_WARNING,
+				"%s: inode (ino=%lx) extent info [%u, %u, %u] "
+				"is incorrect, run fsck to fix",
+				__func__, inode->i_ino,
+				ei->blk, ei->fofs, ei->len);
+			return false;
+		}
+	}
 	return true;
 }
 
@@ -138,6 +155,7 @@ static int do_read_inode(struct inode *inode)
 	struct f2fs_inode_info *fi = F2FS_I(inode);
 	struct page *node_page;
 	struct f2fs_inode *ri;
+	int err;
 
 	/* Check if ino is within scope */
 	if (check_nid_range(sbi, inode->i_ino)) {
@@ -193,7 +211,7 @@ static int do_read_inode(struct inode *inode)
 	/* get rdev by using inline_info */
 	__get_inode_rdev(inode, ri);
 
-	if (__written_first_block(ri))
+	if (__written_first_block(sbi, ri))
 		set_inode_flag(inode, FI_FIRST_BLOCK_WRITTEN);
 
 	if (!need_inode_block_update(sbi, inode->i_ino))
