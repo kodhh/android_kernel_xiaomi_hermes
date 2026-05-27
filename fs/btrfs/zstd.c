@@ -47,11 +47,23 @@ static void zstd_free_workspace(struct list_head *ws)
 
 static struct list_head *zstd_alloc_workspace(unsigned int level)
 {
-	zstd_parameters params =
-		zstd_get_params(ZSTD_BTRFS_DEFAULT_LEVEL,
-				ZSTD_BTRFS_MAX_INPUT);
+	zstd_parameters params;
 	struct workspace *workspace;
 	size_t size;
+
+	if (level == 0)
+		level = ZSTD_BTRFS_DEFAULT_LEVEL;
+	else if (level >= 1 && level <= 22)
+		;
+	else {
+		unsigned int extracted = (level & 0xF0) >> 4;
+		if (extracted >= 1 && extracted <= 22)
+			level = extracted;
+		else
+			level = ZSTD_BTRFS_DEFAULT_LEVEL;
+	}
+
+	params = zstd_get_params(level, ZSTD_BTRFS_MAX_INPUT);
 
 	workspace = kzalloc(sizeof(*workspace), GFP_KERNEL);
 	if (!workspace)
@@ -70,17 +82,7 @@ static struct list_head *zstd_alloc_workspace(unsigned int level)
 	if (!workspace->mem || !workspace->buf)
 		goto fail;
 
-	if (level == 0)
-		workspace->level = ZSTD_BTRFS_DEFAULT_LEVEL;
-	else if (level >= 1 && level <= 22)
-		workspace->level = level;
-	else {
-		unsigned int extracted = (level & 0xF0) >> 4;
-		if (extracted >= 1 && extracted <= 22)
-			workspace->level = extracted;
-		else
-			workspace->level = ZSTD_BTRFS_DEFAULT_LEVEL;
-	}
+	workspace->level = level;
 
 	INIT_LIST_HEAD(&workspace->list);
 
