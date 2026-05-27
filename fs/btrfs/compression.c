@@ -822,7 +822,7 @@ again:
  */
 static void free_workspace(int type, struct list_head *workspace)
 {
-	int idx = type - 1;
+	int idx = (type & 0xF) - 1;
 	struct list_head *idle_ws	= &btrfs_comp_ws[idx].idle_ws;
 	spinlock_t *ws_lock		= &btrfs_comp_ws[idx].ws_lock;
 	atomic_t *alloc_ws		= &btrfs_comp_ws[idx].alloc_ws;
@@ -902,12 +902,12 @@ int btrfs_compress_pages(int type, struct address_space *mapping,
 	if (IS_ERR(workspace))
 		return PTR_ERR(workspace);
 
-	ret = btrfs_compress_op[type-1]->compress_pages(workspace, mapping,
+	ret = btrfs_compress_op[(type & 0xF) - 1]->compress_pages(workspace, mapping,
 						      start, len, pages,
 						      nr_dest_pages, out_pages,
 						      total_in, total_out,
 						      max_out);
-	free_workspace(type, workspace);
+	free_workspace(type & 0xF, workspace);
 	return ret;
 }
 
@@ -938,10 +938,10 @@ static int btrfs_decompress_biovec(int type, struct page **pages_in,
 	if (IS_ERR(workspace))
 		return PTR_ERR(workspace);
 
-	ret = btrfs_compress_op[type-1]->decompress_biovec(workspace, pages_in,
+	ret = btrfs_compress_op[(type & 0xF) - 1]->decompress_biovec(workspace, pages_in,
 							 disk_start,
 							 bvec, vcnt, srclen);
-	free_workspace(type, workspace);
+	free_workspace(type & 0xF, workspace);
 	return ret;
 }
 
@@ -960,11 +960,11 @@ int btrfs_decompress(int type, unsigned char *data_in, struct page *dest_page,
 	if (IS_ERR(workspace))
 		return PTR_ERR(workspace);
 
-	ret = btrfs_compress_op[type-1]->decompress(workspace, data_in,
+	ret = btrfs_compress_op[(type & 0xF) - 1]->decompress(workspace, data_in,
 						  dest_page, start_byte,
 						  srclen, destlen);
 
-	free_workspace(type, workspace);
+	free_workspace(type & 0xF, workspace);
 	return ret;
 }
 
