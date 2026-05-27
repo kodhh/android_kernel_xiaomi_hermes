@@ -891,6 +891,7 @@ struct f2fs_io_info {
 	struct page *encrypted_page;	/* encrypted page */
 	bool submitted;		/* indicate IO submission */
 	bool need_lock;		/* indicate we need to lock cp_rwsem */
+	bool is_meta;		/* indicate borrow meta inode mapping or not */
 };
 
 #define is_read_io(rw) ((rw) == READ)
