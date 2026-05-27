@@ -2415,6 +2415,7 @@ int open_ctree(struct super_block *sb,
 	int num_backups_tried = 0;
 	int backup_index = 0;
 	int max_active;
+	bool cleaner_mutex_locked = false;
 
 	tree_root = fs_info->tree_root = btrfs_alloc_root(fs_info);
 	chunk_root = fs_info->chunk_root = btrfs_alloc_root(fs_info);
@@ -2925,6 +2926,13 @@ retry_root_backup:
 		goto fail_sysfs;
 	}
 
+	/*
+	 * Hold the cleaner_mutex here so that we don't block
+	 * for a long time on btrfs_recover_relocation. cleaner_kthread
+	 * will wait for us to finish mounting the filesystem.
+	 */
+	mutex_lock(&fs_info->cleaner_mutex);
+	cleaner_mutex_locked = true;
 	fs_info->cleaner_kthread = kthread_run(cleaner_kthread, tree_root,
 					       "btrfs-cleaner");
 	if (IS_ERR(fs_info->cleaner_kthread))
@@ -2984,9 +2992,8 @@ retry_root_backup:
 		if (ret)
 			goto fail_qgroup;
 
-		mutex_lock(&fs_info->cleaner_mutex);
+		/* We locked cleaner_mutex before creating cleaner_kthread. */
 		ret = btrfs_recover_relocation(tree_root);
-		mutex_unlock(&fs_info->cleaner_mutex);
 		if (ret < 0) {
 			printk(KERN_WARNING
 			       "BTRFS: failed to recover relocation\n");
@@ -2994,6 +3001,8 @@ retry_root_backup:
 			goto fail_qgroup;
 		}
 	}
+	mutex_unlock(&fs_info->cleaner_mutex);
+	cleaner_mutex_locked = false;
 
 	location.objectid = BTRFS_FS_TREE_OBJECTID;
 	location.type = BTRFS_ROOT_ITEM_KEY;
@@ -3077,6 +3086,10 @@ fail_cleaner:
 	filemap_write_and_wait(fs_info->btree_inode->i_mapping);
 
 fail_sysfs:
+	if (cleaner_mutex_locked) {
+		mutex_unlock(&fs_info->cleaner_mutex);
+		cleaner_mutex_locked = false;
+	}
 	btrfs_sysfs_remove_mounted(fs_info);
 
 fail_fsdev_sysfs:

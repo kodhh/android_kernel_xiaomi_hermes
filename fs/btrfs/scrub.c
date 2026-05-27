@@ -2127,6 +2127,8 @@ static void scrub_missing_raid56_end_io(struct bio *bio, int err)
 	if (!bio_flagged(bio, BIO_UPTODATE))
 		sblock->no_io_error_seen = 0;
 
+	bio_put(bio);
+
 	btrfs_queue_work(fs_info->scrub_workers, &sblock->work);
 }
 
