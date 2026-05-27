@@ -204,7 +204,7 @@ static int insert_inline_extent(struct btrfs_trans_handle *trans,
 			compressed_size -= cur_size;
 		}
 		btrfs_set_file_extent_compression(leaf, ei,
-						  compress_type);
+						  compress_type & 0xF);
 	} else {
 		page = find_get_page(inode->i_mapping,
 				     start >> PAGE_CACHE_SHIFT);
@@ -2164,7 +2164,7 @@ static int insert_reserved_file_extent(struct btrfs_trans_handle *trans,
 	btrfs_set_file_extent_offset(leaf, fi, 0);
 	btrfs_set_file_extent_num_bytes(leaf, fi, num_bytes);
 	btrfs_set_file_extent_ram_bytes(leaf, fi, ram_bytes);
-	btrfs_set_file_extent_compression(leaf, fi, compression);
+	btrfs_set_file_extent_compression(leaf, fi, compression & 0xF);
 	btrfs_set_file_extent_encryption(leaf, fi, encryption);
 	btrfs_set_file_extent_other_encoding(leaf, fi, other_encoding);
 
@@ -2631,7 +2631,8 @@ again:
 	btrfs_set_file_extent_ram_bytes(leaf, item, new->len);
 	btrfs_set_file_extent_generation(leaf, item, trans->transid);
 	btrfs_set_file_extent_type(leaf, item, BTRFS_FILE_EXTENT_REG);
-	btrfs_set_file_extent_compression(leaf, item, new->compress_type);
+	btrfs_set_file_extent_compression(leaf, item,
+					  new->compress_type & 0xF);
 	btrfs_set_file_extent_encryption(leaf, item, 0);
 	btrfs_set_file_extent_other_encoding(leaf, item, 0);
 
@@ -2745,7 +2746,7 @@ record_old_file_extents(struct inode *inode,
 	new->len = ordered->len;
 	new->bytenr = ordered->start;
 	new->disk_len = ordered->disk_len;
-	new->compress_type = ordered->compress_type;
+	new->compress_type = ordered->compress_type & 0xF;
 	new->root = RB_ROOT;
 	INIT_LIST_HEAD(&new->head);
 

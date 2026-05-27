@@ -4136,7 +4136,7 @@ static int log_one_extent(struct btrfs_trans_handle *trans,
 	btrfs_set_token_file_extent_offset(leaf, fi, extent_offset, &token);
 	btrfs_set_token_file_extent_num_bytes(leaf, fi, em->len, &token);
 	btrfs_set_token_file_extent_ram_bytes(leaf, fi, em->ram_bytes, &token);
-	btrfs_set_token_file_extent_compression(leaf, fi, em->compress_type,
+	btrfs_set_token_file_extent_compression(leaf, fi, em->compress_type & 0xF,
 						&token);
 	btrfs_set_token_file_extent_encryption(leaf, fi, 0, &token);
 	btrfs_set_token_file_extent_other_encoding(leaf, fi, 0, &token);
