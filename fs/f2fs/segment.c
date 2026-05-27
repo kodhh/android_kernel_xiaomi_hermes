@@ -540,7 +540,12 @@ static int issue_flush_thread(void *data)
 {
 	struct f2fs_sb_info *sbi = data;
 	struct flush_cmd_control *fcc = SM_I(sbi)->fcc_info;
-	wait_queue_head_t *q = &fcc->flush_wait_queue;
+	wait_queue_head_t *q;
+
+	if (!fcc)
+		return 0;
+
+	q = &fcc->flush_wait_queue;
 repeat:
 	if (kthread_should_stop())
 		return 0;

@@ -843,8 +843,6 @@ int f2fs_fill_dentries(struct file *file, void *dirent, filldir_t filldir,
 			file->f_pos += bit_pos - start_bit_pos;
 			return 1;
 		}
-
-		bit_pos += GET_DENTRY_SLOTS(le16_to_cpu(de->name_len));
 	}
 	return 0;
 }
