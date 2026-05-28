@@ -1020,28 +1020,17 @@ static inline void nt2kernel(const __le64 tm, struct timespec *ts)
  */
 static inline struct timespec ntfs_current_time(struct inode *inode)
 {
-    struct timespec now;
-    unsigned int gran;
-    
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
-    now = current_kernel_time();
-#else
-    struct timeval tv;
-    do_gettimeofday(&tv);
-    now.tv_sec = tv.tv_sec;
-    now.tv_nsec = tv.tv_usec * 1000;
-#endif
-    
-    gran = inode->i_sb->s_time_gran;
-    if (gran > 1 && gran <= NSEC_PER_SEC) {
+    struct timespec now = current_kernel_time();
+    unsigned int gran = inode->i_sb->s_time_gran;
+
+    if (gran > 1 && gran <= NSEC_PER_SEC)
         now.tv_nsec -= now.tv_nsec % gran;
-    }
-    
+
     if (unlikely(now.tv_nsec >= NSEC_PER_SEC)) {
         now.tv_sec++;
         now.tv_nsec -= NSEC_PER_SEC;
     }
-    
+
     return now;
 }
 

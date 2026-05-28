@@ -11,6 +11,7 @@
 #include <linux/namei.h>
 #include <linux/nls.h>
 #include <linux/version.h>
+#include <linux/xattr.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
 #include <linux/iversion.h>
@@ -623,11 +624,10 @@ const struct inode_operations ntfs_dir_inode_operations = {
 	.rename = ntfs_rename2,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
-#if 0
-	.set_acl = ntfs_set_acl,
-#endif
 	.setattr = ntfs3_setattr,
 	.getattr = ntfs_getattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = ntfs_listxattr,
 	.atomic_open = ntfs_atomic_open,
 	.fiemap = ntfs_fiemap,

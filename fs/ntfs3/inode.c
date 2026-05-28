@@ -14,6 +14,7 @@
 #include <linux/uio.h>
 #include <linux/version.h>
 #include <linux/writeback.h>
+#include <linux/xattr.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
 #include <linux/iversion.h>
@@ -2165,12 +2166,11 @@ const struct inode_operations ntfs_link_inode_operations = {
 	.follow_link	= ntfs_follow_link,
 	.put_link	= ntfs_put_link,
 	.setattr = ntfs3_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
-#if 0
-	.set_acl = ntfs_set_acl,
-#endif
 };
 
 const struct address_space_operations ntfs_aops = {

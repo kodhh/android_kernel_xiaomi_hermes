@@ -14,6 +14,7 @@
 #include <linux/blkdev.h>
 #include <linux/nls.h>
 #include <linux/uio.h>
+#include <linux/xattr.h>
 
 #include "debug.h"
 #include "ntfs.h"
@@ -1170,12 +1171,11 @@ int ntfs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 const struct inode_operations ntfs_file_inode_operations = {
 	.getattr = ntfs_getattr,
 	.setattr = ntfs3_setattr,
+	.setxattr = generic_setxattr,
+	.getxattr = generic_getxattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
-#if 0
-	.set_acl = ntfs_set_acl,
-#endif
 	.fiemap = ntfs_fiemap,
 };
 
