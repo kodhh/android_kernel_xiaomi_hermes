@@ -821,6 +821,10 @@ int ntfs_cmp_names(const __le16 *s1, size_t l1, const __le16 *s2, size_t l2,
 int ntfs_cmp_names_cpu(const struct cpu_str *uni1, const struct le_str *uni2,
 		       const u16 *upcase, bool bothcase);
 
+/* EA names used by ntfs3 to persist Linux metadata */
+#define SYSTEM_NTFS_UID      "system.ntfs_uid"
+#define SYSTEM_NTFS_GID      "system.ntfs_gid"
+
 /* globals from xattr.c */
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL
 struct posix_acl *ntfs_get_acl(struct inode *inode, int type);
@@ -841,6 +845,11 @@ int ntfs_init_acl(struct inode *inode,
 #define ntfs_set_acl NULL
 #endif
 
+int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
+		void *buffer, size_t size, size_t *required);
+noinline int ntfs_set_ea(struct inode *inode, const char *name,
+			 size_t name_len, const void *value,
+			 size_t val_size, int flags, int locked);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
 int ntfs_acl_chmod(struct user_namespace *mnt_userns, struct inode *inode);
 int ntfs_permission(struct user_namespace *mnt_userns, struct inode *inode,

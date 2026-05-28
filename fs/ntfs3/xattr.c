@@ -19,7 +19,9 @@
 
 // clang-format off
 #define SYSTEM_DOS_ATTRIB    "system.dos_attrib"
+
 #define SYSTEM_NTFS_ATTRIB   "system.ntfs_attrib"
+
 #define SYSTEM_NTFS_SECURITY "system.ntfs_security"
 // clang-format on
 
@@ -201,8 +203,8 @@ out:
 	return err ? err : ret;
 }
 
-static int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
-		       void *buffer, size_t size, size_t *required)
+int ntfs_get_ea(struct inode *inode, const char *name, size_t name_len,
+		void *buffer, size_t size, size_t *required)
 {
 	struct ntfs_inode *ni = ntfs_i(inode);
 	const struct EA_INFO *info;
@@ -262,9 +264,9 @@ out:
 	return err ? err : len;
 }
 
-static noinline int ntfs_set_ea(struct inode *inode, const char *name,
-				size_t name_len, const void *value,
-				size_t val_size, int flags, int locked)
+noinline int ntfs_set_ea(struct inode *inode, const char *name,
+			 size_t name_len, const void *value,
+			 size_t val_size, int flags, int locked)
 {
 	struct ntfs_inode *ni = ntfs_i(inode);
 	struct ntfs_sb_info *sbi = ni->mi.sbi;

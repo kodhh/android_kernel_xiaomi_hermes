@@ -472,6 +472,26 @@ end_enum:
 	}
 #endif
 
+	/* Restore uid/gid from EA so chown survives remount */
+	if (ni->ni_flags & NI_FLAG_EA) {
+		__le32 v;
+		int ret;
+
+		ret = ntfs_get_ea(inode, SYSTEM_NTFS_UID,
+				  sizeof(SYSTEM_NTFS_UID) - 1,
+				  &v, sizeof(v), NULL);
+		if (ret == sizeof(v))
+			inode->i_uid = make_kuid(&init_user_ns,
+						 le32_to_cpu(v));
+
+		ret = ntfs_get_ea(inode, SYSTEM_NTFS_GID,
+				  sizeof(SYSTEM_NTFS_GID) - 1,
+				  &v, sizeof(v), NULL);
+		if (ret == sizeof(v))
+			inode->i_gid = make_kgid(&init_user_ns,
+						 le32_to_cpu(v));
+	}
+
 Ok:
 	if (ino == MFT_REC_MFT && !sb->s_root)
 		sbi->mft.ni = NULL;
