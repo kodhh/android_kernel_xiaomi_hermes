@@ -29,8 +29,9 @@
 #include "cifs_debug.h"
 #include "cifs_fs_sb.h"
 #include "cifs_unicode.h"
+#ifdef CONFIG_CIFS_SMB2
 #include "smb2proto.h"
-#include "cifs_compat.h"
+#endif
 
 /*
  * M-F Symlink Functions - Begin
@@ -44,19 +45,37 @@
 	(CIFS_MF_SYMLINK_LINK_OFFSET + CIFS_MF_SYMLINK_LINK_MAXLEN)
 
 #define CIFS_MF_SYMLINK_LEN_FORMAT "XSym\n%04u\n"
-#define CIFS_MF_SYMLINK_MD5_FORMAT "%16phN\n"
-#define CIFS_MF_SYMLINK_MD5_ARGS(md5_hash) md5_hash
+#define CIFS_MF_SYMLINK_MD5_FORMAT \
+	"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n"
+#define CIFS_MF_SYMLINK_MD5_ARGS(md5_hash) \
+	md5_hash[0],  md5_hash[1],  md5_hash[2],  md5_hash[3], \
+	md5_hash[4],  md5_hash[5],  md5_hash[6],  md5_hash[7], \
+	md5_hash[8],  md5_hash[9],  md5_hash[10], md5_hash[11],\
+	md5_hash[12], md5_hash[13], md5_hash[14], md5_hash[15]
 
 static int
 symlink_hash(unsigned int link_len, const char *link_str, u8 *md5_hash)
 {
 	int rc;
-	struct crypto_shash *md5 = NULL;
-	struct sdesc *sdescmd5 = NULL;
+	unsigned int size;
+	struct crypto_shash *md5;
+	struct sdesc *sdescmd5;
 
-	rc = cifs_alloc_hash("md5", &md5, &sdescmd5);
-	if (rc)
+	md5 = crypto_alloc_shash("md5", 0, 0);
+	if (IS_ERR(md5)) {
+		rc = PTR_ERR(md5);
+		cifs_dbg(VFS, "%s: Crypto md5 allocation error %d\n",
+			 __func__, rc);
+		return rc;
+	}
+	size = sizeof(struct shash_desc) + crypto_shash_descsize(md5);
+	sdescmd5 = kmalloc(size, GFP_KERNEL);
+	if (!sdescmd5) {
+		rc = -ENOMEM;
 		goto symlink_hash_err;
+	}
+	sdescmd5->shash.tfm = md5;
+	sdescmd5->shash.flags = 0x0;
 
 	rc = crypto_shash_init(&sdescmd5->shash);
 	if (rc) {
@@ -73,7 +92,9 @@ symlink_hash(unsigned int link_len, const char *link_str, u8 *md5_hash)
 		cifs_dbg(VFS, "%s: Could not generate md5 hash\n", __func__);
 
 symlink_hash_err:
-	cifs_free_hash(&md5, &sdescmd5);
+	crypto_free_shash(md5);
+	kfree(sdescmd5);
+
 	return rc;
 }
 
@@ -96,9 +117,6 @@ parse_mf_symlink(const u8 *buf, unsigned int buf_len, unsigned int *_link_len,
 
 	rc = sscanf(buf, CIFS_MF_SYMLINK_LEN_FORMAT, &link_len);
 	if (rc != 1)
-		return -EINVAL;
-
-	if (link_len > CIFS_MF_SYMLINK_LINK_MAXLEN)
 		return -EINVAL;
 
 	rc = symlink_hash(link_len, link_str, md5_hash);
@@ -381,7 +399,7 @@ cifs_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	io_parms.offset = 0;
 	io_parms.length = CIFS_MF_SYMLINK_FILE_SIZE;
 
-	rc = CIFSSMBWrite(xid, &io_parms, pbytes_written, pbuf);
+	rc = CIFSSMBWrite(xid, &io_parms, pbytes_written, pbuf, NULL, 0);
 	CIFSSMBClose(xid, tcon, fid.netfid);
 	return rc;
 }
@@ -389,6 +407,7 @@ cifs_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 /*
  * SMB 2.1/SMB3 Protocol specific functions
  */
+#ifdef CONFIG_CIFS_SMB2
 int
 smb3_query_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 		      struct cifs_sb_info *cifs_sb, const unsigned char *path,
@@ -511,6 +530,7 @@ smb3_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	kfree(utf16_path);
 	return rc;
 }
+#endif /* CONFIG_CIFS_SMB2 */
 
 /*
  * M-F Symlink Functions - End
@@ -609,7 +629,7 @@ cifs_hl_exit:
 void *
 cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 {
-	struct inode *inode = direntry->d_inode;
+	struct inode *inode = d_inode(direntry);
 	int rc = -ENOMEM;
 	unsigned int xid;
 	char *full_path = NULL;
@@ -665,9 +685,9 @@ cifs_follow_link(struct dentry *direntry, struct nameidata *nd)
 void
 cifs_put_link(struct dentry *direntry, struct nameidata *nd, void *cookie)
 {
-	char *p = nd_get_link(nd);
-	if (!IS_ERR(p))
-		kfree(p);
+	char *path = nd_get_link(nd);
+	if (!IS_ERR(path))
+		kfree(path);
 }
 
 int

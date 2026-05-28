@@ -21,7 +21,6 @@
 #define _CIFS_FS_SB_H
 
 #include <linux/backing-dev.h>
-#include <linux/types.h>
 
 #define CIFS_MOUNT_NO_PERM      1 /* do not do client vfs_perm check */
 #define CIFS_MOUNT_SET_UID      2 /* set current's euid in create etc. */
@@ -50,7 +49,6 @@
 #define CIFS_MOUNT_USE_PREFIX_PATH 0x1000000 /* make subpath with unaccessible
 					      * root mountable
 					      */
-#define CIFS_MOUNT_UID_FROM_ACL 0x2000000 /* try to get UID via special SID */
 
 struct cifs_sb_info {
 	struct rb_root tlink_tree;
@@ -69,9 +67,9 @@ struct cifs_sb_info {
 	umode_t	mnt_dir_mode;
 	unsigned int mnt_cifs_flags;
 	char   *mountdata; /* options received at mount time or via DFS refs */
+	struct backing_dev_info bdi;
 	struct delayed_work prune_tlinks;
 	struct rcu_head rcu;
 	char *prepath;
-	struct backing_dev_info bdi;
 };
 #endif				/* _CIFS_FS_SB_H */

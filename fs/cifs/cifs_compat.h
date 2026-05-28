@@ -1,153 +1,78 @@
-#ifndef _CIFS_COMPAT_H
-#define _CIFS_COMPAT_H
+#ifndef _CIFS_COMPAT_H_
+#define _CIFS_COMPAT_H_
 
-#include <linux/sched.h>
-#include <linux/slab.h>
-#include <linux/backing-dev.h>
-#include <linux/random.h>
-#include <linux/socket.h>
-#include <linux/aio.h>
+/*
+ * Compatibility shims for porting cifs from 4.4 to 3.10 kernel.
+ * Modeled after fs/btrfs/compat.h
+ */
 
-/* 3.10 kernel compatibility shims */
-
-#ifndef SLAB_ACCOUNT
-#define SLAB_ACCOUNT 0
-#endif
-
-#ifndef seq_show_option
-#define seq_show_option(s, name, value)	seq_printf(s, ",%s=%s", name, value)
-#endif
-
-#ifndef lookup_one_len_unlocked
-#define lookup_one_len_unlocked(name, parent, len) \
-	lookup_one_len(name, parent, len)
-#endif
-
-#ifndef get_random_u32
-static inline u32 get_random_u32(void)
-{
-	return prandom_u32();
-}
-#endif
-
-#ifndef user_key_payload_locked
-#define user_key_payload_locked(key) \
-	((struct user_key_payload *)rcu_dereference((key)->payload.data))
-#endif
-
-#ifndef allow_kernel_signal
-#define allow_kernel_signal(sig)	allow_signal(sig)
-#endif
-
-#ifndef sock_allow_reclassification
-#define sock_allow_reclassification(sk) true
-#endif
-
-#ifndef kstrtobool_from_user
+#include <linux/uio.h>
 #include <linux/uaccess.h>
-static inline int kstrtobool_from_user(const char __user *s, size_t count,
-				       bool *res)
+#include <linux/highmem.h>
+
+/* mapping_gfp_constraint - added in 3.11 */
+#ifndef mapping_gfp_constraint
+static inline gfp_t mapping_gfp_constraint(struct address_space *mapping,
+					   gfp_t gfp_mask)
 {
-	char buf[32];
-	if (count >= sizeof(buf))
-		return -EINVAL;
-	if (copy_from_user(buf, s, count))
-		return -EFAULT;
-	buf[count] = '\0';
-	return strtobool(buf, res);
+	return (mapping->flags & __GFP_BITS_MASK) & gfp_mask;
 }
 #endif
 
-/* file_dentry compat */
-#ifndef file_dentry
-#define file_dentry(file) ((file)->f_path.dentry)
-#endif
-
-/* inode_lock/unlock compat (3.10 uses i_mutex) */
-#define inode_lock(inode)   mutex_lock(&(inode)->i_mutex)
-#define inode_unlock(inode) mutex_unlock(&(inode)->i_mutex)
-
-/* locks_lock_file_wait compat */
-#define locks_lock_file_wait(file, flock) posix_lock_file_wait(file, flock)
-
-/* file_write_and_wait_range compat */
-#define file_write_and_wait_range(file, start, end) \
-	filemap_write_and_wait_range((file)->f_mapping, start, end)
-
-/* readahead_gfp_mask compat */
-#define readahead_gfp_mask(mapping) mapping_gfp_mask(mapping)
-
-/*
- * generic_write_checks compat: 4.14 takes (iocb, from), 3.10 takes
- * (file, pos, count, isblk). 4.14 returns count (>0) on success.
- */
-static inline ssize_t
-cifs_generic_write_checks(struct kiocb *iocb, struct iov_iter *from)
+/* copy_page_from_iter - 4.0+ API, use iov_iter_copy_from_user in 3.10 */
+static inline size_t copy_page_from_iter(struct page *page, size_t offset,
+					 size_t bytes, struct iov_iter *i)
 {
-	struct file *file = iocb->ki_filp;
-	loff_t pos = iocb->ki_pos;
-	size_t count = iov_iter_count(from);
-	int ret;
-
-	ret = generic_write_checks(file, &pos, &count, 0);
-	if (ret)
-		return ret;
-
-	iocb->ki_pos = pos;
-	from->count = count;
-	return count;
+	return iov_iter_copy_from_user(page, i, offset, bytes);
 }
-#define generic_write_checks(iocb, from) cifs_generic_write_checks(iocb, from)
 
-/*
- * __generic_file_write_iter compat: 4.14 takes (iocb, from), 3.10 takes
- * (iocb, iov, nr_segs, pos)
- */
-static inline ssize_t
-cifs___generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+/* copy_page_to_iter - not in 3.10, implement via kmap + copy_to_user */
+static inline size_t copy_page_to_iter(struct page *page, size_t offset,
+				       size_t bytes, struct iov_iter *i)
 {
-	loff_t pos = iocb->ki_pos;
-	ssize_t ret = __generic_file_aio_write(iocb, from->iov, from->nr_segs, &pos);
-	iocb->ki_pos = pos;
-	return ret;
-}
-#define __generic_file_write_iter(iocb, from) \
-	cifs___generic_file_write_iter(iocb, from)
+	size_t copied = 0;
+	size_t left = min(bytes, i->count);
+	char *kaddr;
 
-/*
- * generic_file_write_iter compat
- */
-static inline ssize_t
-cifs_generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+	if (!left)
+		return 0;
+
+	kaddr = kmap(page);
+	while (left) {
+		const struct iovec *iov = i->iov;
+		size_t base = i->iov_offset;
+		size_t seg = min(left, iov->iov_len - base);
+
+		if (copy_to_user(iov->iov_base + base, kaddr + offset, seg))
+			break;
+
+		i->iov_offset += seg;
+		i->count -= seg;
+		copied += seg;
+		offset += seg;
+		left -= seg;
+
+		if (i->iov_offset >= iov->iov_len) {
+			i->iov++;
+			i->nr_segs--;
+			i->iov_offset = 0;
+		}
+	}
+	kunmap(page);
+	return copied;
+}
+
+/* __SetPageLocked/__ClearPageLocked -> __set_page_locked/__clear_page_locked */
+#define __SetPageLocked(page)	__set_page_locked(page)
+#define __ClearPageLocked(page)	__clear_page_locked(page)
+
+/* bit_wait - generic bit wait action for 3.10's wait_on_bit(word, bit, action, mode) API */
+static inline int cifs_bit_wait(void *word)
 {
-	return generic_file_aio_write(iocb, from->iov, from->nr_segs,
-				      iocb->ki_pos);
+	if (signal_pending_state(current->state, current))
+		return 1;
+	schedule();
+	return 0;
 }
-#define generic_file_write_iter(iocb, from) \
-	cifs_generic_file_write_iter(iocb, from)
 
-/*
- * generic_file_read_iter compat
- */
-static inline ssize_t
-cifs_generic_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
-{
-	return generic_file_aio_read(iocb, to->iov, to->nr_segs,
-				     iocb->ki_pos);
-}
-#define generic_file_read_iter(iocb, to) \
-	cifs_generic_file_read_iter(iocb, to)
-
-/*
- * generic_write_sync compat: 4.14 takes (iocb, count), 3.10 takes
- * (file, pos, count)
- */
-static inline int
-cifs_generic_write_sync(struct kiocb *iocb, ssize_t count)
-{
-	return generic_write_sync(iocb->ki_filp, iocb->ki_pos, count);
-}
-#define generic_write_sync(iocb, count) \
-	cifs_generic_write_sync(iocb, count)
-
-#endif /* _CIFS_COMPAT_H */
+#endif /* _CIFS_COMPAT_H_ */

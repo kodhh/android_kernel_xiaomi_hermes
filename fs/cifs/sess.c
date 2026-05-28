@@ -454,7 +454,7 @@ int build_ntlmssp_auth_blob(unsigned char **pbuffer,
 	} else {
 		int len;
 		len = cifs_strtoUTF16((__le16 *)tmp, ses->domainName,
-				      CIFS_MAX_DOMAINNAME_LEN, nls_cp);
+				      CIFS_MAX_USERNAME_LEN, nls_cp);
 		len *= 2; /* unicode is 2 bytes each */
 		sec_blob->DomainName.BufferOffset = cpu_to_le32(tmp - *pbuffer);
 		sec_blob->DomainName.Length = cpu_to_le16(len);
@@ -504,7 +504,7 @@ setup_ntlmv2_ret:
 }
 
 enum securityEnum
-cifs_select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
+select_sectype(struct TCP_Server_Info *server, enum securityEnum requested)
 {
 	switch (server->negflavor) {
 	case CIFS_NEGFLAVOR_EXTENDED:
@@ -602,7 +602,7 @@ sess_alloc_buffer(struct sess_data *sess_data, int wct)
 	return 0;
 
 out_free_smb_buf:
-	cifs_small_buf_release(smb_buf);
+	kfree(smb_buf);
 	sess_data->iov[0].iov_base = NULL;
 	sess_data->iov[0].iov_len = 0;
 	sess_data->buf0_type = CIFS_NO_BUFFER;
@@ -656,7 +656,6 @@ sess_sendreceive(struct sess_data *sess_data)
 	int rc;
 	struct smb_hdr *smb_buf = (struct smb_hdr *) sess_data->iov[0].iov_base;
 	__u16 count;
-	struct kvec rsp_iov = { NULL, 0 };
 
 	count = sess_data->iov[1].iov_len + sess_data->iov[2].iov_len;
 	smb_buf->smb_buf_length =
@@ -666,9 +665,7 @@ sess_sendreceive(struct sess_data *sess_data)
 	rc = SendReceive2(sess_data->xid, sess_data->ses,
 			  sess_data->iov, 3 /* num_iovecs */,
 			  &sess_data->buf0_type,
-			  CIFS_LOG_ERROR, &rsp_iov);
-	cifs_small_buf_release(sess_data->iov[0].iov_base);
-	memcpy(&sess_data->iov[0], &rsp_iov, sizeof(struct kvec));
+			  CIFS_LOG_ERROR);
 
 	return rc;
 }
@@ -717,8 +714,6 @@ sess_auth_lanman(struct sess_data *sess_data)
 		rc = calc_lanman_hash(ses->password, ses->server->cryptkey,
 				      ses->server->sec_mode & SECMODE_PW_ENCRYPT ?
 				      true : false, lnm_session_key);
-		if (rc)
-			goto out;
 
 		memcpy(bcc_ptr, (char *)lnm_session_key, CIFS_AUTH_RESP_SIZE);
 		bcc_ptr += CIFS_AUTH_RESP_SIZE;
@@ -1397,7 +1392,7 @@ static int select_sec(struct cifs_ses *ses, struct sess_data *sess_data)
 {
 	int type;
 
-	type = cifs_select_sectype(ses->server, ses->sectype);
+	type = select_sectype(ses->server, ses->sectype);
 	cifs_dbg(FYI, "sess setup type %d\n", type);
 	if (type == Unspecified) {
 		cifs_dbg(VFS,

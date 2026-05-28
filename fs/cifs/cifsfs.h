@@ -23,7 +23,6 @@
 #define _CIFSFS_H
 
 #include <linux/hash.h>
-#include "cifs_compat.h"
 
 #define ROOT_I 2
 
@@ -40,16 +39,6 @@ cifs_uniqueid_to_ino_t(u64 fileid)
 
 	return (ino_t)fileid;
 
-}
-
-static inline void cifs_set_time(struct dentry *dentry, unsigned long time)
-{
-	dentry->d_fsdata = (void *) time;
-}
-
-static inline unsigned long cifs_get_time(struct dentry *dentry)
-{
-	return (unsigned long) dentry->d_fsdata;
 }
 
 extern struct file_system_type cifs_fs_type;
@@ -76,7 +65,7 @@ extern int cifs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
 extern int cifs_mkdir(struct inode *, struct dentry *, umode_t);
 extern int cifs_rmdir(struct inode *, struct dentry *);
 extern int cifs_rename2(struct inode *, struct dentry *, struct inode *,
-			struct dentry *);
+			struct dentry *, unsigned int);
 extern int cifs_revalidate_file_attr(struct file *filp);
 extern int cifs_revalidate_dentry_attr(struct dentry *);
 extern int cifs_revalidate_file(struct file *filp);
@@ -102,10 +91,14 @@ extern const struct file_operations cifs_file_strict_nobrl_ops;
 extern int cifs_open(struct inode *inode, struct file *file);
 extern int cifs_close(struct inode *inode, struct file *file);
 extern int cifs_closedir(struct inode *inode, struct file *file);
-extern ssize_t cifs_user_readv(struct kiocb *iocb, struct iov_iter *to);
-extern ssize_t cifs_strict_readv(struct kiocb *iocb, struct iov_iter *to);
-extern ssize_t cifs_user_writev(struct kiocb *iocb, struct iov_iter *from);
-extern ssize_t cifs_strict_writev(struct kiocb *iocb, struct iov_iter *from);
+extern ssize_t cifs_user_readv(struct kiocb *iocb, const struct iovec *iov,
+			       unsigned long nr_segs, loff_t pos);
+extern ssize_t cifs_strict_readv(struct kiocb *iocb, const struct iovec *iov,
+				 unsigned long nr_segs, loff_t pos);
+extern ssize_t cifs_user_writev(struct kiocb *iocb, const struct iovec *iov,
+				unsigned long nr_segs, loff_t pos);
+extern ssize_t cifs_strict_writev(struct kiocb *iocb, const struct iovec *iov,
+				  unsigned long nr_segs, loff_t pos);
 extern int cifs_lock(struct file *, int, struct file_lock *);
 extern int cifs_fsync(struct file *, loff_t, loff_t, int);
 extern int cifs_strict_fsync(struct file *, loff_t, loff_t, int);
@@ -123,35 +116,29 @@ extern const struct dentry_operations cifs_ci_dentry_ops;
 #ifdef CONFIG_CIFS_DFS_UPCALL
 extern struct vfsmount *cifs_dfs_d_automount(struct path *path);
 #else
-static inline struct vfsmount *cifs_dfs_d_automount(struct path *path)
-{
-	return ERR_PTR(-EREMOTE);
-}
+#define cifs_dfs_d_automount NULL
 #endif
 
 /* Functions related to symlinks */
-extern void *cifs_follow_link(struct dentry *, struct nameidata *);
-extern void cifs_put_link(struct dentry *, struct nameidata *, void *);
+extern void *cifs_follow_link(struct dentry *direntry, struct nameidata *nd);
+extern void cifs_put_link(struct dentry *direntry, struct nameidata *nd,
+			  void *cookie);
+extern int cifs_readlink(struct dentry *direntry, char __user *buffer,
+			 int buflen);
 extern int cifs_symlink(struct inode *inode, struct dentry *direntry,
 			const char *symname);
-
-#ifdef CONFIG_CIFS_XATTR
-extern const struct xattr_handler *cifs_xattr_handlers[];
+extern int	cifs_removexattr(struct dentry *, const char *);
+extern int	cifs_setxattr(struct dentry *, const char *, const void *,
+			size_t, int);
+extern ssize_t	cifs_getxattr(struct dentry *, const char *, void *, size_t);
 extern ssize_t	cifs_listxattr(struct dentry *, char *, size_t);
-#else
-# define cifs_xattr_handlers NULL
-# define cifs_listxattr NULL
-#endif
-
-extern ssize_t cifs_file_copychunk_range(unsigned int xid,
-					struct file *src_file, loff_t off,
-					struct file *dst_file, loff_t destoff,
-					size_t len, unsigned int flags);
-
 extern long cifs_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
+
 #ifdef CONFIG_CIFS_NFSD_EXPORT
 extern const struct export_operations cifs_export_ops;
 #endif /* CONFIG_CIFS_NFSD_EXPORT */
 
-#define CIFS_VERSION   "2.10"
+#define CIFS_VERSION   "2.08"
+
+#include "cifs_compat.h"
 #endif				/* _CIFSFS_H */
