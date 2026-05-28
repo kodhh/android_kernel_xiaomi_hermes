@@ -616,7 +616,7 @@ static noinline int ntfs_set_acl_ex(
 #else
 	err = posix_acl_to_xattr(&init_user_ns, acl, value, size);
 #endif
-	if (err)
+	if (err < 0)
 		goto out;
 
 	err = ntfs_set_ea(inode, name, name_len, value, size, 0, locked);
