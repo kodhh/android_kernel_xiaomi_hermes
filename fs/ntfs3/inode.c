@@ -20,6 +20,10 @@
 #include <linux/iversion.h>
 #endif
 
+#ifdef CONFIG_NTFS3_FS_POSIX_ACL
+#include <linux/posix_acl.h>
+#endif
+
 #include "debug.h"
 #include "ntfs.h"
 #include "ntfs_fs.h"
@@ -454,6 +458,19 @@ end_enum:
 		/* if no xattr then no security (stored in xattr) */
 		inode->i_flags |= S_NOSEC;
 	}
+#ifdef CONFIG_NTFS3_FS_POSIX_ACL
+	/* Restore mode from persisted ACL so chmod survives remount */
+	if ((sb->s_flags & MS_POSIXACL) && (ni->ni_flags & NI_FLAG_EA)) {
+		struct posix_acl *acl = ntfs_get_acl(inode, ACL_TYPE_ACCESS);
+		if (!IS_ERR(acl) && acl) {
+			umode_t acl_mode = inode->i_mode;
+			int eq = posix_acl_equiv_mode(acl, &acl_mode);
+			if (eq >= 0)
+				inode->i_mode = acl_mode;
+			posix_acl_release(acl);
+		}
+	}
+#endif
 
 Ok:
 	if (ino == MFT_REC_MFT && !sb->s_root)

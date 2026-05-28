@@ -579,14 +579,10 @@ static noinline int ntfs_set_acl_ex(
 				mark_inode_dirty(inode);
 			}
 
-			if (!err) {
-				/*
-				 * acl can be exactly represented in the
-				 * traditional file mode permission bits
-				 */
-				acl = NULL;
-				goto out;
-			}
+			/* Always store the ACL as EA so the mode can be
+			 * restored after remount.  NTFS has no on-disk
+			 * inode mode bits;  ACL is the only channel.
+			 */
 		}
 		name = XATTR_NAME_POSIX_ACL_ACCESS;
 		name_len = sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1;
@@ -863,8 +859,19 @@ int ntfs_acl_chmod(struct inode *inode)
     
     acl = ntfs_get_acl_ex(inode, ACL_TYPE_ACCESS, 1);
     if (IS_ERR(acl) || !acl) {
-        err = PTR_ERR(acl);
-        goto out;
+        if (!acl) {
+            /* No existing ACL - create one from the current mode so
+             * that permission changes survive remount.
+             */
+            acl = posix_acl_from_mode(inode->i_mode, GFP_KERNEL);
+            if (IS_ERR(acl)) {
+                err = PTR_ERR(acl);
+                goto out;
+            }
+        } else {
+            err = PTR_ERR(acl);
+            goto out;
+        }
     }
     
     // posix_acl_chmod 内部会克隆并替换 acl
