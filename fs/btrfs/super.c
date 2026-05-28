@@ -2127,6 +2127,7 @@ static void btrfs_kill_super(struct super_block *sb)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(sb);
 	kill_anon_super(sb);
+	sb->s_fs_info = NULL;
 	free_fs_info(fs_info);
 }
 

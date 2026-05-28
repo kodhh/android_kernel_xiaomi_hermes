@@ -65,7 +65,7 @@ static struct list_head *zstd_alloc_workspace(unsigned int level)
 
 	params = zstd_get_params(level, ZSTD_BTRFS_MAX_INPUT);
 
-	workspace = kzalloc(sizeof(*workspace), GFP_KERNEL);
+	workspace = kzalloc(sizeof(*workspace), GFP_NOFS);
 	if (!workspace)
 		return ERR_PTR(-ENOMEM);
 
@@ -77,8 +77,8 @@ static struct list_head *zstd_alloc_workspace(unsigned int level)
 		zstd_cstream_workspace_bound(&params.cParams));
 
 	workspace->size = size;
-	workspace->mem = kvmalloc(workspace->size, GFP_KERNEL);
-	workspace->buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	workspace->mem = kvmalloc(workspace->size, GFP_NOFS);
+	workspace->buf = kmalloc(PAGE_SIZE, GFP_NOFS);
 	if (!workspace->mem || !workspace->buf)
 		goto fail;
 
@@ -166,7 +166,10 @@ static int zstd_compress_pages(struct list_head *ws,
 
 		if (workspace->out_buf.pos == workspace->out_buf.size) {
 			tot_out += PAGE_SIZE;
-			max_out -= PAGE_SIZE;
+			if (max_out >= PAGE_SIZE)
+				max_out -= PAGE_SIZE;
+			else
+				max_out = 0;
 			kunmap(out_page);
 			if (nr_pages == nr_dest_pages) {
 				out_page = NULL;
@@ -224,7 +227,10 @@ static int zstd_compress_pages(struct list_head *ws,
 		}
 
 		tot_out += PAGE_SIZE;
-		max_out -= PAGE_SIZE;
+		if (max_out >= PAGE_SIZE)
+			max_out -= PAGE_SIZE;
+		else
+			max_out = 0;
 		kunmap(out_page);
 		if (nr_pages == nr_dest_pages) {
 			out_page = NULL;
