@@ -1754,7 +1754,7 @@ cifs_rename2(struct inode *source_dir, struct dentry *source_dentry,
 unlink_target:
 	/* Try unlinking the target dentry if it's not negative */
 	if (target_dentry->d_inode && (rc == -EACCES || rc == -EEXIST)) {
-		if (d_inode(target_dentry) && S_ISDIR(d_inode(target_dentry)->i_mode))
+		if (target_dentry->d_inode && S_ISDIR(target_dentry->d_inode->i_mode))
 			tmprc = cifs_rmdir(target_dir, target_dentry);
 		else
 			tmprc = cifs_unlink(target_dir, target_dentry);
@@ -1828,13 +1828,26 @@ cifs_invalidate_mapping(struct inode *inode)
 	return rc;
 }
 
+/**
+ * cifs_wait_bit_killable - helper for functions that are sleeping on bit locks
+ * @word: long word containing the bit lock
+ */
+static int
+cifs_wait_bit_killable(void *key)
+{
+	if (fatal_signal_pending(current))
+		return -ERESTARTSYS;
+	freezable_schedule_unsafe();
+	return 0;
+}
+
 int
 cifs_revalidate_mapping(struct inode *inode)
 {
 	int rc;
 	unsigned long *flags = &CIFS_I(inode)->flags;
 
-	rc = wait_on_bit_lock(flags, CIFS_INO_LOCK, bit_wait_io,
+	rc = wait_on_bit_lock(flags, CIFS_INO_LOCK, cifs_wait_bit_killable,
 				     TASK_KILLABLE);
 	if (rc)
 		return rc;

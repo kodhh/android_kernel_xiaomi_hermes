@@ -558,7 +558,8 @@ int cifs_get_writer(struct cifsInodeInfo *cinode)
 
 start:
 	rc = wait_on_bit(&cinode->flags, CIFS_INODE_PENDING_OPLOCK_BREAK,
-			 bit_wait_io, TASK_KILLABLE);
+			 bit_wait_io,
+			 TASK_KILLABLE);
 	if (rc)
 		return rc;
 

@@ -2877,31 +2877,24 @@ cifs_readdata_to_iov(struct cifs_readdata *rdata, struct iov_iter *iter)
 	for (i = 0; i < rdata->nr_pages; i++) {
 		struct page *page = rdata->pages[i];
 		size_t copy = min_t(size_t, remaining, PAGE_SIZE);
-		char *addr;
-		size_t written;
+		size_t written = 0;
 
-		addr = kmap(page);
-		if (likely(iter->nr_segs == 1)) {
-			char __user *buf = iter->iov->iov_base + iter->iov_offset;
-			if (copy_to_user(buf, addr, copy))
-				written = copy;
-			else
-				written = 0;
-		} else {
-			size_t n = 0;
-			const struct iovec *iov = iter->iov;
-			unsigned long seg;
-			written = 0;
-			for (seg = 0; seg < iter->nr_segs && n < copy; seg++) {
-				size_t len = min(copy - n, iov[seg].iov_len);
-				if (copy_to_user(iov[seg].iov_base, addr + n, len))
-					written += len;
-				n += len;
+		if (copy > 0) {
+			char *kaddr = kmap(page);
+			while (copy > 0) {
+				size_t seg = min(copy, iov_iter_single_seg_count(iter));
+				if (copy_to_user(iter->iov->iov_base + iter->iov_offset,
+						 kaddr + written, seg)) {
+					kunmap(page);
+					return -EFAULT;
+				}
+				iov_iter_advance(iter, seg);
+				copy -= seg;
+				written += seg;
 			}
+			kunmap(page);
 		}
-		kunmap(page);
 		remaining -= written;
-		iov_iter_advance(iter, written);
 		if (written < copy && iov_iter_count(iter) > 0)
 			break;
 	}
@@ -3868,7 +3861,8 @@ void cifs_oplock_break(struct work_struct *work)
 	int rc = 0;
 
 	wait_on_bit(&cinode->flags, CIFS_INODE_PENDING_WRITERS,
-			bit_wait_io, TASK_UNINTERRUPTIBLE);
+			bit_wait_io,
+			TASK_UNINTERRUPTIBLE);
 
 	server->ops->downgrade_oplock(server, cinode,
 		test_bit(CIFS_INODE_DOWNGRADE_OPLOCK_TO_L2, &cinode->flags));
@@ -3923,7 +3917,7 @@ void cifs_oplock_break(struct work_struct *work)
  */
 static ssize_t
 cifs_direct_io(int rw, struct kiocb *iocb, const struct iovec *iov,
-               loff_t pos, unsigned long nr_segs)
+               loff_t offset, unsigned long nr_segs)
 {
         /*
          * FIXME
