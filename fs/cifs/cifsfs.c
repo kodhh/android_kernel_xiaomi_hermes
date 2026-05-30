@@ -751,7 +751,8 @@ out_nls:
 }
 
 static ssize_t
-cifs_loose_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+cifs_loose_read_iter(struct kiocb *iocb, const struct iovec *iov,
+		     unsigned long nr_segs, loff_t pos)
 {
 	ssize_t rc;
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -760,21 +761,23 @@ cifs_loose_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (rc)
 		return rc;
 
-	return generic_file_aio_read(iocb, iter->iov, iter->nr_segs, iocb->ki_pos);
+	return generic_file_aio_read(iocb, iov, nr_segs, pos);
 }
 
-static ssize_t cifs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+static ssize_t cifs_file_write_iter(struct kiocb *iocb, const struct iovec *iov,
+				    unsigned long nr_segs, loff_t pos)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
 	struct cifsInodeInfo *cinode = CIFS_I(inode);
 	ssize_t written;
 	int rc;
 
+	iocb->ki_pos = pos;
 	written = cifs_get_writer(cinode);
 	if (written)
 		return written;
 
-	written = generic_file_aio_write(iocb, from->iov, from->nr_segs, iocb->ki_pos);
+	written = generic_file_aio_write(iocb, iov, nr_segs, pos);
 
 	if (CIFS_CACHE_WRITE(CIFS_I(inode)))
 		goto out;
@@ -918,11 +921,68 @@ const struct inode_operations cifs_symlink_inode_ops = {
 #endif
 };
 
+/* Adapters: old-style aio_read/aio_write -> new-style read_iter/write_iter */
+static ssize_t
+cifs_strict_readv_adapter(struct kiocb *iocb, const struct iovec *iov,
+			  unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter = {
+		.iov = iov,
+		.nr_segs = nr_segs,
+		.iov_offset = 0,
+		.count = iov_length(iov, nr_segs),
+	};
+	iocb->ki_pos = pos;
+	return cifs_strict_readv(iocb, &iter);
+}
+
+static ssize_t
+cifs_strict_writev_adapter(struct kiocb *iocb, const struct iovec *iov,
+			   unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter = {
+		.iov = iov,
+		.nr_segs = nr_segs,
+		.iov_offset = 0,
+		.count = iov_length(iov, nr_segs),
+	};
+	iocb->ki_pos = pos;
+	return cifs_strict_writev(iocb, &iter);
+}
+
+static ssize_t
+cifs_user_readv_adapter(struct kiocb *iocb, const struct iovec *iov,
+			unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter = {
+		.iov = iov,
+		.nr_segs = nr_segs,
+		.iov_offset = 0,
+		.count = iov_length(iov, nr_segs),
+	};
+	iocb->ki_pos = pos;
+	return cifs_user_readv(iocb, &iter);
+}
+
+static ssize_t
+cifs_user_writev_adapter(struct kiocb *iocb, const struct iovec *iov,
+			 unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter = {
+		.iov = iov,
+		.nr_segs = nr_segs,
+		.iov_offset = 0,
+		.count = iov_length(iov, nr_segs),
+	};
+	iocb->ki_pos = pos;
+	return cifs_user_writev(iocb, &iter);
+}
+
 const struct file_operations cifs_file_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_loose_read_iter,
-	.write_iter = cifs_file_write_iter,
+	.aio_read = cifs_loose_read_iter,
+	.aio_write = cifs_file_write_iter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.lock = cifs_lock,
@@ -941,8 +1001,8 @@ const struct file_operations cifs_file_ops = {
 const struct file_operations cifs_file_strict_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_strict_readv,
-	.write_iter = cifs_strict_writev,
+	.aio_read = cifs_strict_readv_adapter,
+	.aio_write = cifs_strict_writev_adapter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.lock = cifs_lock,
@@ -962,8 +1022,8 @@ const struct file_operations cifs_file_direct_ops = {
 	/* BB reevaluate whether they can be done with directio, no cache */
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_user_readv,
-	.write_iter = cifs_user_writev,
+	.aio_read = cifs_user_readv_adapter,
+	.aio_write = cifs_user_writev_adapter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.lock = cifs_lock,
@@ -982,8 +1042,8 @@ const struct file_operations cifs_file_direct_ops = {
 const struct file_operations cifs_file_nobrl_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_loose_read_iter,
-	.write_iter = cifs_file_write_iter,
+	.aio_read = cifs_loose_read_iter,
+	.aio_write = cifs_file_write_iter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.fsync = cifs_fsync,
@@ -1001,8 +1061,8 @@ const struct file_operations cifs_file_nobrl_ops = {
 const struct file_operations cifs_file_strict_nobrl_ops = {
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_strict_readv,
-	.write_iter = cifs_strict_writev,
+	.aio_read = cifs_strict_readv_adapter,
+	.aio_write = cifs_strict_writev_adapter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.fsync = cifs_strict_fsync,
@@ -1021,8 +1081,8 @@ const struct file_operations cifs_file_direct_nobrl_ops = {
 	/* BB reevaluate whether they can be done with directio, no cache */
 	.read = do_sync_read,
 	.write = do_sync_write,
-	.read_iter = cifs_user_readv,
-	.write_iter = cifs_user_writev,
+	.aio_read = cifs_user_readv_adapter,
+	.aio_write = cifs_user_writev_adapter,
 	.open = cifs_open,
 	.release = cifs_close,
 	.fsync = cifs_fsync,
