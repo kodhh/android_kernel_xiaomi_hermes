@@ -44,6 +44,8 @@
 #include "cifs_debug.h"
 #include "fscache.h"
 
+
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 #ifdef CONFIG_CIFS_POSIX
 static struct {
 	int index;
@@ -86,30 +88,6 @@ static struct {
 #endif /* CONFIG_CIFS_WEAK_PW_HASH */
 #endif /* CIFS_POSIX */
 
-/*
- * Mark as invalid, all open files on tree connections since they
- * were closed when session to server was lost.
- */
-void
-cifs_mark_open_files_invalid(struct cifs_tcon *tcon)
-{
-	struct cifsFileInfo *open_file = NULL;
-	struct list_head *tmp;
-	struct list_head *tmp1;
-
-	/* list all files open on tree connection and mark them invalid */
-	spin_lock(&cifs_file_list_lock);
-	list_for_each_safe(tmp, tmp1, &tcon->openFileList) {
-		open_file = list_entry(tmp, struct cifsFileInfo, tlist);
-		open_file->invalidHandle = true;
-		open_file->oplock_break_cancelled = true;
-	}
-	spin_unlock(&cifs_file_list_lock);
-	/*
-	 * BB Add call to invalidate_inodes(sb) for all superblocks mounted
-	 * to this tcon.
-	 */
-}
 
 /* reconnect the socket, tcon, and smb session if needed */
 static int
@@ -404,49 +382,6 @@ decode_ext_sec_blob(struct cifs_ses *ses, NEGOTIATE_RSP *pSMBr)
 			pSMBr->u.extended_response.SecurityBlob, count, server);
 		if (rc != 1)
 			return -EINVAL;
-	}
-
-	return 0;
-}
-
-int
-cifs_enable_signing(struct TCP_Server_Info *server, bool mnt_sign_required)
-{
-	bool srv_sign_required = server->sec_mode & server->vals->signing_required;
-	bool srv_sign_enabled = server->sec_mode & server->vals->signing_enabled;
-	bool mnt_sign_enabled = global_secflags & CIFSSEC_MAY_SIGN;
-
-	/*
-	 * Is signing required by mnt options? If not then check
-	 * global_secflags to see if it is there.
-	 */
-	if (!mnt_sign_required)
-		mnt_sign_required = ((global_secflags & CIFSSEC_MUST_SIGN) ==
-						CIFSSEC_MUST_SIGN);
-
-	/*
-	 * If signing is required then it's automatically enabled too,
-	 * otherwise, check to see if the secflags allow it.
-	 */
-	mnt_sign_enabled = mnt_sign_required ? mnt_sign_required :
-				(global_secflags & CIFSSEC_MAY_SIGN);
-
-	/* If server requires signing, does client allow it? */
-	if (srv_sign_required) {
-		if (!mnt_sign_enabled) {
-			cifs_dbg(VFS, "Server requires signing, but it's disabled in SecurityFlags!");
-			return -ENOTSUPP;
-		}
-		server->sign = true;
-	}
-
-	/* If client requires signing, does server allow it? */
-	if (mnt_sign_required) {
-		if (!srv_sign_enabled) {
-			cifs_dbg(VFS, "Server does not support signing!");
-			return -ENOTSUPP;
-		}
-		server->sign = true;
 	}
 
 	return 0;
@@ -1406,166 +1341,8 @@ openRetry:
 	return rc;
 }
 
-/*
- * Discard any remaining data in the current SMB. To do this, we borrow the
- * current bigbuf.
- */
-static int
-discard_remaining_data(struct TCP_Server_Info *server)
-{
-	unsigned int rfclen = get_rfc1002_length(server->smallbuf);
-	int remaining = rfclen + 4 - server->total_read;
 
-	while (remaining > 0) {
-		int length;
 
-		length = cifs_read_from_socket(server, server->bigbuf,
-				min_t(unsigned int, remaining,
-				    CIFSMaxBufSize + MAX_HEADER_SIZE(server)));
-		if (length < 0)
-			return length;
-		server->total_read += length;
-		remaining -= length;
-	}
-
-	return 0;
-}
-
-static int
-cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid)
-{
-	int length;
-	struct cifs_readdata *rdata = mid->callback_data;
-
-	length = discard_remaining_data(server);
-	dequeue_mid(mid, rdata->result);
-	mid->resp_buf = server->smallbuf;
-	server->smallbuf = NULL;
-	return length;
-}
-
-int
-cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
-{
-	int length, len;
-	unsigned int data_offset, data_len;
-	struct cifs_readdata *rdata = mid->callback_data;
-	char *buf = server->smallbuf;
-	unsigned int buflen = get_rfc1002_length(buf) + 4;
-
-	cifs_dbg(FYI, "%s: mid=%llu offset=%llu bytes=%u\n",
-		 __func__, mid->mid, rdata->offset, rdata->bytes);
-
-	/*
-	 * read the rest of READ_RSP header (sans Data array), or whatever we
-	 * can if there's not enough data. At this point, we've read down to
-	 * the Mid.
-	 */
-	len = min_t(unsigned int, buflen, server->vals->read_rsp_size) -
-							HEADER_SIZE(server) + 1;
-
-	rdata->iov.iov_base = buf + HEADER_SIZE(server) - 1;
-	rdata->iov.iov_len = len;
-
-	length = cifs_readv_from_socket(server, &rdata->iov, 1, len);
-	if (length < 0)
-		return length;
-	server->total_read += length;
-
-	if (server->ops->is_session_expired &&
-	    server->ops->is_session_expired(buf)) {
-		cifs_reconnect(server);
-		wake_up(&server->response_q);
-		return -1;
-	}
-
-	if (server->ops->is_status_pending &&
-	    server->ops->is_status_pending(buf, server, 0)) {
-		discard_remaining_data(server);
-		return -1;
-	}
-
-	/* Was the SMB read successful? */
-	rdata->result = server->ops->map_error(buf, false);
-	if (rdata->result != 0) {
-		cifs_dbg(FYI, "%s: server returned error %d\n",
-			 __func__, rdata->result);
-		return cifs_readv_discard(server, mid);
-	}
-
-	/* Is there enough to get to the rest of the READ_RSP header? */
-	if (server->total_read < server->vals->read_rsp_size) {
-		cifs_dbg(FYI, "%s: server returned short header. got=%u expected=%zu\n",
-			 __func__, server->total_read,
-			 server->vals->read_rsp_size);
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	data_offset = server->ops->read_data_offset(buf) + 4;
-	if (data_offset < server->total_read) {
-		/*
-		 * win2k8 sometimes sends an offset of 0 when the read
-		 * is beyond the EOF. Treat it as if the data starts just after
-		 * the header.
-		 */
-		cifs_dbg(FYI, "%s: data offset (%u) inside read response header\n",
-			 __func__, data_offset);
-		data_offset = server->total_read;
-	} else if (data_offset > MAX_CIFS_SMALL_BUFFER_SIZE) {
-		/* data_offset is beyond the end of smallbuf */
-		cifs_dbg(FYI, "%s: data offset (%u) beyond end of smallbuf\n",
-			 __func__, data_offset);
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	cifs_dbg(FYI, "%s: total_read=%u data_offset=%u\n",
-		 __func__, server->total_read, data_offset);
-
-	len = data_offset - server->total_read;
-	if (len > 0) {
-		/* read any junk before data into the rest of smallbuf */
-		rdata->iov.iov_base = buf + server->total_read;
-		rdata->iov.iov_len = len;
-		length = cifs_readv_from_socket(server, &rdata->iov, 1, len);
-		if (length < 0)
-			return length;
-		server->total_read += length;
-	}
-
-	/* set up first iov for signature check */
-	rdata->iov.iov_base = buf;
-	rdata->iov.iov_len = server->total_read;
-	cifs_dbg(FYI, "0: iov_base=%p iov_len=%zu\n",
-		 rdata->iov.iov_base, rdata->iov.iov_len);
-
-	/* how much data is in the response? */
-	data_len = server->ops->read_data_length(buf);
-	if (data_offset + data_len > buflen) {
-		/* data_len is corrupt -- discard frame */
-		rdata->result = -EIO;
-		return cifs_readv_discard(server, mid);
-	}
-
-	length = rdata->read_into_pages(server, rdata, data_len);
-	if (length < 0)
-		return length;
-
-	server->total_read += length;
-
-	cifs_dbg(FYI, "total_read=%u buflen=%u remaining=%u\n",
-		 server->total_read, buflen, data_len);
-
-	/* discard anything left over */
-	if (server->total_read < buflen)
-		return cifs_readv_discard(server, mid);
-
-	dequeue_mid(mid, false);
-	mid->resp_buf = server->smallbuf;
-	server->smallbuf = NULL;
-	return length;
-}
 
 static void
 cifs_readv_callback(struct mid_q_entry *mid)
@@ -1919,153 +1696,6 @@ CIFSSMBWrite(const unsigned int xid, struct cifs_io_parms *io_parms,
 
 	return rc;
 }
-
-void
-cifs_writedata_release(struct kref *refcount)
-{
-	struct cifs_writedata *wdata = container_of(refcount,
-					struct cifs_writedata, refcount);
-
-	if (wdata->cfile)
-		cifsFileInfo_put(wdata->cfile);
-
-	kfree(wdata);
-}
-
-/*
- * Write failed with a retryable error. Resend the write request. It's also
- * possible that the page was redirtied so re-clean the page.
- */
-static void
-cifs_writev_requeue(struct cifs_writedata *wdata)
-{
-	int i, rc = 0;
-	struct inode *inode = wdata->cfile->dentry->d_inode;
-	struct TCP_Server_Info *server;
-	unsigned int rest_len;
-
-	server = tlink_tcon(wdata->cfile->tlink)->ses->server;
-	i = 0;
-	rest_len = wdata->bytes;
-	do {
-		struct cifs_writedata *wdata2;
-		unsigned int j, nr_pages, wsize, tailsz, cur_len;
-
-		wsize = server->ops->wp_retry_size(inode);
-		if (wsize < rest_len) {
-			nr_pages = wsize / PAGE_CACHE_SIZE;
-			if (!nr_pages) {
-				rc = -ENOTSUPP;
-				break;
-			}
-			cur_len = nr_pages * PAGE_CACHE_SIZE;
-			tailsz = PAGE_CACHE_SIZE;
-		} else {
-			nr_pages = DIV_ROUND_UP(rest_len, PAGE_CACHE_SIZE);
-			cur_len = rest_len;
-			tailsz = rest_len - (nr_pages - 1) * PAGE_CACHE_SIZE;
-		}
-
-		wdata2 = cifs_writedata_alloc(nr_pages, cifs_writev_complete);
-		if (!wdata2) {
-			rc = -ENOMEM;
-			break;
-		}
-
-		for (j = 0; j < nr_pages; j++) {
-			wdata2->pages[j] = wdata->pages[i + j];
-			lock_page(wdata2->pages[j]);
-			clear_page_dirty_for_io(wdata2->pages[j]);
-		}
-
-		wdata2->sync_mode = wdata->sync_mode;
-		wdata2->nr_pages = nr_pages;
-		wdata2->offset = page_offset(wdata2->pages[0]);
-		wdata2->pagesz = PAGE_CACHE_SIZE;
-		wdata2->tailsz = tailsz;
-		wdata2->bytes = cur_len;
-
-		wdata2->cfile = find_writable_file(CIFS_I(inode), false);
-		if (!wdata2->cfile) {
-			cifs_dbg(VFS, "No writable handles for inode\n");
-			rc = -EBADF;
-			break;
-		}
-		wdata2->pid = wdata2->cfile->pid;
-		rc = server->ops->async_writev(wdata2, cifs_writedata_release);
-
-		for (j = 0; j < nr_pages; j++) {
-			unlock_page(wdata2->pages[j]);
-			if (rc != 0 && rc != -EAGAIN) {
-				SetPageError(wdata2->pages[j]);
-				end_page_writeback(wdata2->pages[j]);
-				page_cache_release(wdata2->pages[j]);
-			}
-		}
-
-		if (rc) {
-			kref_put(&wdata2->refcount, cifs_writedata_release);
-			if (rc == -EAGAIN)
-				continue;
-			break;
-		}
-
-		rest_len -= cur_len;
-		i += nr_pages;
-	} while (i < wdata->nr_pages);
-
-	mapping_set_error(inode->i_mapping, rc);
-	kref_put(&wdata->refcount, cifs_writedata_release);
-}
-
-void
-cifs_writev_complete(struct work_struct *work)
-{
-	struct cifs_writedata *wdata = container_of(work,
-						struct cifs_writedata, work);
-	struct inode *inode = wdata->cfile->dentry->d_inode;
-	int i = 0;
-
-	if (wdata->result == 0) {
-		spin_lock(&inode->i_lock);
-		cifs_update_eof(CIFS_I(inode), wdata->offset, wdata->bytes);
-		spin_unlock(&inode->i_lock);
-		cifs_stats_bytes_written(tlink_tcon(wdata->cfile->tlink),
-					 wdata->bytes);
-	} else if (wdata->sync_mode == WB_SYNC_ALL && wdata->result == -EAGAIN)
-		return cifs_writev_requeue(wdata);
-
-	for (i = 0; i < wdata->nr_pages; i++) {
-		struct page *page = wdata->pages[i];
-		if (wdata->result == -EAGAIN)
-			__set_page_dirty_nobuffers(page);
-		else if (wdata->result < 0)
-			SetPageError(page);
-		end_page_writeback(page);
-		page_cache_release(page);
-	}
-	if (wdata->result != -EAGAIN)
-		mapping_set_error(inode->i_mapping, wdata->result);
-	kref_put(&wdata->refcount, cifs_writedata_release);
-}
-
-struct cifs_writedata *
-cifs_writedata_alloc(unsigned int nr_pages, work_func_t complete)
-{
-	struct cifs_writedata *wdata;
-
-	/* writedata + number of page pointers */
-	wdata = kzalloc(sizeof(*wdata) +
-			sizeof(struct page *) * nr_pages, GFP_NOFS);
-	if (wdata != NULL) {
-		kref_init(&wdata->refcount);
-		INIT_LIST_HEAD(&wdata->list);
-		init_completion(&wdata->done);
-		INIT_WORK(&wdata->work, complete);
-	}
-	return wdata;
-}
-
 /*
  * Check the mid_state and signature on received buffer (if any), and queue the
  * workqueue completion task.
@@ -6563,3 +6193,5 @@ int CIFSSMBNotify(const unsigned int xid, struct cifs_tcon *tcon,
 	return rc;
 }
 #endif /* was needed for dnotify, and will be needed for inotify when VFS fix */
+
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */

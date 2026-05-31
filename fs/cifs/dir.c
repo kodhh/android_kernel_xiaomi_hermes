@@ -252,7 +252,9 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 			}
 
 			if (S_ISDIR(newinode->i_mode)) {
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 				CIFSSMBClose(xid, tcon, fid->netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 				iput(newinode);
 				rc = -EISDIR;
 				goto out;
@@ -266,7 +268,9 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 				 * close it and proceed as if it were a normal
 				 * lookup.
 				 */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 				CIFSSMBClose(xid, tcon, fid->netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 				goto cifs_create_get_file_info;
 			}
 			/* success, no need to query */
@@ -388,8 +392,10 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 			args.uid = INVALID_UID; /* no change */
 			args.gid = INVALID_GID; /* no change */
 		}
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		CIFSSMBUnixSetFileInfo(xid, tcon, &args, fid->netfid,
 				       current->tgid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	} else {
 		/*
 		 * BB implement mode setting via Windows security
@@ -659,10 +665,12 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 			args.uid = INVALID_UID; /* no change */
 			args.gid = INVALID_GID; /* no change */
 		}
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		rc = CIFSSMBUnixSetPathInfo(xid, tcon, full_path, &args,
 					    cifs_sb->local_nls,
 					    cifs_sb->mnt_cifs_flags &
 						CIFS_MOUNT_MAP_SPECIAL_CHR);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 		if (rc)
 			goto mknod_out;
 

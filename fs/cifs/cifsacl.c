@@ -876,8 +876,10 @@ struct cifs_ntsd *get_cifs_acl_by_fid(struct cifs_sb_info *cifs_sb,
 		return ERR_CAST(tlink);
 
 	xid = get_xid();
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFSSMBGetCIFSACL(xid, tlink_tcon(tlink), cifsfid->netfid, &pntsd,
 				pacllen);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	free_xid(xid);
 
 	cifs_put_tlink(tlink);
@@ -920,8 +922,10 @@ static struct cifs_ntsd *get_cifs_acl_by_path(struct cifs_sb_info *cifs_sb,
 
 	rc = CIFS_open(xid, &oparms, &oplock, NULL);
 	if (!rc) {
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		rc = CIFSSMBGetCIFSACL(xid, tcon, fid.netfid, &pntsd, pacllen);
 		CIFSSMBClose(xid, tcon, fid.netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	}
 
 	cifs_put_tlink(tlink);
@@ -993,10 +997,14 @@ int set_cifs_acl(struct cifs_ntsd *pnntsd, __u32 acllen,
 		goto out;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFSSMBSetCIFSACL(xid, tcon, fid.netfid, pnntsd, acllen, aclflag);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	cifs_dbg(NOISY, "SetCIFSACL rc = %d\n", rc);
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	CIFSSMBClose(xid, tcon, fid.netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 out:
 	free_xid(xid);
 	cifs_put_tlink(tlink);

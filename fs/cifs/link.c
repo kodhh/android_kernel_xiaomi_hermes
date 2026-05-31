@@ -343,7 +343,9 @@ cifs_query_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	oparms.fid = &fid;
 	oparms.reconnect = false;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFS_open(xid, &oparms, &oplock, &file_info);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	if (rc)
 		return rc;
 
@@ -359,9 +361,13 @@ cifs_query_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	io_parms.offset = 0;
 	io_parms.length = CIFS_MF_SYMLINK_FILE_SIZE;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFSSMBRead(xid, &io_parms, pbytes_read, &pbuf, &buf_type);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 out:
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	CIFSSMBClose(xid, tcon, fid.netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	return rc;
 }
 
@@ -389,7 +395,9 @@ cifs_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	oparms.fid = &fid;
 	oparms.reconnect = false;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFS_open(xid, &oparms, &oplock, NULL);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	if (rc)
 		return rc;
 
@@ -399,8 +407,10 @@ cifs_create_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
 	io_parms.offset = 0;
 	io_parms.length = CIFS_MF_SYMLINK_FILE_SIZE;
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	rc = CIFSSMBWrite(xid, &io_parms, pbytes_written, pbuf, NULL, 0);
 	CIFSSMBClose(xid, tcon, fid.netfid);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	return rc;
 }
 
@@ -564,6 +574,7 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 		goto cifs_hl_exit;
 	}
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	if (tcon->unix_ext)
 		rc = CIFSUnixCreateHardLink(xid, tcon, from_name, to_name,
 					    cifs_sb->local_nls,
@@ -579,6 +590,7 @@ cifs_hardlink(struct dentry *old_file, struct inode *inode,
 		if ((rc == -EIO) || (rc == -EINVAL))
 			rc = -EOPNOTSUPP;
 	}
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 	d_drop(direntry);	/* force new lookup from server of target */
 
@@ -716,8 +728,10 @@ cifs_symlink(struct inode *inode, struct dentry *direntry, const char *symname)
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS)
 		rc = create_mf_symlink(xid, pTcon, cifs_sb, full_path, symname);
 	else if (pTcon->unix_ext)
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		rc = CIFSUnixCreateSymLink(xid, pTcon, full_path, symname,
 					   cifs_sb->local_nls);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	/* else
 	   rc = CIFSCreateReparseSymLink(xid, pTcon, fromName, toName,
 					cifs_sb_target->local_nls); */

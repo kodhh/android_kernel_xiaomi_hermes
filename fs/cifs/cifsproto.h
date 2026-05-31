@@ -126,8 +126,10 @@ extern int small_smb_init_no_tc(const int smb_cmd, const int wct,
 				void **request_buf);
 extern enum securityEnum select_sectype(struct TCP_Server_Info *server,
 				enum securityEnum requested);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFS_SessSetup(const unsigned int xid, struct cifs_ses *ses,
 			  const struct nls_table *nls_cp);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 extern struct timespec cifs_NTtimeToUnix(__le64 utc_nanoseconds_since_1601);
 extern u64 cifs_UnixTimeToNT(struct timespec);
 extern struct timespec cnvrtDosUnixTm(__le16 le_date, __le16 le_time,
@@ -229,25 +231,36 @@ extern int cifs_negotiate_protocol(const unsigned int xid,
 extern int cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 			      struct nls_table *nls_info);
 extern int cifs_enable_signing(struct TCP_Server_Info *server, bool mnt_sign_required);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
 		    const char *tree, struct cifs_tcon *tcon,
 		    const struct nls_table *);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSFindFirst(const unsigned int xid, struct cifs_tcon *tcon,
 		const char *searchName, struct cifs_sb_info *cifs_sb,
 		__u16 *searchHandle, __u16 search_flags,
 		struct cifs_search_info *psrch_inf,
 		bool msearch);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSFindNext(const unsigned int xid, struct cifs_tcon *tcon,
 		__u16 searchHandle, __u16 search_flags,
 		struct cifs_search_info *psrch_inf);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSFindClose(const unsigned int xid, struct cifs_tcon *tcon,
 			const __u16 search_handle);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			u16 netfid, FILE_ALL_INFO *pFindData);
 extern int CIFSSMBQPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
@@ -257,7 +270,9 @@ extern int CIFSSMBQPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 extern int SMBQueryInformation(const unsigned int xid, struct cifs_tcon *tcon,
 			       const char *search_name, FILE_ALL_INFO *data,
 			       const struct nls_table *nls_codepage, int remap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBUnixQFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			u16 netfid, FILE_UNIX_BASIC_INFO *pFindData);
 extern int CIFSSMBUnixQPathInfo(const unsigned int xid,
@@ -265,12 +280,15 @@ extern int CIFSSMBUnixQPathInfo(const unsigned int xid,
 			const unsigned char *searchName,
 			FILE_UNIX_BASIC_INFO *pFindData,
 			const struct nls_table *nls_codepage, int remap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSGetDFSRefer(const unsigned int xid, struct cifs_ses *ses,
 			   const char *search_name,
 			   struct dfs_info3_param **target_nodes,
 			   unsigned int *num_of_nodes,
 			   const struct nls_table *nls_codepage, int remap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 extern int get_dfs_path(const unsigned int xid, struct cifs_ses *ses,
 			const char *old_path,
@@ -280,20 +298,25 @@ extern int get_dfs_path(const unsigned int xid, struct cifs_ses *ses,
 extern void reset_cifs_unix_caps(unsigned int xid, struct cifs_tcon *tcon,
 				 struct cifs_sb_info *cifs_sb,
 				 struct smb_vol *vol);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			struct kstatfs *FSData);
 extern int SMBOldQFSInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			struct kstatfs *FSData);
 extern int CIFSSMBSetFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			__u64 cap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBQFSAttributeInfo(const unsigned int xid,
 			struct cifs_tcon *tcon);
 extern int CIFSSMBQFSDeviceInfo(const unsigned int xid, struct cifs_tcon *tcon);
 extern int CIFSSMBQFSUnixInfo(const unsigned int xid, struct cifs_tcon *tcon);
 extern int CIFSSMBQFSPosixInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			struct kstatfs *FSData);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			const char *fileName, const FILE_BASIC_INFO *data,
 			const struct nls_table *nls_codepage,
@@ -305,17 +328,22 @@ extern int CIFSSMBSetFileDisposition(const unsigned int xid,
 				     struct cifs_tcon *tcon,
 				     bool delete_file, __u16 fid,
 				     __u32 pid_of_opener);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 #if 0
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBSetAttrLegacy(unsigned int xid, struct cifs_tcon *tcon,
 			char *fileName, __u16 dos_attributes,
 			const struct nls_table *nls_codepage);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 #endif /* possibly unneeded function */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBSetEOF(const unsigned int xid, struct cifs_tcon *tcon,
 			 const char *file_name, __u64 size,
 			 struct cifs_sb_info *cifs_sb, bool set_allocation);
 extern int CIFSSMBSetFileSize(const unsigned int xid, struct cifs_tcon *tcon,
 			      struct cifsFileInfo *cfile, __u64 size,
 			      bool set_allocation);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 struct cifs_unix_set_info_args {
 	__u64	ctime;
@@ -327,17 +355,22 @@ struct cifs_unix_set_info_args {
 	dev_t	device;
 };
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBUnixSetFileInfo(const unsigned int xid,
 				  struct cifs_tcon *tcon,
 				  const struct cifs_unix_set_info_args *args,
 				  u16 fid, u32 pid_of_opener);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBUnixSetPathInfo(const unsigned int xid,
 				  struct cifs_tcon *tcon, const char *file_name,
 				  const struct cifs_unix_set_info_args *args,
 				  const struct nls_table *nls_codepage,
 				  int remap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBMkDir(const unsigned int xid, struct cifs_tcon *tcon,
 			const char *name, struct cifs_sb_info *cifs_sb);
 extern int CIFSSMBRmDir(const unsigned int xid, struct cifs_tcon *tcon,
@@ -390,10 +423,14 @@ extern int CIFSPOSIXCreate(const unsigned int xid, struct cifs_tcon *tcon,
 			const struct nls_table *nls_codepage, int remap);
 extern int CIFSSMBClose(const unsigned int xid, struct cifs_tcon *tcon,
 			const int smb_file_id);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBFlush(const unsigned int xid, struct cifs_tcon *tcon,
 			const int smb_file_id);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBRead(const unsigned int xid, struct cifs_io_parms *io_parms,
 			unsigned int *nbytes, char **buf,
 			int *return_buf_type);
@@ -406,11 +443,13 @@ extern int CIFSGetSrvInodeNumber(const unsigned int xid, struct cifs_tcon *tcon,
 				 const char *search_name, __u64 *inode_number,
 				 const struct nls_table *nls_codepage,
 				 int remap);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 extern int cifs_lockv(const unsigned int xid, struct cifs_tcon *tcon,
 		      const __u16 netfid, const __u8 lock_type,
 		      const __u32 num_unlock, const __u32 num_lock,
 		      LOCKING_ANDX_RANGE *buf);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBLock(const unsigned int xid, struct cifs_tcon *tcon,
 			const __u16 netfid, const __u32 netpid, const __u64 len,
 			const __u64 offset, const __u32 numUnlock,
@@ -424,6 +463,7 @@ extern int CIFSSMBPosixLock(const unsigned int xid, struct cifs_tcon *tcon,
 extern int CIFSSMBTDis(const unsigned int xid, struct cifs_tcon *tcon);
 extern int CIFSSMBEcho(struct TCP_Server_Info *server);
 extern int CIFSSMBLogoff(const unsigned int xid, struct cifs_ses *ses);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 extern struct cifs_ses *sesInfoAlloc(void);
 extern void sesInfoFree(struct cifs_ses *);
@@ -451,11 +491,14 @@ extern int calc_lanman_hash(const char *password, const char *cryptkey,
 				bool encrypt, char *lnm_session_key);
 #endif /* CIFS_WEAK_PW_HASH */
 #ifdef CONFIG_CIFS_DNOTIFY_EXPERIMENTAL /* unused temporarily */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBNotify(const unsigned int xid, struct cifs_tcon *tcon,
 			const int notify_subdirs, const __u16 netfid,
 			__u32 filter, struct file *file, int multishot,
 			const struct nls_table *nls_codepage);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 #endif /* was needed for dnotify, and will be needed for inotify when VFS fix */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int CIFSSMBCopy(unsigned int xid,
 			struct cifs_tcon *source_tcon,
 			const char *fromName,
@@ -486,6 +529,7 @@ extern int CIFSSMBSetPosixACL(const unsigned int xid, struct cifs_tcon *tcon,
 		const struct nls_table *nls_codepage, int remap_special_chars);
 extern int CIFSGetExtAttr(const unsigned int xid, struct cifs_tcon *tcon,
 			const int netfid, __u64 *pExtAttrBits, __u64 *pMask);
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 extern void cifs_autodisable_serverino(struct cifs_sb_info *cifs_sb);
 extern bool couldbe_mf_symlink(const struct cifs_fattr *fattr);
 extern int check_mf_symlink(unsigned int xid, struct cifs_tcon *tcon,
