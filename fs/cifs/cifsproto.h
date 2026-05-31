@@ -138,9 +138,11 @@ extern void cifs_set_oplock_level(struct cifsInodeInfo *cinode, __u32 oplock);
 extern int cifs_get_writer(struct cifsInodeInfo *cinode);
 extern void cifs_put_writer(struct cifsInodeInfo *cinode);
 extern void cifs_done_oplock_break(struct cifsInodeInfo *cinode);
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 extern int cifs_unlock_range(struct cifsFileInfo *cfile,
 			     struct file_lock *flock, const unsigned int xid);
 extern int cifs_push_mandatory_locks(struct cifsFileInfo *cfile);
+#endif
 
 extern struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid,
 					      struct file *file,

@@ -1224,6 +1224,7 @@ try_again:
 	return rc;
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 cifs_push_mandatory_locks(struct cifsFileInfo *cfile)
 {
@@ -1298,6 +1299,7 @@ cifs_push_mandatory_locks(struct cifsFileInfo *cfile)
 	free_xid(xid);
 	return rc;
 }
+#endif
 
 /* copied from fs/locks.c with a name change */
 #define cifs_for_each_lock(inode, lockp) \
@@ -1567,6 +1569,7 @@ cifs_free_llist(struct list_head *llist)
 	}
 }
 
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 int
 cifs_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 		  unsigned int xid)
@@ -1677,6 +1680,7 @@ cifs_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 	kfree(buf);
 	return rc;
 }
+#endif
 
 static int
 cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
