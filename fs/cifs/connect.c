@@ -52,9 +52,7 @@
 #include "nterr.h"
 #include "rfc1002pdu.h"
 #include "fscache.h"
-#ifdef CONFIG_CIFS_SMB2
 #include "smb2proto.h"
-#endif
 
 
 int
@@ -363,9 +361,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		server->tcpStatus = CifsNeedReconnect;
 	spin_unlock(&GlobalMid_Lock);
 	server->maxBuf = 0;
-#ifdef CONFIG_CIFS_SMB2
 	server->max_read = 0;
-#endif
 
 	cifs_dbg(FYI, "Reconnecting tcp session\n");
 
@@ -1197,7 +1193,6 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 		cifs_dbg(VFS, "vers=1.0 (cifs) mount not permitted when legacy dialects disabled\n");
 		return 1;
 #endif /* CIFS_ALLOW_INSECURE_LEGACY */
-#ifdef CONFIG_CIFS_SMB2
 	case Smb_20:
 		vol->ops = &smb20_operations;
 		vol->vals = &smb20_values;
@@ -1214,7 +1209,6 @@ cifs_parse_smb_version(char *value, struct smb_vol *vol)
 		vol->ops = &smb30_operations; /* currently identical with 3.0 */
 		vol->vals = &smb302_values;
 		break;
-#endif
 	default:
 		cifs_dbg(VFS, "Unknown vers= option specified: %s\n", value);
 		return 1;
@@ -2172,7 +2166,6 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 
 	cancel_delayed_work_sync(&server->echo);
 
-#ifdef CONFIG_CIFS_SMB2
 	if (from_reconnect)
 		/*
 		 * Avoid deadlock here: reconnect work calls
@@ -2183,7 +2176,6 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 		cancel_delayed_work(&server->reconnect);
 	else
 		cancel_delayed_work_sync(&server->reconnect);
-#endif
 
 	spin_lock(&GlobalMid_Lock);
 	server->tcpStatus = CifsExiting;
@@ -2249,17 +2241,13 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	INIT_LIST_HEAD(&tcp_ses->tcp_ses_list);
 	INIT_LIST_HEAD(&tcp_ses->smb_ses_list);
 	INIT_DELAYED_WORK(&tcp_ses->echo, cifs_echo_request);
-#ifdef CONFIG_CIFS_SMB2
 	INIT_DELAYED_WORK(&tcp_ses->reconnect, smb2_reconnect_server);
 	mutex_init(&tcp_ses->reconnect_mutex);
-#endif
 	memcpy(&tcp_ses->srcaddr, &volume_info->srcaddr,
 	       sizeof(tcp_ses->srcaddr));
 	memcpy(&tcp_ses->dstaddr, &volume_info->dstaddr,
 		sizeof(tcp_ses->dstaddr));
-#ifdef CONFIG_CIFS_SMB2
 	get_random_bytes(tcp_ses->client_guid, SMB2_CLIENT_GUID_SIZE);
-#endif
 	/*
 	 * at this point we are the only ones with the pointer
 	 * to the struct since the kernel thread not created yet
