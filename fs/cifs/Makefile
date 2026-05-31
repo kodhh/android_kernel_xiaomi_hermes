@@ -8,8 +8,7 @@ cifs-y := cifsfs.o cifs_debug.o connect.o dir.o file.o inode.o \
 	  cifs_unicode.o nterr.o xattr.o cifsencrypt.o \
 	  readdir.o ioctl.o sess.o export.o winucase.o
 
-cifs-$(CONFIG_CIFS_ALLOW_INSECURE_LEGACY) += smb1ops.o
-cifs-$(CONFIG_CIFS_ALLOW_INSECURE_LEGACY) += cifssmb.o
+cifs-$(CONFIG_CIFS_ALLOW_INSECURE_LEGACY) += smb1ops.o cifssmb.o
 
 cifs-$(CONFIG_CIFS_ACL) += cifsacl.o
 
