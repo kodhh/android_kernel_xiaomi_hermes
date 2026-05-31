@@ -478,16 +478,8 @@ int smb3_validate_negotiate(const unsigned int xid, struct cifs_tcon *tcon)
 	 * sign just this, the first and only signed request on a connection.
 	 * Having validation of negotiate info  helps reduce attack vectors.
 	 */
-	if (tcon->ses->session_flags & SMB2_SESSION_FLAG_IS_GUEST)
+	if (tcon->ses->server->sign == false)
 		return 0; /* validation requires signing */
-
-	if (tcon->ses->user_name == NULL) {
-		cifs_dbg(FYI, "Can't validate negotiate: null user mount\n");
-		return 0; /* validation requires signing */
-	}
-
-	if (tcon->ses->session_flags & SMB2_SESSION_FLAG_IS_NULL)
-		cifs_dbg(VFS, "Unexpected null user (anonymous) auth flag sent by server\n");
 
 	vneg_inbuf.Capabilities =
 			cpu_to_le32(tcon->ses->server->vals->req_capabilities);
