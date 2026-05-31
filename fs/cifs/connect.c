@@ -1345,8 +1345,13 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 	vol->actimeo = CIFS_DEF_ACTIMEO;
 
 	/* FIXME: add autonegotiation -- for now, SMB1 is default */
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	vol->ops = &smb1_operations;
 	vol->vals = &smb1_values;
+#else
+	vol->ops = &smb20_operations;
+	vol->vals = &smb20_values;
+#endif
 
 	if (!mountdata)
 		goto cifs_parse_mount_err;
