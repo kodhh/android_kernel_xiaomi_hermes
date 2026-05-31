@@ -205,8 +205,11 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 	atomic_inc(&tconInfoReconnectCount);
 
 	/* tell server Unix caps we support */
-	if (ses->capabilities & CAP_UNIX)
+	if (ses->capabilities & CAP_UNIX) {
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 		reset_cifs_unix_caps(0, tcon, NULL, NULL);
+#endif
+	}
 
 	/*
 	 * Removed call to reopen open files here. It is safer (and faster) to
