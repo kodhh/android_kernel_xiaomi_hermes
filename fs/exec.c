@@ -769,19 +769,25 @@ EXPORT_SYMBOL(setup_arg_pages);
 
 #endif /* CONFIG_MMU */
 
-struct file *open_exec(const char *name)
+static struct file *do_open_execat(int fd, struct filename *name, int flags)
 {
 	struct file *file;
 	int err;
-	struct filename tmp = { .name = name };
-	static const struct open_flags open_exec_flags = {
+	struct open_flags open_exec_flags = {
 		.open_flag = O_LARGEFILE | O_RDONLY | __FMODE_EXEC,
 		.acc_mode = MAY_EXEC | MAY_OPEN,
 		.intent = LOOKUP_OPEN,
 		.lookup_flags = LOOKUP_FOLLOW,
 	};
 
-	file = do_filp_open(AT_FDCWD, &tmp, &open_exec_flags);
+	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH)) != 0)
+		return ERR_PTR(-EINVAL);
+	if (flags & AT_SYMLINK_NOFOLLOW)
+		open_exec_flags.lookup_flags &= ~LOOKUP_FOLLOW;
+	if (flags & AT_EMPTY_PATH)
+		open_exec_flags.lookup_flags |= LOOKUP_EMPTY;
+
+	file = do_filp_open(fd, name, &open_exec_flags);
 	if (IS_ERR(file))
 		goto out;
 
@@ -791,8 +797,6 @@ struct file *open_exec(const char *name)
 
 	if (file->f_path.mnt->mnt_flags & MNT_NOEXEC)
 		goto exit;
-
-	fsnotify_open(file);
 
 	err = deny_write_access(file);
 	if (err)
@@ -804,6 +808,13 @@ out:
 exit:
 	fput(file);
 	return ERR_PTR(err);
+}
+
+struct file *open_exec(const char *name)
+{
+	struct filename tmp = { .name = name };
+
+	return do_open_execat(AT_FDCWD, &tmp, 0);
 }
 EXPORT_SYMBOL(open_exec);
 
@@ -1502,10 +1513,17 @@ EXPORT_SYMBOL(search_binary_handler);
 /*
  * sys_execve() executes a new program.
  */
-static int do_execve_common(const char *filename,
+#ifdef CONFIG_KSU
+extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+			void *envp, int *flags);
+#endif
+
+static int do_execveat_common(int fd, struct filename *filename,
 				struct user_arg_ptr argv,
-				struct user_arg_ptr envp)
+				struct user_arg_ptr envp,
+				int flags)
 {
+	char *pathbuf = NULL;
 	struct linux_binprm *bprm;
 	struct file *file;
 	struct files_struct *displaced;
@@ -1548,7 +1566,11 @@ static int do_execve_common(const char *filename,
 	clear_in_exec = retval;
 	current->in_execve = 1;
 
-	file = open_exec(filename);
+#ifdef CONFIG_KSU
+	ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
+#endif
+
+	file = do_open_execat(fd, filename, flags);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_unmark;
@@ -1556,8 +1578,26 @@ static int do_execve_common(const char *filename,
 	sched_exec();
 
 	bprm->file = file;
-	bprm->filename = filename;
-	bprm->interp = filename;
+	if (fd == AT_FDCWD || filename->name[0] == '/') {
+		bprm->filename = filename->name;
+	} else {
+		if (filename->name[0] == '\0')
+			pathbuf = kasprintf(GFP_TEMPORARY, "/dev/fd/%d", fd);
+		else
+			pathbuf = kasprintf(GFP_TEMPORARY, "/dev/fd/%d/%s",
+					    fd, filename->name);
+		if (!pathbuf) {
+			retval = -ENOMEM;
+			goto out_unmark;
+		}
+		if (close_on_exec(fd, rcu_dereference_raw(current->files->fdt)))
+			bprm->interp_flags |= BINPRM_FLAGS_PATH_INACCESSIBLE;
+		bprm->filename = pathbuf;
+	}
+	bprm->interp = bprm->filename;
+
+	if (filename->name[0] != '\0')
+		fsnotify_open(file);
 
 	retval = bprm_mm_init(bprm);
 	if (retval)
@@ -1597,6 +1637,7 @@ static int do_execve_common(const char *filename,
 	current->in_execve = 0;
 	acct_update_integrals(current);
 	free_bprm(bprm);
+	kfree(pathbuf);
 	if (displaced)
 		put_files_struct(displaced);
 	return retval;
@@ -1620,6 +1661,7 @@ out_unmark:
 
 out_free:
 	free_bprm(bprm);
+	kfree(pathbuf);
 
 out_files:
 	if (displaced)
@@ -1634,7 +1676,19 @@ int do_execve(const char *filename,
 {
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
-	return do_execve_common(filename, argv, envp);
+	struct filename tmp = { .name = filename };
+	return do_execveat_common(AT_FDCWD, &tmp, argv, envp, 0);
+}
+
+int do_execveat(int fd, struct filename *filename,
+	const char __user *const __user *__argv,
+	const char __user *const __user *__envp,
+	int flags)
+{
+	struct user_arg_ptr argv = { .ptr.native = __argv };
+	struct user_arg_ptr envp = { .ptr.native = __envp };
+
+	return do_execveat_common(fd, filename, argv, envp, flags);
 }
 
 #ifdef CONFIG_COMPAT
@@ -1650,7 +1704,24 @@ static int compat_do_execve(const char *filename,
 		.is_compat = true,
 		.ptr.compat = __envp,
 	};
-	return do_execve_common(filename, argv, envp);
+	struct filename tmp = { .name = filename };
+	return do_execveat_common(AT_FDCWD, &tmp, argv, envp, 0);
+}
+
+static int compat_do_execveat(int fd, struct filename *filename,
+	const compat_uptr_t __user *__argv,
+	const compat_uptr_t __user *__envp,
+	int flags)
+{
+	struct user_arg_ptr argv = {
+		.is_compat = true,
+		.ptr.compat = __argv,
+	};
+	struct user_arg_ptr envp = {
+		.is_compat = true,
+		.ptr.compat = __envp,
+	};
+	return do_execveat_common(fd, filename, argv, envp, flags);
 }
 #endif
 
@@ -1728,14 +1799,6 @@ int get_dumpable(struct mm_struct *mm)
 	return __get_dumpable(mm->flags);
 }
 
-#ifdef CONFIG_KSU
-extern bool ksu_execveat_hook __read_mostly;
-extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-			void *envp, int *flags);
-extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
-				 void *argv, void *envp, int *flags);
-#endif
-
 SYSCALL_DEFINE3(execve,
 		const char __user *, filename,
 		const char __user *const __user *, argv,
@@ -1744,17 +1807,29 @@ SYSCALL_DEFINE3(execve,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
-#ifdef CONFIG_KSU
-		if (unlikely(ksu_execveat_hook))
-			ksu_handle_execveat((int *)AT_FDCWD, &path, &argv, &envp, 0);
-		else
-			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &path, NULL, NULL, NULL);
-#endif
 		error = do_execve(path->name, argv, envp);
 		putname(path);
 	}
 	return error;
 }
+
+SYSCALL_DEFINE5(execveat,
+		int, fd, const char __user *, filename,
+		const char __user *const __user *, argv,
+		const char __user *const __user *, envp,
+		int, flags)
+{
+	int lookup_flags = (flags & AT_EMPTY_PATH) ? LOOKUP_EMPTY : 0;
+	struct filename *path = getname_flags(filename, lookup_flags, NULL);
+	int error = PTR_ERR(path);
+
+	if (!IS_ERR(path)) {
+		error = do_execveat(fd, path, argv, envp, flags);
+		putname(path);
+	}
+	return error;
+}
+
 #ifdef CONFIG_COMPAT
 asmlinkage long compat_sys_execve(const char __user * filename,
 	const compat_uptr_t __user * argv,
@@ -1763,11 +1838,23 @@ asmlinkage long compat_sys_execve(const char __user * filename,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
-#ifdef CONFIG_KSU
-		if (!ksu_execveat_hook)
-			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &path, NULL, NULL, NULL); /* 32-bit su */
-#endif
 		error = compat_do_execve(path->name, argv, envp);
+		putname(path);
+	}
+	return error;
+}
+
+asmlinkage long compat_sys_execveat(int fd, const char __user *filename,
+	const compat_uptr_t __user *argv,
+	const compat_uptr_t __user *envp,
+	int flags)
+{
+	int lookup_flags = (flags & AT_EMPTY_PATH) ? LOOKUP_EMPTY : 0;
+	struct filename *path = getname_flags(filename, lookup_flags, NULL);
+	int error = PTR_ERR(path);
+
+	if (!IS_ERR(path)) {
+		error = compat_do_execveat(fd, path, argv, envp, flags);
 		putname(path);
 	}
 	return error;

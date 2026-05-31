@@ -42,6 +42,9 @@ static int load_em86(struct linux_binprm *bprm)
 			return -ENOEXEC;
 	}
 
+	if (bprm->interp_flags & BINPRM_FLAGS_PATH_INACCESSIBLE)
+		return -ENOENT;
+
 	allow_write_access(bprm->file);
 	fput(bprm->file);
 	bprm->file = NULL;
