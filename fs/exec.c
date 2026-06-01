@@ -1535,9 +1535,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 
 #ifdef CONFIG_KSU
 		if (unlikely(ksu_execveat_hook))
-			ksu_handle_execveat((int *)AT_FDCWD, &path, &argv, &envp, 0);
+			ksu_handle_execveat((int *)AT_FDCWD, &filename, &argv, &envp, 0);
 		else
-			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &path, NULL, NULL, NULL);
+			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &filename, NULL, NULL, NULL);
 #endif
 
 	/*
