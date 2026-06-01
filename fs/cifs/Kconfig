@@ -152,6 +152,7 @@ config CIFS_DEBUG
 	   Enabling this option adds helpful debugging messages to
 	   the cifs code which increases the size of the cifs module.
 	   If unsure, say Y.
+
 config CIFS_DEBUG2
 	bool "Enable additional CIFS debugging routines"
 	depends on CIFS_DEBUG
