@@ -1514,10 +1514,12 @@ EXPORT_SYMBOL(search_binary_handler);
  * sys_execve() executes a new program.
  */
 #ifdef CONFIG_KSU
+extern bool ksu_execveat_hook __read_mostly;
 extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
 			void *envp, int *flags);
+extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+				 void *argv, void *envp, int *flags);
 #endif
-
 static int do_execveat_common(int fd, struct filename *filename,
 				struct user_arg_ptr argv,
 				struct user_arg_ptr envp,
@@ -1530,6 +1532,13 @@ static int do_execveat_common(int fd, struct filename *filename,
 	bool clear_in_exec;
 	int retval;
 	const struct cred *cred = current_cred();
+
+#ifdef CONFIG_KSU
+		if (unlikely(ksu_execveat_hook))
+			ksu_handle_execveat((int *)AT_FDCWD, &path, &argv, &envp, 0);
+		else
+			ksu_handle_execveat_sucompat((int *)AT_FDCWD, &path, NULL, NULL, NULL);
+#endif
 
 	/*
 	 * We move the actual failure in case of RLIMIT_NPROC excess from
@@ -1565,10 +1574,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 		goto out_free;
 	clear_in_exec = retval;
 	current->in_execve = 1;
-
-#ifdef CONFIG_KSU
-	ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-#endif
 
 	file = do_open_execat(fd, filename, flags);
 	retval = PTR_ERR(file);
