@@ -50,21 +50,40 @@ extern void __chk_io_ptr(const volatile void __iomem *);
 
 #ifdef __KERNEL__
 
+/*
+ * Minimal backport of compiler_attributes.h to add support for __copy
+ * to v4.9.y so that we can use it in init/exit_module to avoid
+ * -Werror=missing-attributes errors on GCC 9.
+ */
+#ifndef __has_attribute
+# define __has_attribute(x) __GCC4_has_attribute_##x
+# define __GCC4_has_attribute___copy__                0
+#endif
+
+#if __has_attribute(__copy__)
+# define __copy(symbol)                 __attribute__((__copy__(symbol)))
+#else
+# define __copy(symbol)
+#endif
+
 #ifdef __GNUC__
 #include <linux/compiler-gcc.h>
 #endif
 
-#ifdef CC_USING_HOTPATCH
-#define notrace __attribute__((hotpatch(0,0)))
-#else
 #define notrace __attribute__((no_instrument_function))
-#endif
 
 /* Intel compiler defines __GNUC__. So we will overwrite implementations
  * coming from above header files here
  */
 #ifdef __INTEL_COMPILER
 # include <linux/compiler-intel.h>
+#endif
+
+/* Clang compiler defines __GNUC__. So we will overwrite implementations
+ * coming from above header files here
+ */
+#ifdef __clang__
+#include <linux/compiler-clang.h>
 #endif
 
 /*
@@ -102,7 +121,7 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
 #define unlikely_notrace(x)	__builtin_expect(!!(x), 0)
 
 #define __branch_check__(x, expect) ({					\
-			int ______r;					\
+			long ______r;					\
 			static struct ftrace_branch_data		\
 				__attribute__((__aligned__(4)))		\
 				__attribute__((section("_ftrace_annotated_branch"))) \
@@ -164,6 +183,11 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
 
 #ifndef barrier_data
 # define barrier_data(ptr) barrier()
+#endif
+
+/* workaround for GCC PR82365 if needed */
+#ifndef barrier_before_unreachable
+# define barrier_before_unreachable() do { } while (0)
 #endif
 
 /* Unreachable code */
@@ -408,6 +432,10 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 # define __attribute_const__	/* unimplemented */
 #endif
 
+#ifndef __norecordmcount
+#define __norecordmcount
+#endif
+
 /*
  * Tell gcc if a function is cold. The compiler will assume any path
  * directly leading to the call is unlikely.
@@ -433,7 +461,7 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 
 /* Is this type a native word size -- useful for atomic operations */
 #ifndef __native_word
-# define __native_word(t) (sizeof(t) == sizeof(char) || sizeof(t) == sizeof(short) || sizeof(t) == sizeof(int) || sizeof(t) == sizeof(long))
+# define __native_word(t) (sizeof(t) == sizeof(int) || sizeof(t) == sizeof(long))
 #endif
 
 /* Compile time object size, -1 for unknown */
@@ -445,9 +473,18 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
 #endif
 #ifndef __compiletime_error
 # define __compiletime_error(message)
-# define __compiletime_error_fallback(condition) \
+/*
+ * Sparse complains of variable sized arrays due to the temporary variable in
+ * __compiletime_assert. Unfortunately we can't just expand it out to make
+ * sparse see a constant array size without breaking compiletime_assert on old
+ * versions of GCC (e.g. 4.2.4), so hide the array from sparse altogether.
+ */
+# ifndef __CHECKER__
+#  define __compiletime_error_fallback(condition) \
 	do { ((void)sizeof(char[1 - 2 * condition])); } while (0)
-#else
+# endif
+#endif
+#ifndef __compiletime_error_fallback
 # define __compiletime_error_fallback(condition) do { } while (0)
 #endif
 
@@ -473,7 +510,7 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
  * compiler has support to do so.
  */
 #define compiletime_assert(condition, msg) \
-	_compiletime_assert(condition, msg, __compiletime_assert_, __LINE__)
+	_compiletime_assert(condition, msg, __compiletime_assert_, __COUNTER__)
 
 #define compiletime_assert_atomic_type(t)				\
 	compiletime_assert(__native_word(t),				\
@@ -486,28 +523,41 @@ static __always_inline void __write_once_size(volatile void *p, void *res, int s
  * to make the compiler aware of ordering is to put the two invocations of
  * ACCESS_ONCE() in different C statements.
  *
- * ACCESS_ONCE will only work on scalar types. For union types, ACCESS_ONCE
- * on a union member will work as long as the size of the member matches the
- * size of the union and the size is smaller than word size.
- *
- * The major use cases of ACCESS_ONCE used to be (1) Mediating communication
- * between process-level code and irq/NMI handlers, all running on the same CPU,
- * and (2) Ensuring that the compiler does not  fold, spindle, or otherwise
- * mutilate accesses that either do not require ordering or that interact
- * with an explicit memory barrier or atomic instruction that provides the
- * required ordering.
- *
- * If possible use READ_ONCE()/WRITE_ONCE() instead.
+ * This macro does absolutely -nothing- to prevent the CPU from reordering,
+ * merging, or refetching absolutely anything at any time.  Its main intended
+ * use is to mediate communication between process-level code and irq/NMI
+ * handlers, all running on the same CPU.
  */
-#define __ACCESS_ONCE(x) ({ \
-	 __maybe_unused typeof(x) __var = (__force typeof(x)) 0; \
-	(volatile typeof(x) *)&(x); })
-#define ACCESS_ONCE(x) (*__ACCESS_ONCE(x))
+#define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
+
+/**
+ * lockless_dereference() - safely load a pointer for later dereference
+ * @p: The pointer to load
+ *
+ * Similar to rcu_dereference(), but for situations where the pointed-to
+ * object's lifetime is managed by something other than RCU.  That
+ * "something other" might be reference counting or simple immortality.
+ */
+#define lockless_dereference(p) \
+({ \
+	typeof(p) _________p1 = ACCESS_ONCE(p); \
+	smp_read_barrier_depends(); /* Dependency order vs. p above. */ \
+	(_________p1); \
+})
 
 /* Ignore/forbid kprobes attach on very low level functions marked by this attribute: */
 #ifdef CONFIG_KPROBES
 # define __kprobes	__attribute__((__section__(".kprobes.text")))
+# define nokprobe_inline	__always_inline
 #else
 # define __kprobes
+# define nokprobe_inline	inline
 #endif
+
+/*
+ * This is needed in functions which generate the stack canary, see
+ * arch/x86/kernel/smpboot.c::start_secondary() for an example.
+ */
+#define prevent_tail_call_optimization()	mb()
+
 #endif /* __LINUX_COMPILER_H */

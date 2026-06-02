@@ -7,7 +7,6 @@
 */
 
 #include "fuse_i.h"
-#include "fuse.h"
 
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -772,7 +771,7 @@ static int fuse_unlink(struct inode *dir, struct dentry *entry)
 	req->in.numargs = 1;
 	req->in.args[0].size = entry->d_name.len + 1;
 	req->in.args[0].value = entry->d_name.name;
-	fuse_request_send_ex(fc, req, i_size_read(entry->d_inode));
+	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
 	if (!err) {
@@ -811,7 +810,7 @@ static int fuse_rmdir(struct inode *dir, struct dentry *entry)
 	req->in.numargs = 1;
 	req->in.args[0].size = entry->d_name.len + 1;
 	req->in.args[0].value = entry->d_name.name;
-	fuse_request_send_ex(fc, req, i_size_read(entry->d_inode));
+	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
 	if (!err) {
@@ -1267,7 +1266,7 @@ static int fuse_direntplus_link(struct file *file,
 	struct fuse_entry_out *o = &direntplus->entry_out;
 	struct fuse_dirent *dirent = &direntplus->dirent;
 	struct dentry *parent = file->f_path.dentry;
-	struct qstr name = QSTR_INIT(dirent->name, dirent->namelen);
+	struct qstr name = QSTR_INIT((const unsigned char *)dirent->name, dirent->namelen);
 	struct dentry *dentry;
 	struct dentry *alias;
 	struct inode *dir = parent->d_inode;

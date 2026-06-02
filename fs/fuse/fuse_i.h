@@ -10,6 +10,7 @@
 #define _FS_FUSE_I_H
 
 #include <linux/fuse.h>
+#include <linux/idr.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/wait.h>
@@ -121,6 +122,20 @@ enum {
 
 struct fuse_conn;
 
+struct fuse_dev {
+	struct fuse_conn *fc;
+	struct list_head entry;
+};
+
+/**
+ * Reference to lower filesystem file for read/write operations handled in
+ * passthrough mode.
+ */
+struct fuse_passthrough {
+	struct file *filp;
+	struct cred *cred;
+};
+
 /** FUSE specific file data */
 struct fuse_file {
 	/** Fuse connection for this file */
@@ -146,6 +161,9 @@ struct fuse_file {
 
 	/** Entry on inode's write_files list */
 	struct list_head write_entry;
+
+	/** Container for data related to the passthrough functionality */
+	struct fuse_passthrough passthrough;
 
 	/** RB node to be linked on fuse_conn->polled_files */
 	struct rb_node polled_node;
@@ -590,6 +608,15 @@ struct fuse_conn {
 
 	/** Read/write semaphore to hold when accessing sb. */
 	struct rw_semaphore killsb;
+
+	/** Passthrough support for this connection */
+	unsigned int passthrough:1;
+
+	/** IDR for passthrough requests */
+	struct idr passthrough_req;
+
+	/** Protects passthrough_req */
+	spinlock_t passthrough_req_lock;
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -873,5 +900,37 @@ void fuse_write_update_size(struct inode *inode, loff_t pos);
 
 int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
+
+/* passthrough.c */
+int fuse_passthrough_open(struct fuse_dev *fud, u32 lower_fd);
+int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
+			   struct fuse_open_out *openarg);
+void fuse_passthrough_release(struct fuse_passthrough *passthrough);
+ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
+				   const struct iovec *iov, unsigned long nr_segs,
+				   loff_t *ppos);
+ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
+				    const struct iovec *iov, unsigned long nr_segs,
+				    loff_t *ppos);
+ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+
+static inline ssize_t call_read_iter(struct file *file, struct kiocb *kio,
+				     const struct iovec *iov,
+				     unsigned long nr_segs, loff_t pos)
+{
+	return file->f_op->aio_read(kio, iov, nr_segs, pos);
+}
+
+static inline ssize_t call_write_iter(struct file *file, struct kiocb *kio,
+				      const struct iovec *iov,
+				      unsigned long nr_segs, loff_t pos)
+{
+	return file->f_op->aio_write(kio, iov, nr_segs, pos);
+}
+
+static inline int call_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	return file->f_op->mmap(file, vma);
+}
 
 #endif /* _FS_FUSE_I_H */
