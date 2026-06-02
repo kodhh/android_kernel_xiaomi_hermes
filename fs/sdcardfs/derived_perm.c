@@ -32,23 +32,20 @@ static void inherit_derived_state(struct inode *parent, struct inode *child)
 	ci->data->under_android = pi->data->under_android;
 	ci->data->under_cache = pi->data->under_cache;
 	ci->data->under_obb = pi->data->under_obb;
-	set_top(ci, pi->top_data);
 }
 
 /* helper function for derived state */
 void setup_derived_state(struct inode *inode, perm_t perm, userid_t userid,
-					uid_t uid, bool under_android,
-					struct sdcardfs_inode_data *top)
+					uid_t uid)
 {
 	struct sdcardfs_inode_info *info = SDCARDFS_I(inode);
 
 	info->data->perm = perm;
 	info->data->userid = userid;
 	info->data->d_uid = uid;
-	info->data->under_android = under_android;
+	info->data->under_android = false;
 	info->data->under_cache = false;
 	info->data->under_obb = false;
-	set_top(info, top);
 }
 
 /* While renaming, there is a point where we want the path from dentry,
@@ -58,16 +55,17 @@ void get_derived_permission_new(struct dentry *parent, struct dentry *dentry,
 				const struct qstr *name)
 {
 	struct sdcardfs_inode_info *info = SDCARDFS_I(dentry->d_inode);
-	struct sdcardfs_inode_data *parent_data =
-			SDCARDFS_I(parent->d_inode)->data;
+	struct sdcardfs_inode_info *parent_info = SDCARDFS_I(parent->d_inode);
+	struct sdcardfs_inode_data *parent_data = parent_info->data;
 	appid_t appid;
 	unsigned long user_num;
 	int err;
-	struct qstr q_Android = QSTR_LITERAL("Android");
-	struct qstr q_data = QSTR_LITERAL("data");
-	struct qstr q_obb = QSTR_LITERAL("obb");
-	struct qstr q_media = QSTR_LITERAL("media");
-	struct qstr q_cache = QSTR_LITERAL("cache");
+	struct qstr q_Android = QSTR_INIT((const unsigned char *)"Android", 7);
+	struct qstr q_data = QSTR_INIT((const unsigned char *)"data", 4);
+	struct qstr q_sandbox = QSTR_INIT((const unsigned char *)"sandbox", 7);
+	struct qstr q_obb = QSTR_INIT((const unsigned char *)"obb", 3);
+	struct qstr q_media = QSTR_INIT((const unsigned char *)"media", 5);
+	struct qstr q_cache = QSTR_INIT((const unsigned char *)"cache", 5);
 
 	/* By default, each inode inherits from its parent.
 	 * the properties are maintained on its private fields
@@ -80,23 +78,24 @@ void get_derived_permission_new(struct dentry *parent, struct dentry *dentry,
 	inherit_derived_state(parent->d_inode, dentry->d_inode);
 
 	/* Files don't get special labels */
-	if (!S_ISDIR(dentry->d_inode->i_mode))
+	if (!S_ISDIR(dentry->d_inode->i_mode)) {
+		set_top(info, parent_info);
 		return;
+	}
 	/* Derive custom permissions based on parent and current node */
 	switch (parent_data->perm) {
 	case PERM_INHERIT:
 	case PERM_ANDROID_PACKAGE_CACHE:
-		/* Already inherited above */
+		set_top(info, parent_info);
 		break;
 	case PERM_PRE_ROOT:
 		/* Legacy internal layout places users at top level */
 		info->data->perm = PERM_ROOT;
-		err = kstrtoul(name->name, 10, &user_num);
+		err = kstrtoul((const char *)name->name, 10, &user_num);
 		if (err)
 			info->data->userid = 0;
 		else
 			info->data->userid = user_num;
-		set_top(info, info->data);
 		break;
 	case PERM_ROOT:
 		/* Assume masked off by default. */
@@ -104,41 +103,44 @@ void get_derived_permission_new(struct dentry *parent, struct dentry *dentry,
 			/* App-specific directories inside; let anyone traverse */
 			info->data->perm = PERM_ANDROID;
 			info->data->under_android = true;
-			set_top(info, info->data);
+		} else {
+			set_top(info, parent_info);
 		}
 		break;
 	case PERM_ANDROID:
 		if (qstr_case_eq(name, &q_data)) {
 			/* App-specific directories inside; let anyone traverse */
 			info->data->perm = PERM_ANDROID_DATA;
-			set_top(info, info->data);
+		} else if (qstr_case_eq(name, &q_sandbox)) {
+			/* App-specific directories inside; let anyone traverse */
+			info->data->perm = PERM_ANDROID_DATA;
 		} else if (qstr_case_eq(name, &q_obb)) {
 			/* App-specific directories inside; let anyone traverse */
 			info->data->perm = PERM_ANDROID_OBB;
 			info->data->under_obb = true;
-			set_top(info, info->data);
 			/* Single OBB directory is always shared */
 		} else if (qstr_case_eq(name, &q_media)) {
 			/* App-specific directories inside; let anyone traverse */
 			info->data->perm = PERM_ANDROID_MEDIA;
-			set_top(info, info->data);
+		} else {
+			set_top(info, parent_info);
 		}
 		break;
 	case PERM_ANDROID_OBB:
 	case PERM_ANDROID_DATA:
 	case PERM_ANDROID_MEDIA:
 		info->data->perm = PERM_ANDROID_PACKAGE;
-		appid = get_appid(name->name);
-		if (appid != 0 && !is_excluded(name->name, parent_data->userid))
+		appid = get_appid((const char *)name->name);
+		if (appid != 0 && !is_excluded((const char *)name->name, parent_data->userid))
 			info->data->d_uid =
 				multiuser_get_uid(parent_data->userid, appid);
-		set_top(info, info->data);
 		break;
 	case PERM_ANDROID_PACKAGE:
 		if (qstr_case_eq(name, &q_cache)) {
 			info->data->perm = PERM_ANDROID_PACKAGE_CACHE;
 			info->data->under_cache = true;
 		}
+		set_top(info, parent_info);
 		break;
 	}
 }
@@ -161,7 +163,7 @@ static appid_t get_type(const char *name)
 	return AID_MEDIA_RW;
 }
 
-void fixup_lower_ownership(struct dentry *dentry, const char *name)
+void fixup_lower_ownership(struct dentry *dentry, const unsigned char *name)
 {
 	struct path path;
 	struct inode *inode;
@@ -215,7 +217,7 @@ void fixup_lower_ownership(struct dentry *dentry, const char *name)
 		if (S_ISDIR(dentry->d_inode->i_mode))
 			gid = multiuser_get_uid(info_d->userid, AID_MEDIA_RW);
 		else
-			gid = multiuser_get_uid(info_d->userid, get_type(name));
+			gid = multiuser_get_uid(info_d->userid, get_type((const char *)name));
 		break;
 	case PERM_ANDROID_OBB:
 		gid = AID_MEDIA_OBB;
@@ -252,7 +254,7 @@ void fixup_lower_ownership(struct dentry *dentry, const char *name)
 			error = notify_change2(path.mnt, path.dentry, &newattrs);
 		mutex_unlock(&inode->i_mutex);
 		if (error)
-			pr_debug("sdcardfs: Failed to touch up lower fs gid/uid for %s\n", name);
+			pr_debug("sdcardfs: Failed to touch up lower fs gid/uid for %s\n", (const char *)name);
 	}
 	sdcardfs_put_lower_path(dentry, &path);
 }
@@ -349,9 +351,10 @@ int need_graft_path(struct dentry *dentry)
 	struct dentry *parent = dget_parent(dentry);
 	struct sdcardfs_inode_info *parent_info = SDCARDFS_I(parent->d_inode);
 	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
-	struct qstr obb = QSTR_LITERAL("obb");
+	struct qstr obb = QSTR_INIT((const unsigned char *)"obb", 3);
 
-	if (parent_info->data->perm == PERM_ANDROID &&
+	if (!sbi->options.unshared_obb &&
+			parent_info->data->perm == PERM_ANDROID &&
 			qstr_case_eq(&dentry->d_name, &obb)) {
 
 		/* /Android/obb is the base obbpath of DERIVED_UNIFIED */
@@ -413,7 +416,7 @@ int is_base_obbpath(struct dentry *dentry)
 	struct dentry *parent = dget_parent(dentry);
 	struct sdcardfs_inode_info *parent_info = SDCARDFS_I(parent->d_inode);
 	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
-	struct qstr q_obb = QSTR_LITERAL("obb");
+	struct qstr q_obb = QSTR_INIT((const unsigned char *)"obb", 3);
 
 	spin_lock(&SDCARDFS_D(dentry)->lock);
 	if (sbi->options.multiuser) {
@@ -463,5 +466,3 @@ int setup_obb_dentry(struct dentry *dentry, struct path *lower_path)
 	}
 	return err;
 }
-
-

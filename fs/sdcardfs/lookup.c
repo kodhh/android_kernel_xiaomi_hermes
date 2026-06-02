@@ -41,8 +41,6 @@ void sdcardfs_destroy_dentry_cache(void)
 
 void free_dentry_private_data(struct dentry *dentry)
 {
-	if (!dentry || !dentry->d_fsdata)
-		return;
 	kmem_cache_free(sdcardfs_dentry_cachep, dentry->d_fsdata);
 	dentry->d_fsdata = NULL;
 }
@@ -68,7 +66,7 @@ struct inode_data {
 	userid_t id;
 };
 
-static int sdcardfs_inode_test(struct inode *inode, void *candidate_data/*void *candidate_lower_inode*/)
+static int sdcardfs_inode_test(struct inode *inode, void *candidate_data)
 {
 	struct inode *current_lower_inode = sdcardfs_lower_inode(inode);
 	userid_t current_userid = SDCARDFS_I(inode)->data->userid;
@@ -233,7 +231,7 @@ static int sdcardfs_name_match(void *__buf, const char *name, int namelen,
 		loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct sdcardfs_name_data *buf = (struct sdcardfs_name_data *) __buf;
-	struct qstr candidate = QSTR_INIT(name, namelen);
+	struct qstr candidate = QSTR_INIT((const unsigned char *)name, namelen);
 
 	if (qstr_case_eq(buf->to_find, &candidate)) {
 		memcpy(buf->name, name, namelen);
@@ -277,7 +275,7 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 	lower_dir_mnt = lower_parent_path->mnt;
 
 	/* Use vfs_path_lookup to check if the dentry exists or not */
-	err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, name->name, 0,
+	err = vfs_path_lookup(lower_dir_dentry, lower_dir_mnt, (const char *)name->name, 0,
 				&lower_path);
 	/* check for other cases */
 	if (err == -ENOENT) {
@@ -365,7 +363,7 @@ put_name:
 		goto out;
 
 	/* instatiate a new negative dentry */
-	dname.name = name->name;
+	dname.name = (const unsigned char *)name->name;
 	dname.len = name->len;
 
 	/* See if the low-level filesystem might want

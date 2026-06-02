@@ -56,14 +56,14 @@ static unsigned int full_name_case_hash(const unsigned char *name, unsigned int 
 
 static inline void qstr_init(struct qstr *q, const char *name)
 {
-	q->name = name;
-	q->len = strlen(q->name);
+	q->name = (const unsigned char *)name;
+	q->len = strlen(name);
 	q->hash = full_name_case_hash(q->name, q->len);
 }
 
 static inline int qstr_copy(const struct qstr *src, struct qstr *dest)
 {
-	dest->name = kstrdup(src->name, GFP_KERNEL);
+	dest->name = (const unsigned char *)kstrdup((const char *)src->name, GFP_KERNEL);
 	dest->hash_len = src->hash_len;
 	return !!dest->name;
 }
@@ -152,9 +152,9 @@ appid_t is_excluded(const char *key, userid_t user)
  */
 int check_caller_access_to_name(struct inode *parent_node, const struct qstr *name)
 {
-	struct qstr q_autorun = QSTR_LITERAL("autorun.inf");
-	struct qstr q__android_secure = QSTR_LITERAL(".android_secure");
-	struct qstr q_android_secure = QSTR_LITERAL("android_secure");
+	struct qstr q_autorun = QSTR_INIT((const unsigned char *)"autorun.inf", 11);
+	struct qstr q__android_secure = QSTR_INIT((const unsigned char *)".android_secure", 15);
+	struct qstr q_android_secure = QSTR_INIT((const unsigned char *)"android_secure", 14);
 
 	/* Always block security-sensitive files at root */
 	if (parent_node && SDCARDFS_I(parent_node)->data->perm == PERM_ROOT) {
@@ -556,7 +556,7 @@ static void package_details_release(struct config_item *item)
 {
 	struct package_details *package_details = to_package_details(item);
 
-	pr_info("sdcardfs: removing %s\n", package_details->name.name);
+	pr_debug("sdcardfs: removing %s\n", package_details->name.name);
 	remove_packagelist_entry(&package_details->name);
 	kfree(package_details->name.name);
 	kfree(package_details);
@@ -645,6 +645,7 @@ static struct config_item *extension_details_make_item(struct config_group *grou
 		return ERR_PTR(-ENOMEM);
 	}
 	qstr_init(&extension_details->name, tmp);
+	extension_details->num = extensions_value->num;
 	ret = insert_ext_gid_entry(&extension_details->name, extensions_value->num);
 
 	if (ret) {

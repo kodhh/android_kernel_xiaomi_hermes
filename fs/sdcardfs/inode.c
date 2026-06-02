@@ -205,6 +205,7 @@ static int sdcardfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 	struct dentry *lower_dentry;
 	struct vfsmount *lower_mnt;
 	struct dentry *lower_parent_dentry = NULL;
+	struct dentry *parent_dentry = NULL;
 	struct path lower_path;
 	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
 	const struct cred *saved_cred = NULL;
@@ -212,8 +213,8 @@ static int sdcardfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 	int touch_err = 0;
 	struct fs_struct *saved_fs;
 	struct fs_struct *copied_fs;
-	struct qstr q_obb = QSTR_LITERAL("obb");
-	struct qstr q_data = QSTR_LITERAL("data");
+	struct qstr q_obb = QSTR_INIT((const unsigned char *)"obb", 3);
+	struct qstr q_data = QSTR_INIT((const unsigned char *)"data", 4);
 
 	if (!check_caller_access_to_name(dir, &dentry->d_name)) {
 		err = -EACCES;
@@ -227,11 +228,14 @@ static int sdcardfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 		return -ENOMEM;
 
 	/* check disk space */
-	if (!check_min_free_space(dentry, 0, 1)) {
+	parent_dentry = dget_parent(dentry);
+	if (!check_min_free_space(parent_dentry, 0, 1)) {
 		pr_err("sdcardfs: No minimum free space.\n");
 		err = -ENOSPC;
+		dput(parent_dentry);
 		goto out_revert;
 	}
+	dput(parent_dentry);
 
 	/* the lower_dentry is negative here */
 	sdcardfs_get_lower_path(dentry, &lower_path);
@@ -462,76 +466,6 @@ out_eacces:
 	return err;
 }
 
-#if 0
-static int sdcardfs_readlink(struct dentry *dentry, char __user *buf, int bufsiz)
-{
-	int err;
-	struct dentry *lower_dentry;
-	struct path lower_path;
-	/* XXX readlink does not requires overriding credential */
-
-	sdcardfs_get_lower_path(dentry, &lower_path);
-	lower_dentry = lower_path.dentry;
-	if (!lower_dentry->d_inode->i_op ||
-	    !lower_dentry->d_inode->i_op->readlink) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = lower_dentry->d_inode->i_op->readlink(lower_dentry,
-						    buf, bufsiz);
-	if (err < 0)
-		goto out;
-	fsstack_copy_attr_atime(dentry->d_inode, lower_dentry->d_inode);
-
-out:
-	sdcardfs_put_lower_path(dentry, &lower_path);
-	return err;
-}
-#endif
-
-#if 0
-static void *sdcardfs_follow_link(struct dentry *dentry, struct nameidata *nd)
-{
-	char *buf;
-	int len = PAGE_SIZE, err;
-	mm_segment_t old_fs;
-
-	/* This is freed by the put_link method assuming a successful call. */
-	buf = kmalloc(len, GFP_KERNEL);
-	if (!buf) {
-		buf = ERR_PTR(-ENOMEM);
-		goto out;
-	}
-
-	/* read the symlink, and then we will follow it */
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
-	err = sdcardfs_readlink(dentry, buf, len);
-	set_fs(old_fs);
-	if (err < 0) {
-		kfree(buf);
-		buf = ERR_PTR(err);
-	} else {
-		buf[err] = '\0';
-	}
-out:
-	nd_set_link(nd, buf);
-	return NULL;
-}
-#endif
-
-#if 0
-/* this @nd *IS* still used */
-static void sdcardfs_put_link(struct dentry *dentry, struct nameidata *nd,
-			    void *cookie)
-{
-	char *buf = nd_get_link(nd);
-	if (!IS_ERR(buf))	/* free the char* */
-		kfree(buf);
-}
-#endif
-
 static int sdcardfs_permission_wrn(struct inode *inode, int mask)
 {
 	WARN_RATELIMIT(1, "sdcardfs does not support permission. Use permission2.\n");
@@ -731,8 +665,8 @@ out_err:
 	return err;
 }
 
-static int sdcardfs_fillattr(struct vfsmount *mnt,
-				struct inode *inode, struct kstat *stat)
+static int sdcardfs_fillattr(struct vfsmount *mnt, struct inode *inode,
+				struct kstat *lower_stat, struct kstat *stat)
 {
 	struct sdcardfs_inode_info *info = SDCARDFS_I(inode);
 	struct sdcardfs_inode_data *top = top_data_get(info);
@@ -748,12 +682,12 @@ static int sdcardfs_fillattr(struct vfsmount *mnt,
 	stat->uid = make_kuid(&init_user_ns, top->d_uid);
 	stat->gid = make_kgid(&init_user_ns, get_gid(mnt, sb, top));
 	stat->rdev = inode->i_rdev;
-	stat->size = i_size_read(inode);
-	stat->atime = inode->i_atime;
-	stat->mtime = inode->i_mtime;
-	stat->ctime = inode->i_ctime;
-	stat->blksize = (1 << inode->i_blkbits);
-	stat->blocks = inode->i_blocks;
+	stat->size = lower_stat->size;
+	stat->atime = lower_stat->atime;
+	stat->mtime = lower_stat->mtime;
+	stat->ctime = lower_stat->ctime;
+	stat->blksize = lower_stat->blksize;
+	stat->blocks = lower_stat->blocks;
 	data_put(top);
 	return 0;
 }
@@ -779,8 +713,7 @@ static int sdcardfs_getattr(struct vfsmount *mnt, struct dentry *dentry,
 		goto out;
 	sdcardfs_copy_and_fix_attrs(dentry->d_inode,
 			      lower_path.dentry->d_inode);
-	err = sdcardfs_fillattr(mnt, dentry->d_inode, stat);
-	stat->blocks = lower_stat.blocks;
+	err = sdcardfs_fillattr(mnt, dentry->d_inode, &lower_stat, stat);
 out:
 	sdcardfs_put_lower_path(dentry, &lower_path);
 	return err;
@@ -789,13 +722,6 @@ out:
 const struct inode_operations sdcardfs_symlink_iops = {
 	.permission2	= sdcardfs_permission,
 	.setattr2	= sdcardfs_setattr,
-	/* XXX Following operations are implemented,
-	 *     but FUSE(sdcard) or FAT does not support them
-	 *     These methods are *NOT* perfectly tested.
-	.readlink	= sdcardfs_readlink,
-	.follow_link	= sdcardfs_follow_link,
-	.put_link	= sdcardfs_put_link,
-	 */
 };
 
 const struct inode_operations sdcardfs_dir_iops = {
