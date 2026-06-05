@@ -17,6 +17,7 @@
 #include <linux/fsnotify.h>
 #include <linux/dcache.h>
 #include <linux/slab.h>
+#include <linux/posix_acl_xattr.h>
 #include <linux/vmalloc.h>
 #include <linux/crc32c.h>
 
@@ -1742,7 +1743,10 @@ int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
 		struct posix_acl *acl)
 {
 #if IS_ENABLED(CONFIG_FS_POSIX_ACL)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0)
+	struct dentry *dentry;
+	char *name;
+	void *value = NULL;
+	size_t size = 0;
 	int ret;
 
 	if (!IS_POSIXACL(inode))
@@ -1751,20 +1755,46 @@ int ksmbd_vfs_set_posix_acl(struct inode *inode, int type,
 		return -EACCES;
 	if (!inode_owner_or_capable(inode))
 		return -EPERM;
-	if (!acl)
-		return -EINVAL;
 
-	ret = posix_acl_valid(acl);
-	if (ret)
-		return ret;
-	return set_posix_acl(inode, type, acl);
-#else
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0)
-	return set_posix_acl(&init_user_ns, inode, type, acl);
-#else
-	return set_posix_acl(inode, type, acl);
-#endif
-#endif
+	switch (type) {
+	case ACL_TYPE_ACCESS:
+		name = XATTR_NAME_POSIX_ACL_ACCESS;
+		break;
+	case ACL_TYPE_DEFAULT:
+		name = XATTR_NAME_POSIX_ACL_DEFAULT;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	dentry = d_find_alias(inode);
+	if (!dentry)
+		return -ENOENT;
+
+	if (acl) {
+		ret = posix_acl_valid(acl);
+		if (ret) {
+			dput(dentry);
+			return ret;
+		}
+		size = posix_acl_xattr_size(acl->a_count);
+		value = kmalloc(size, GFP_KERNEL);
+		if (!value) {
+			dput(dentry);
+			return -ENOMEM;
+		}
+		ret = posix_acl_to_xattr(&init_user_ns, acl, value, size);
+		if (ret < 0) {
+			kfree(value);
+			dput(dentry);
+			return ret;
+		}
+	}
+
+	ret = vfs_setxattr(dentry, name, value, size, 0);
+	kfree(value);
+	dput(dentry);
+	return ret;
 #else
 	return -EOPNOTSUPP;
 #endif
