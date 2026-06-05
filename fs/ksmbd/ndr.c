@@ -91,7 +91,12 @@ static int ndr_write_string(struct ndr *n, void *value, size_t sz)
 
 static int ndr_read_string(struct ndr *n, void *value, size_t sz)
 {
-	int len = strnlen(PAYLOAD_HEAD(n), sz);
+	int len;
+
+	if (n->offset >= n->length)
+		return -EINVAL;
+
+	len = strnlen(PAYLOAD_HEAD(n), min_t(size_t, sz, n->length - n->offset));
 
 	memcpy(value, PAYLOAD_HEAD(n), len);
 	len++;
@@ -102,36 +107,42 @@ static int ndr_read_string(struct ndr *n, void *value, size_t sz)
 
 static int ndr_read_bytes(struct ndr *n, void *value, size_t sz)
 {
+	if (n->offset + sz > n->length)
+		return -EINVAL;
+
 	memcpy(value, PAYLOAD_HEAD(n), sz);
 	n->offset += sz;
 	return 0;
 }
 
-static __u16 ndr_read_int16(struct ndr *n)
+static int ndr_read_int16(struct ndr *n, __u16 *result)
 {
-	__u16 ret;
+	if (n->offset + sizeof(__u16) > n->length)
+		return -EINVAL;
 
-	ret = le16_to_cpu(*(__le16 *)PAYLOAD_HEAD(n));
+	*result = le16_to_cpu(*(__le16 *)PAYLOAD_HEAD(n));
 	n->offset += sizeof(__u16);
-	return ret;
+	return 0;
 }
 
-static __u32 ndr_read_int32(struct ndr *n)
+static int ndr_read_int32(struct ndr *n, __u32 *result)
 {
-	__u32 ret;
+	if (n->offset + sizeof(__u32) > n->length)
+		return -EINVAL;
 
-	ret = le32_to_cpu(*(__le32 *)PAYLOAD_HEAD(n));
+	*result = le32_to_cpu(*(__le32 *)PAYLOAD_HEAD(n));
 	n->offset += sizeof(__u32);
-	return ret;
+	return 0;
 }
 
-static __u64 ndr_read_int64(struct ndr *n)
+static int ndr_read_int64(struct ndr *n, __u64 *result)
 {
-	__u64 ret;
+	if (n->offset + sizeof(__u64) > n->length)
+		return -EINVAL;
 
-	ret = le64_to_cpu(*(__le64 *)PAYLOAD_HEAD(n));
+	*result = le64_to_cpu(*(__le64 *)PAYLOAD_HEAD(n));
 	n->offset += sizeof(__u64);
-	return ret;
+	return 0;
 }
 
 int ndr_encode_dos_attr(struct ndr *n, struct xattr_dos_attrib *da)
@@ -159,8 +170,9 @@ int ndr_encode_dos_attr(struct ndr *n, struct xattr_dos_attrib *da)
 		ndr_write_int32(n, da->ea_size);
 		ndr_write_int64(n, da->size);
 		ndr_write_int64(n, da->alloc_size);
-	} else
+	} else {
 		ndr_write_int64(n, da->itime);
+	}
 	ndr_write_int64(n, da->create_time);
 	if (da->version == 3)
 		ndr_write_int64(n, da->change_time);
@@ -170,35 +182,66 @@ int ndr_encode_dos_attr(struct ndr *n, struct xattr_dos_attrib *da)
 int ndr_decode_dos_attr(struct ndr *n, struct xattr_dos_attrib *da)
 {
 	char hex_attr[12] = {0};
-	int version2;
+	int ret;
+	__u16 version;
+	__u32 tmp32;
+	__u64 tmp64;
 
 	n->offset = 0;
-	ndr_read_string(n, hex_attr, n->length - n->offset);
-	da->version = ndr_read_int16(n);
+	ret = ndr_read_string(n, hex_attr, n->length - n->offset);
+	if (ret)
+		return ret;
+
+	ret = ndr_read_int16(n, &version);
+	if (ret)
+		return ret;
+	da->version = version;
 
 	if (da->version != 3 && da->version != 4) {
 		ksmbd_err("v%d version is not supported\n", da->version);
 		return -EINVAL;
 	}
 
-	version2 = ndr_read_int32(n);
-	if (da->version != version2) {
+	ret = ndr_read_int32(n, &tmp32);
+	if (ret)
+		return ret;
+	if (da->version != tmp32) {
 		ksmbd_err("ndr version mismatched(version: %d, version2: %d)\n",
-				da->version, version2);
+				da->version, tmp32);
 		return -EINVAL;
 	}
 
-	ndr_read_int32(n);
-	da->attr = ndr_read_int32(n);
+	ret = ndr_read_int32(n, &tmp32);
+	if (ret)
+		return ret;
+	ret = ndr_read_int32(n, &tmp32);
+	if (ret)
+		return ret;
+	da->attr = tmp32;
+
 	if (da->version == 4) {
-		da->itime = ndr_read_int64(n);
-		da->create_time = ndr_read_int64(n);
+		ret = ndr_read_int64(n, &da->itime);
+		if (ret)
+			return ret;
+		ret = ndr_read_int64(n, &da->create_time);
+		if (ret)
+			return ret;
 	} else {
-		ndr_read_int32(n);
-		ndr_read_int64(n);
-		ndr_read_int64(n);
-		da->create_time = ndr_read_int64(n);
-		ndr_read_int64(n);
+		ret = ndr_read_int32(n, &tmp32);
+		if (ret)
+			return ret;
+		ret = ndr_read_int64(n, &tmp64);
+		if (ret)
+			return ret;
+		ret = ndr_read_int64(n, &tmp64);
+		if (ret)
+			return ret;
+		ret = ndr_read_int64(n, &da->create_time);
+		if (ret)
+			return ret;
+		ret = ndr_read_int64(n, &tmp64);
+		if (ret)
+			return ret;
 	}
 
 	return 0;
@@ -248,15 +291,17 @@ int ndr_encode_posix_acl(struct ndr *n, struct inode *inode,
 		/* ACL ACCESS */
 		ndr_write_int32(n, ref_id);
 		ref_id += 4;
-	} else
+	} else {
 		ndr_write_int32(n, 0);
+	}
 
 	if (def_acl) {
 		/* DEFAULT ACL ACCESS */
 		ndr_write_int32(n, ref_id);
 		ref_id += 4;
-	} else
+	} else {
 		ndr_write_int32(n, 0);
+	}
 
 	ndr_write_int64(n, from_kuid(&init_user_ns, inode->i_uid));
 	ndr_write_int64(n, from_kgid(&init_user_ns, inode->i_gid));
@@ -300,45 +345,74 @@ int ndr_encode_v4_ntacl(struct ndr *n, struct xattr_ntacl *acl)
 
 int ndr_decode_v4_ntacl(struct ndr *n, struct xattr_ntacl *acl)
 {
-	int version2;
+	int ret;
+	__u16 version;
+	__u32 tmp32;
+	__u64 tmp64;
 
 	n->offset = 0;
-	acl->version = ndr_read_int16(n);
+	ret = ndr_read_int16(n, &version);
+	if (ret)
+		return ret;
+	acl->version = version;
+
 	if (acl->version != 4) {
 		ksmbd_err("v%d version is not supported\n", acl->version);
 		return -EINVAL;
 	}
 
-	version2 = ndr_read_int32(n);
-	if (acl->version != version2) {
+	ret = ndr_read_int32(n, &tmp32);
+	if (ret)
+		return ret;
+	if (acl->version != tmp32) {
 		ksmbd_err("ndr version mismatched(version: %d, version2: %d)\n",
-				acl->version, version2);
+				acl->version, tmp32);
 		return -EINVAL;
 	}
 
 	/* Read Level */
-	ndr_read_int16(n);
+	ret = ndr_read_int16(n, &version);
+	if (ret)
+		return ret;
 	/* Read Ref Id */
-	ndr_read_int32(n);
-	acl->hash_type = ndr_read_int16(n);
-	ndr_read_bytes(n, acl->hash, XATTR_SD_HASH_SIZE);
+	ret = ndr_read_int32(n, &tmp32);
+	if (ret)
+		return ret;
+	ret = ndr_read_int16(n, &version);
+	if (ret)
+		return ret;
+	acl->hash_type = version;
+	ret = ndr_read_bytes(n, acl->hash, XATTR_SD_HASH_SIZE);
+	if (ret)
+		return ret;
 
-	ndr_read_bytes(n, acl->desc, 10);
+	ret = ndr_read_bytes(n, acl->desc, 10);
+	if (ret)
+		return ret;
 	if (strncmp(acl->desc, "posix_acl", 9)) {
-		ksmbd_err("Invalid acl desciption : %s\n", acl->desc);
+		ksmbd_err("Invalid acl description : %s\n", acl->desc);
 		return -EINVAL;
 	}
 
 	/* Read Time */
-	ndr_read_int64(n);
+	ret = ndr_read_int64(n, &tmp64);
+	if (ret)
+		return ret;
 	/* Read Posix ACL hash */
-	ndr_read_bytes(n, acl->posix_acl_hash, XATTR_SD_HASH_SIZE);
+	ret = ndr_read_bytes(n, acl->posix_acl_hash, XATTR_SD_HASH_SIZE);
+	if (ret)
+		return ret;
 	acl->sd_size = n->length - n->offset;
 	acl->sd_buf = kzalloc(acl->sd_size, GFP_KERNEL);
 	if (!acl->sd_buf)
 		return -ENOMEM;
 
-	ndr_read_bytes(n, acl->sd_buf, acl->sd_size);
+	ret = ndr_read_bytes(n, acl->sd_buf, acl->sd_size);
+	if (ret) {
+		kfree(acl->sd_buf);
+		acl->sd_buf = NULL;
+		return ret;
+	}
 
 	return 0;
 }

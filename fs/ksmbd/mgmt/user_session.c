@@ -6,6 +6,10 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/rwsem.h>
+#include <linux/version.h>
+#if 0
+#include <linux/xarray.h>
+#endif
 
 #include "ksmbd_ida.h"
 #include "user_session.h"
@@ -14,7 +18,6 @@
 #include "../transport_ipc.h"
 #include "../connection.h"
 #include "../buffer_pool.h"
-#include "../ksmbd_server.h" /* FIXME */
 #include "../vfs_cache.h"
 
 static struct ksmbd_ida *session_ida;
@@ -34,7 +37,6 @@ static void free_channel_list(struct ksmbd_session *sess)
 	struct channel *chann;
 	struct list_head *tmp, *t;
 
-	spin_lock(&sess->chann_lock);
 	list_for_each_safe(tmp, t, &sess->ksmbd_chann_list) {
 		chann = list_entry(tmp, struct channel, chann_list);
 		if (chann) {
@@ -42,7 +44,6 @@ static void free_channel_list(struct ksmbd_session *sess)
 			kfree(chann);
 		}
 	}
-	spin_unlock(&sess->chann_lock);
 }
 
 static void __session_rpc_close(struct ksmbd_session *sess,
@@ -104,7 +105,7 @@ int ksmbd_session_rpc_open(struct ksmbd_session *sess, char *rpc_name)
 	if (!method)
 		return -EINVAL;
 
-	entry = ksmbd_alloc(sizeof(struct ksmbd_session_rpc));
+	entry = kzalloc(sizeof(struct ksmbd_session_rpc), GFP_KERNEL);
 	if (!entry)
 		return -EINVAL;
 
@@ -281,7 +282,7 @@ static struct ksmbd_session *__session_create(int protocol)
 	struct ksmbd_session *sess;
 	int ret;
 
-	sess = ksmbd_alloc(sizeof(struct ksmbd_session));
+	sess = kzalloc(sizeof(struct ksmbd_session), GFP_KERNEL);
 	if (!sess)
 		return NULL;
 
@@ -290,10 +291,13 @@ static struct ksmbd_session *__session_create(int protocol)
 
 	set_session_flag(sess, protocol);
 	INIT_LIST_HEAD(&sess->sessions_entry);
+#if 0
+	xa_init(&sess->tree_conns);
+#else
 	INIT_LIST_HEAD(&sess->tree_conn_list);
+#endif
 	INIT_LIST_HEAD(&sess->ksmbd_chann_list);
 	INIT_LIST_HEAD(&sess->rpc_handle_list);
-	spin_lock_init(&sess->chann_lock);
 	sess->sequence_number = 1;
 	atomic_set(&sess->refcnt, 1);
 
@@ -319,9 +323,9 @@ static struct ksmbd_session *__session_create(int protocol)
 		goto error;
 
 	if (protocol == CIFDS_SESSION_FLAG_SMB2) {
-		down_read(&sessions_table_lock);
+		down_write(&sessions_table_lock);
 		hash_add(sessions_table, &sess->hlist, sess->id);
-		up_read(&sessions_table_lock);
+		up_write(&sessions_table_lock);
 	}
 	return sess;
 

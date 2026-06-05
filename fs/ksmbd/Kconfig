@@ -1,19 +1,19 @@
 config SMB_SERVER
 	tristate "SMB server support (EXPERIMENTAL)"
 	depends on INET
+	depends on FILE_LOCKING
 	select NLS
 	select NLS_UTF8
 	select CRYPTO
 	select CRYPTO_MD4
 	select CRYPTO_MD5
 	select CRYPTO_HMAC
-	select CRYPTO_ARC4
 	select CRYPTO_ECB
 	select CRYPTO_DES
 	select CRYPTO_SHA256
 	select CRYPTO_CMAC
 	select CRYPTO_SHA512
-	select CRYPTO_AEAD
+	select CRYPTO_AEAD2
 	select CRYPTO_CCM
 	select CRYPTO_GCM
 	default n
@@ -33,7 +33,7 @@ config SMB_SERVER
 	  available via README file
 	  (https://github.com/cifsd-team/cifsd-tools/blob/master/README).
 
-	  ksmbd kernel server includes support for auto-negotiation,
+	  cifsd kernel server includes support for auto-negotiation,
 	  Secure negotiate, Pre-authentication integrity, oplock/lease,
 	  compound requests, multi-credit, packet signing, RDMA(smbdirect),
 	  smb3 encryption, copy-offload, secure per-user session

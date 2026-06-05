@@ -8,7 +8,6 @@
 #include "user_config.h"
 #include "../buffer_pool.h"
 #include "../transport_ipc.h"
-#include "../ksmbd_server.h" /* FIXME */
 
 struct ksmbd_user *ksmbd_login_user(const char *account)
 {
@@ -32,7 +31,7 @@ struct ksmbd_user *ksmbd_alloc_user(struct ksmbd_login_response *resp)
 {
 	struct ksmbd_user *user = NULL;
 
-	user = ksmbd_alloc(sizeof(struct ksmbd_user));
+	user = kmalloc(sizeof(struct ksmbd_user), GFP_KERNEL);
 	if (!user)
 		return NULL;
 
@@ -41,7 +40,7 @@ struct ksmbd_user *ksmbd_alloc_user(struct ksmbd_login_response *resp)
 	user->gid = resp->gid;
 	user->uid = resp->uid;
 	user->passkey_sz = resp->hash_sz;
-	user->passkey = ksmbd_alloc(resp->hash_sz);
+	user->passkey = kmalloc(resp->hash_sz, GFP_KERNEL);
 	if (user->passkey)
 		memcpy(user->passkey, resp->hash, resp->hash_sz);
 

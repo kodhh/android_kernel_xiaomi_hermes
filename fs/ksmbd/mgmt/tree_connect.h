@@ -8,12 +8,10 @@
 
 #include <linux/hashtable.h>
 
-#include "../ksmbd_server.h" /* FIXME */
+#include "../ksmbd_server.h"
 
 struct ksmbd_share_config;
 struct ksmbd_user;
-
-#define KSMBD_TREE_CONN_STATUS_DISCONNECT	(1 << 0)
 
 struct ksmbd_tree_connect {
 	int				id;
@@ -23,7 +21,6 @@ struct ksmbd_tree_connect {
 	struct ksmbd_user		*user;
 
 	struct list_head		list;
-	unsigned int			t_state;
 
 	int				maximal_access;
 	bool				posix_extensions;

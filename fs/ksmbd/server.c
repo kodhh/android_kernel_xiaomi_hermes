@@ -7,7 +7,6 @@
 #include "glob.h"
 #include "oplock.h"
 #include "misc.h"
-#include "compat.h"
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 #include <linux/sched/signal.h>
 #endif
@@ -89,7 +88,7 @@ char *ksmbd_work_group(void)
 
 /**
  * check_conn_state() - check state of server thread connection
- * @ksmbd_work:     smb work containing server thread information
+ * @work:     smb work containing server thread information
  *
  * Return:	0 on valid connection, otherwise 1 to reconnect
  */
@@ -98,21 +97,18 @@ static inline int check_conn_state(struct ksmbd_work *work)
 	struct smb_hdr *rsp_hdr;
 
 	if (ksmbd_conn_exiting(work) || ksmbd_conn_need_reconnect(work)) {
-		rsp_hdr = RESPONSE_BUF(work);
+		rsp_hdr = work->response_buf;
 		rsp_hdr->Status.CifsError = STATUS_CONNECTION_DISCONNECTED;
 		return 1;
 	}
 	return 0;
 }
 
-/* @FIXME what a mess... god help. */
-
 #define TCP_HANDLER_CONTINUE	0
 #define TCP_HANDLER_ABORT	1
 
-static int __process_request(struct ksmbd_work *work,
-			     struct ksmbd_conn *conn,
-			     uint16_t *cmd)
+static int __process_request(struct ksmbd_work *work, struct ksmbd_conn *conn,
+		uint16_t *cmd)
 {
 	struct smb_version_cmds *cmds;
 	uint16_t command;
@@ -165,16 +161,16 @@ andx_again:
 }
 
 static void __handle_ksmbd_work(struct ksmbd_work *work,
-				struct ksmbd_conn *conn)
+		struct ksmbd_conn *conn)
 {
-	uint16_t command = 0;
+	u16 command = 0;
 	int rc;
 
 	if (conn->ops->allocate_rsp_buf(work))
 		return;
 
 	if (conn->ops->is_transform_hdr &&
-		conn->ops->is_transform_hdr(REQUEST_BUF(work))) {
+	    conn->ops->is_transform_hdr(work->request_buf)) {
 		rc = conn->ops->decrypt_req(work);
 		if (rc < 0) {
 			conn->ops->set_rsp_status(work, STATUS_DATA_ERROR);
@@ -229,7 +225,7 @@ static void __handle_ksmbd_work(struct ksmbd_work *work,
 		}
 
 		if (work->sess && (work->sess->sign ||
-		     smb3_11_final_sess_setup_resp(work) ||
+		    smb3_11_final_sess_setup_resp(work) ||
 		     conn->ops->is_sign_req(work, command)))
 			conn->ops->set_sign_rsp(work);
 	} while (is_chained_smb2_message(work));
@@ -240,7 +236,7 @@ static void __handle_ksmbd_work(struct ksmbd_work *work,
 send:
 	smb3_preauth_hash_rsp(work);
 	if (work->sess && work->sess->enc && work->encrypted &&
-		conn->ops->encrypt_resp) {
+	    conn->ops->encrypt_resp) {
 		rc = conn->ops->encrypt_resp(work);
 		if (rc < 0) {
 			conn->ops->set_rsp_status(work, STATUS_DATA_ERROR);
@@ -253,7 +249,7 @@ send:
 
 /**
  * handle_ksmbd_work() - process pending smb work requests
- * @ksmbd_work:	smb work containing request command buffer
+ * @wk:	smb work containing request command buffer
  *
  * called by kworker threads to processing remaining smb work requests
  */
@@ -421,9 +417,8 @@ int server_queue_ctrl_reset_work(void)
 	return __queue_ctrl_work(SERVER_CTRL_TYPE_RESET);
 }
 
-static ssize_t stats_show(struct class *class,
-			  struct class_attribute *attr,
-			  char *buf)
+static ssize_t stats_show(struct class *class, struct class_attribute *attr,
+		char *buf)
 {
 	/*
 	 * Inc this each time you change stats output format,
@@ -448,9 +443,8 @@ static ssize_t stats_show(struct class *class,
 }
 
 static ssize_t kill_server_store(struct class *class,
-				 struct class_attribute *attr,
-				 const char *buf,
-				 size_t len)
+		struct class_attribute *attr, const char *buf,
+		size_t len)
 {
 	if (!sysfs_streq(buf, "hard"))
 		return len;
@@ -469,9 +463,8 @@ static const char * const debug_type_strings[] = {"smb", "auth", "vfs",
 						"oplock", "ipc", "conn",
 						"rdma"};
 
-static ssize_t debug_show(struct class *class,
-			  struct class_attribute *attr,
-			  char *buf)
+static ssize_t debug_show(struct class *class, struct class_attribute *attr,
+		char *buf)
 {
 	ssize_t sz = 0;
 	int i, pos = 0;
@@ -489,16 +482,13 @@ static ssize_t debug_show(struct class *class,
 					debug_type_strings[i]);
 		}
 		sz += pos;
-
 	}
 	sz += scnprintf(buf + sz, PAGE_SIZE - sz, "\n");
 	return sz;
 }
 
-static ssize_t debug_store(struct class *class,
-			   struct class_attribute *attr,
-			   const char *buf,
-			   size_t len)
+static ssize_t debug_store(struct class *class, struct class_attribute *attr,
+		const char *buf, size_t len)
 {
 	int i;
 
@@ -543,10 +533,10 @@ static struct class ksmbd_control_class = {
 };
 #else
 static struct class_attribute ksmbd_control_class_attrs[] = {
-	__ATTR_RO(stats),
-	__ATTR_WO(kill_server),
-	__ATTR_RW(debug),
-	__ATTR_NULL,
+	__ATTR(stats, 0444, stats_show, NULL),
+	__ATTR(kill_server, 0222, NULL, kill_server_store),
+	__ATTR(debug, 0664, debug_show, debug_store),
+	{},
 };
 
 static struct class ksmbd_control_class = {
@@ -587,44 +577,57 @@ static int __init ksmbd_server_init(void)
 
 	ret = server_conf_init();
 	if (ret)
-		return ret;
+		goto err_unregister;
 
 	ret = ksmbd_init_buffer_pools();
 	if (ret)
-		return ret;
+		goto err_unregister;
 
 	ret = ksmbd_init_session_table();
 	if (ret)
-		goto error;
+		goto err_destroy_pools;
 
 	ret = ksmbd_ipc_init();
 	if (ret)
-		goto error;
+		goto err_free_session_table;
 
 	ret = ksmbd_init_global_file_table();
 	if (ret)
-		goto error;
+		goto err_ipc_release;
 
 	ret = ksmbd_inode_hash_init();
 	if (ret)
-		goto error;
+		goto err_destroy_file_table;
 
 	ret = ksmbd_crypto_create();
 	if (ret)
-		goto error;
+		goto err_release_inode_hash;
 
 	ret = ksmbd_workqueue_init();
 	if (ret)
-		goto error;
+		goto err_crypto_destroy;
 	return 0;
 
-error:
-	ksmbd_server_shutdown();
+err_crypto_destroy:
+	ksmbd_crypto_destroy();
+err_release_inode_hash:
+	ksmbd_release_inode_hash();
+err_destroy_file_table:
+	ksmbd_free_global_file_table();
+err_ipc_release:
+	ksmbd_ipc_release();
+err_free_session_table:
+	ksmbd_free_session_table();
+err_destroy_pools:
+	ksmbd_destroy_buffer_pools();
+err_unregister:
+	class_unregister(&ksmbd_control_class);
+
 	return ret;
 }
 
 /**
- * exit_smb_server() - shutdown forker thread and free memory at module exit
+ * ksmbd_server_exit() - shutdown forker thread and free memory at module exit
  */
 static void __exit ksmbd_server_exit(void)
 {
@@ -636,7 +639,6 @@ MODULE_AUTHOR("Namjae Jeon <linkinjeon@kernel.org>");
 MODULE_VERSION(KSMBD_VERSION);
 MODULE_DESCRIPTION("Linux kernel CIFS/SMB SERVER");
 MODULE_LICENSE("GPL");
-MODULE_SOFTDEP("pre: arc4");
 MODULE_SOFTDEP("pre: ecb");
 MODULE_SOFTDEP("pre: hmac");
 MODULE_SOFTDEP("pre: md4");
@@ -646,7 +648,7 @@ MODULE_SOFTDEP("pre: aes");
 MODULE_SOFTDEP("pre: cmac");
 MODULE_SOFTDEP("pre: sha256");
 MODULE_SOFTDEP("pre: sha512");
-MODULE_SOFTDEP("pre: aead");
+MODULE_SOFTDEP("pre: aead2");
 MODULE_SOFTDEP("pre: ccm");
 MODULE_SOFTDEP("pre: gcm");
 module_init(ksmbd_server_init)

@@ -115,11 +115,7 @@ static int register_wm_size_class(size_t sz)
 {
 	struct wm_list *l, *nl;
 
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(5, 0, 0)
-	nl = __alloc(sizeof(struct wm_list), GFP_KERNEL);
-#else
-	nl = kvmalloc(sizeof(struct wm_list), GFP_KERNEL);
-#endif
+	nl = kmalloc(sizeof(struct wm_list), GFP_KERNEL);
 	if (!nl)
 		return -ENOMEM;
 
@@ -362,8 +358,7 @@ int ksmbd_init_buffer_pools(void)
 		goto out;
 
 	filp_cache = kmem_cache_create("ksmbd_file_cache",
-					sizeof(struct ksmbd_file), 0,
-					SLAB_HWCACHE_ALIGN, NULL);
+			sizeof(struct ksmbd_file), 0, SLAB_HWCACHE_ALIGN, NULL);
 	if (!filp_cache)
 		goto out;
 

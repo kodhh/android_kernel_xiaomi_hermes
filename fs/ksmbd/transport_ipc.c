@@ -15,7 +15,6 @@
 #include <linux/workqueue.h>
 
 #include "vfs_cache.h"
-#include "compat.h"
 #include "transport_ipc.h"
 #include "buffer_pool.h"
 #include "server.h"
@@ -28,9 +27,6 @@
 #include "mgmt/ksmbd_ida.h"
 #include "connection.h"
 #include "transport_tcp.h"
-
-/* @FIXME fix this code */
-extern int get_protocol_idx(char *str);
 
 #define IPC_WAIT_TIMEOUT	(2 * HZ)
 
@@ -79,8 +75,7 @@ struct ipc_msg_table_entry {
 static struct delayed_work ipc_timer_work;
 
 static int handle_startup_event(struct sk_buff *skb, struct genl_info *info);
-static int handle_unsupported_event(struct sk_buff *skb,
-				    struct genl_info *info);
+static int handle_unsupported_event(struct sk_buff *skb, struct genl_info *info);
 static int handle_generic_event(struct sk_buff *skb, struct genl_info *info);
 static int ksmbd_ipc_heartbeat_request(void);
 
@@ -204,23 +199,14 @@ static struct genl_family ksmbd_genl_family = {
 	.hdrsize	= 0,
 	.maxattr	= KSMBD_EVENT_MAX,
 	.netnsok	= true,
-	.module		= THIS_MODULE,
 };
 
 static void ksmbd_nl_init_fixup(void)
 {
 	int i;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
-	for (i = 0; i < ARRAY_SIZE(ksmbd_genl_ops); i++)
-		ksmbd_genl_ops[i].validate = GENL_DONT_VALIDATE_STRICT |
-						GENL_DONT_VALIDATE_DUMP;
-
-	ksmbd_genl_family.policy = ksmbd_nl_policy;
-#else
 	for (i = 0; i < ARRAY_SIZE(ksmbd_genl_ops); i++)
 		ksmbd_genl_ops[i].policy = ksmbd_nl_policy;
-#endif
 }
 
 static int rpc_context_flags(struct ksmbd_session *sess)
@@ -396,8 +382,7 @@ out:
 	return ret;
 }
 
-static int handle_unsupported_event(struct sk_buff *skb,
-				    struct genl_info *info)
+static int handle_unsupported_event(struct sk_buff *skb, struct genl_info *info)
 {
 	ksmbd_err("Unknown IPC event: %d, ignore.\n", info->genlhdr->cmd);
 	return -EINVAL;
@@ -464,8 +449,7 @@ out:
 	return ret;
 }
 
-static void *ipc_msg_send_request(struct ksmbd_ipc_msg *msg,
-				  unsigned int handle)
+static void *ipc_msg_send_request(struct ksmbd_ipc_msg *msg, unsigned int handle)
 {
 	struct ipc_msg_table_entry entry;
 	int ret;
@@ -565,9 +549,9 @@ ksmbd_ipc_spnego_authen_request(const char *spnego_blob, int blob_len)
 
 struct ksmbd_tree_connect_response *
 ksmbd_ipc_tree_connect_request(struct ksmbd_session *sess,
-			       struct ksmbd_share_config *share,
-			       struct ksmbd_tree_connect *tree_conn,
-			       struct sockaddr *peer_addr)
+		struct ksmbd_share_config *share,
+		struct ksmbd_tree_connect *tree_conn,
+		struct sockaddr *peer_addr)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_tree_connect_request *req;
@@ -611,7 +595,7 @@ ksmbd_ipc_tree_connect_request(struct ksmbd_session *sess,
 }
 
 int ksmbd_ipc_tree_disconnect_request(unsigned long long session_id,
-				      unsigned long long connect_id)
+		unsigned long long connect_id)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_tree_disconnect_request *req;
@@ -686,8 +670,7 @@ ksmbd_ipc_share_config_request(const char *name)
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_open(struct ksmbd_session *sess,
-					 int handle)
+struct ksmbd_rpc_command *ksmbd_rpc_open(struct ksmbd_session *sess, int handle)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -709,8 +692,7 @@ struct ksmbd_rpc_command *ksmbd_rpc_open(struct ksmbd_session *sess,
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_close(struct ksmbd_session *sess,
-					  int handle)
+struct ksmbd_rpc_command *ksmbd_rpc_close(struct ksmbd_session *sess, int handle)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -732,10 +714,8 @@ struct ksmbd_rpc_command *ksmbd_rpc_close(struct ksmbd_session *sess,
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_write(struct ksmbd_session *sess,
-					  int handle,
-					  void *payload,
-					  size_t payload_sz)
+struct ksmbd_rpc_command *ksmbd_rpc_write(struct ksmbd_session *sess, int handle,
+		void *payload, size_t payload_sz)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -759,8 +739,7 @@ struct ksmbd_rpc_command *ksmbd_rpc_write(struct ksmbd_session *sess,
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_read(struct ksmbd_session *sess,
-					 int handle)
+struct ksmbd_rpc_command *ksmbd_rpc_read(struct ksmbd_session *sess, int handle)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -783,10 +762,8 @@ struct ksmbd_rpc_command *ksmbd_rpc_read(struct ksmbd_session *sess,
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_ioctl(struct ksmbd_session *sess,
-					  int handle,
-					  void *payload,
-					  size_t payload_sz)
+struct ksmbd_rpc_command *ksmbd_rpc_ioctl(struct ksmbd_session *sess, int handle,
+		void *payload, size_t payload_sz)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -810,9 +787,8 @@ struct ksmbd_rpc_command *ksmbd_rpc_ioctl(struct ksmbd_session *sess,
 	return resp;
 }
 
-struct ksmbd_rpc_command *ksmbd_rpc_rap(struct ksmbd_session *sess,
-					void *payload,
-					size_t payload_sz)
+struct ksmbd_rpc_command *ksmbd_rpc_rap(struct ksmbd_session *sess, void *payload,
+		size_t payload_sz)
 {
 	struct ksmbd_ipc_msg *msg;
 	struct ksmbd_rpc_command *req;
@@ -915,13 +891,20 @@ int ksmbd_ipc_init(void)
 					    ksmbd_genl_ops,
 					    ARRAY_SIZE(ksmbd_genl_ops));
 	if (ret) {
-		ksmbd_err("Failed to register KSMBD netlink interface %d\n",
-				ret);
-		return ret;
+		ksmbd_err("Failed to register KSMBD netlink interface %d\n", ret);
+		goto cancel_work;
 	}
 
 	ida = ksmbd_ida_alloc();
-	if (!ida)
-		return -ENOMEM;
+	if (!ida) {
+		ret = -ENOMEM;
+		goto unregister;
+	}
 	return 0;
+
+unregister:
+	genl_unregister_family(&ksmbd_genl_family);
+cancel_work:
+	cancel_delayed_work_sync(&ipc_timer_work);
+	return ret;
 }
