@@ -158,7 +158,6 @@ struct dentry_operations {
 	char *(*d_dname)(struct dentry *, char *, int);
 	struct vfsmount *(*d_automount)(struct path *);
 	int (*d_manage)(struct dentry *, bool);
-	struct inode *(*d_select_inode)(struct dentry *, unsigned);
 	struct dentry *(*d_real)(struct dentry *, struct inode *);
 	void (*d_canonical_path)(const struct path *, struct path *);
 } ____cacheline_aligned;
@@ -212,8 +211,6 @@ struct dentry_operations {
 	(DCACHE_MOUNTED|DCACHE_NEED_AUTOMOUNT|DCACHE_MANAGE_TRANSIT)
 
 #define DCACHE_DENTRY_KILLED	0x100000
-
-#define DCACHE_OP_SELECT_INODE		0x02000000 /* Unioned entry: dcache op selects inode */
 
 #define DCACHE_ENCRYPTED_WITH_KEY	0x04000000 /* dir is encrypted with a valid key */
 #define DCACHE_OP_REAL			0x08000000

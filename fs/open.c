@@ -759,16 +759,10 @@ int finish_open(struct file *file, struct dentry *dentry,
 		int *opened)
 {
 	int error;
-	struct inode *inode = dentry->d_inode;
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
 
 	file->f_path.dentry = dentry;
-	if (dentry->d_flags & DCACHE_OP_SELECT_INODE) {
-		inode = dentry->d_op->d_select_inode(dentry, file->f_flags);
-		if (IS_ERR(inode))
-			return PTR_ERR(inode);
-	}
-	error = do_dentry_open(file, inode, open,
+	error = do_dentry_open(file, dentry->d_inode, open,
 			       current_cred());
 	if (!error)
 		*opened |= FILE_OPENED;
@@ -802,17 +796,8 @@ EXPORT_SYMBOL(file_path);
 int vfs_open(const struct path *path, struct file *file,
 	     const struct cred *cred)
 {
-	struct dentry *dentry = path->dentry;
-	struct inode *inode = dentry->d_inode;
-
 	file->f_path = *path;
-	if (dentry->d_flags & DCACHE_OP_SELECT_INODE) {
-		inode = dentry->d_op->d_select_inode(dentry, file->f_flags);
-		if (IS_ERR(inode))
-			return PTR_ERR(inode);
-	}
-
-	return do_dentry_open(file, inode, NULL, cred);
+	return do_dentry_open(file, path->dentry->d_inode, NULL, cred);
 }
 EXPORT_SYMBOL(vfs_open);
 
