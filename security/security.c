@@ -862,6 +862,16 @@ int security_kernel_create_files_as(struct cred *new, struct inode *inode)
 	return security_ops->kernel_create_files_as(new, inode);
 }
 
+int security_dentry_create_files_as(struct dentry *dentry, int mode,
+				    struct qstr *name,
+				    const struct cred *old,
+				    struct cred *new)
+{
+	return security_ops->dentry_create_files_as(dentry, mode, name,
+						    old, new);
+}
+EXPORT_SYMBOL(security_dentry_create_files_as);
+
 int security_kernel_module_request(char *kmod_name)
 {
 	return security_ops->kernel_module_request(kmod_name);

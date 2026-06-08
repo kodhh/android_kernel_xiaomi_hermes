@@ -1507,6 +1507,10 @@ struct security_operations {
 	void (*inode_getsecid) (const struct inode *inode, u32 *secid);
 	int (*inode_copy_up) (struct dentry *dentry, struct cred **new);
 	int (*inode_copy_up_xattr) (const char *name);
+	int (*dentry_create_files_as) (struct dentry *dentry, int mode,
+				       struct qstr *name,
+				       const struct cred *old,
+				       struct cred *new);
 
 	int (*file_permission) (struct file *file, int mask);
 	int (*file_alloc_security) (struct file *file);
@@ -1807,6 +1811,10 @@ int security_prepare_creds(struct cred *new, const struct cred *old, gfp_t gfp);
 void security_transfer_creds(struct cred *new, const struct cred *old);
 int security_kernel_act_as(struct cred *new, u32 secid);
 int security_kernel_create_files_as(struct cred *new, struct inode *inode);
+int security_dentry_create_files_as(struct dentry *dentry, int mode,
+				    struct qstr *name,
+				    const struct cred *old,
+				    struct cred *new);
 int security_kernel_module_request(char *kmod_name);
 int security_kernel_module_from_file(struct file *file);
 int security_task_fix_setuid(struct cred *new, const struct cred *old,
@@ -2238,6 +2246,15 @@ static inline int security_inode_copy_up(struct dentry *src, struct cred **new)
 static inline int security_inode_copy_up_xattr(const char *name)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int security_dentry_create_files_as(struct dentry *dentry,
+						  int mode,
+						  struct qstr *name,
+						  const struct cred *old,
+						  struct cred *new)
+{
+	return 0;
 }
 
 static inline int security_file_permission(struct file *file, int mask)

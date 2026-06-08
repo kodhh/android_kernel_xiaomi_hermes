@@ -3150,6 +3150,29 @@ static int selinux_inode_copy_up_xattr(const char *name)
 	return -EOPNOTSUPP;
 }
 
+static int selinux_dentry_create_files_as(struct dentry *dentry, int mode,
+					  struct qstr *name,
+					  const struct cred *old,
+					  struct cred *new)
+{
+	u32 newsid;
+	int rc;
+	struct task_security_struct *tsec;
+
+	rc = security_transition_sid(((struct task_security_struct *)
+				     old->security)->sid,
+				     ((struct inode_security_struct *)
+				      d_inode(dentry->d_parent)->i_security)->sid,
+				     inode_mode_to_security_class(mode),
+				     name, &newsid);
+	if (rc)
+		return rc;
+
+	tsec = new->security;
+	tsec->create_sid = newsid;
+	return 0;
+}
+
 /* file security operations */
 
 static int selinux_revalidate_file_permission(struct file *file, int mask)
@@ -5949,6 +5972,7 @@ static struct security_operations selinux_ops = {
 	.inode_getsecid =		selinux_inode_getsecid,
 	.inode_copy_up =		selinux_inode_copy_up,
 	.inode_copy_up_xattr =		selinux_inode_copy_up_xattr,
+	.dentry_create_files_as =	selinux_dentry_create_files_as,
 
 	.file_permission =		selinux_file_permission,
 	.file_alloc_security =		selinux_file_alloc_security,

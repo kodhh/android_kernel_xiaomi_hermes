@@ -413,6 +413,14 @@ static int cap_kernel_create_files_as(struct cred *new, struct inode *inode)
 	return 0;
 }
 
+static int cap_dentry_create_files_as(struct dentry *dentry, int mode,
+				      struct qstr *name,
+				      const struct cred *old,
+				      struct cred *new)
+{
+	return 0;
+}
+
 static int cap_kernel_module_request(char *kmod_name)
 {
 	return 0;
@@ -984,6 +992,7 @@ void __init security_fixup_ops(struct security_operations *ops)
 	set_to_cap_if_null(ops, inode_setsecurity);
 	set_to_cap_if_null(ops, inode_listsecurity);
 	set_to_cap_if_null(ops, inode_getsecid);
+	set_to_cap_if_null(ops, dentry_create_files_as);
 #ifdef CONFIG_SECURITY_PATH
 	set_to_cap_if_null(ops, path_mknod);
 	set_to_cap_if_null(ops, path_mkdir);
