@@ -13,7 +13,7 @@
 #include <linux/posix_acl.h>
 #include "overlayfs.h"
 
-static int ovl_copy_up_truncate(struct dentry *dentry)
+int ovl_copy_up_truncate(struct dentry *dentry)
 {
 	int err;
 	struct dentry *parent;
@@ -302,8 +302,8 @@ struct posix_acl *ovl_get_acl(struct inode *inode, int type)
 	return acl;
 }
 
-static bool ovl_open_need_copy_up(int flags, enum ovl_path_type type,
-				  struct dentry *realdentry)
+bool ovl_open_need_copy_up(int flags, enum ovl_path_type type,
+			   struct dentry *realdentry)
 {
 	if (OVL_TYPE_UPPER(type))
 		return false;
@@ -435,11 +435,15 @@ static void ovl_fill_inode(struct inode *inode, umode_t mode)
 		inode->i_op = &ovl_symlink_inode_operations;
 		break;
 
+	case S_IFREG:
+		inode->i_op = &ovl_file_inode_operations;
+		inode->i_fop = &ovl_file_operations;
+		break;
+
 	default:
 		WARN(1, "illegal file type: %i\n", mode);
 		/* Fall through */
 
-	case S_IFREG:
 	case S_IFSOCK:
 	case S_IFBLK:
 	case S_IFCHR:

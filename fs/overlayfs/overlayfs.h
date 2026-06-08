@@ -8,6 +8,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/xattr.h>
 
 struct ovl_entry;
 
@@ -199,6 +200,8 @@ void ovl_workdir_cleanup(struct inode *dir, struct vfsmount *mnt,
 
 /* inode.c */
 int ovl_setattr(struct dentry *dentry, struct iattr *attr);
+bool ovl_open_need_copy_up(int flags, enum ovl_path_type type,
+			   struct dentry *realdentry);
 int ovl_permission(struct inode *inode, int mask);
 int ovl_xattr_set(struct dentry *dentry, const char *name, const void *value,
 		  size_t size, int flags);
@@ -225,6 +228,9 @@ static inline void ovl_copyattr(struct inode *from, struct inode *to)
 	i_size_write(to, i_size_read(from));
 }
 
+/* file.c */
+extern const struct file_operations ovl_file_operations;
+
 /* dir.c */
 extern const struct inode_operations ovl_dir_inode_operations;
 struct dentry *ovl_lookup_temp(struct dentry *workdir, struct dentry *dentry);
@@ -235,6 +241,7 @@ void ovl_cleanup(struct inode *dir, struct dentry *dentry);
 
 /* copy_up.c */
 int ovl_copy_up(struct dentry *dentry);
+int ovl_copy_up_truncate(struct dentry *dentry);
 int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 		    struct path *lowerpath, struct kstat *stat);
 int ovl_copy_xattr(struct dentry *old, struct dentry *new);
