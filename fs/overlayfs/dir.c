@@ -12,8 +12,6 @@
 #include <linux/xattr.h>
 #include <linux/security.h>
 #include <linux/cred.h>
-#include <linux/posix_acl.h>
-#include <linux/posix_acl_xattr.h>
 #include <linux/atomic.h>
 #include "overlayfs.h"
 
@@ -348,32 +346,6 @@ out_free:
 	return ret;
 }
 
-static int ovl_set_upper_acl(struct dentry *upperdentry, const char *name,
-			     const struct posix_acl *acl)
-{
-	void *buffer;
-	size_t size;
-	int err;
-
-	if (!IS_ENABLED(CONFIG_FS_POSIX_ACL) || !acl)
-		return 0;
-
-	size = posix_acl_to_xattr(NULL, acl, NULL, 0);
-	buffer = kmalloc(size, GFP_KERNEL);
-	if (!buffer)
-		return -ENOMEM;
-
-	size = posix_acl_to_xattr(&init_user_ns, acl, buffer, size);
-	err = size;
-	if (err < 0)
-		goto out_free;
-
-	err = vfs_setxattr(upperdentry, name, buffer, size, XATTR_CREATE);
-out_free:
-	kfree(buffer);
-	return err;
-}
-
 static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 				    struct kstat *stat, const char *link,
 				    struct dentry *hardlink)
@@ -384,19 +356,12 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 	struct dentry *upper;
 	struct dentry *newdentry;
 	int err;
-	struct posix_acl *acl = NULL;
 
 	if (WARN_ON(!workdir))
 		return -EROFS;
 	wdir = workdir->d_inode;
 	upperdir = ovl_dentry_upper(dentry->d_parent);
 	udir = upperdir->d_inode;
-
-	if (!hardlink) {
-		err = posix_acl_create(&acl, GFP_KERNEL, &stat->mode);
-		if (err)
-			return err;
-	}
 
 	err = ovl_lock_rename_workdir(workdir, upperdir);
 	if (err)
@@ -432,13 +397,6 @@ static int ovl_create_over_whiteout(struct dentry *dentry, struct inode *inode,
 		if (err)
 			goto out_cleanup;
 	}
-	if (!hardlink) {
-		err = ovl_set_upper_acl(newdentry, XATTR_NAME_POSIX_ACL_ACCESS,
-					acl);
-		if (err)
-			goto out_cleanup;
-	}
-
 	if (!hardlink && S_ISDIR(stat->mode)) {
 		err = ovl_set_opaque(newdentry);
 		if (err)
@@ -464,8 +422,6 @@ out_dput:
 out_unlock:
 	unlock_rename(workdir, upperdir);
 out:
-	if (!hardlink)
-		posix_acl_release(acl);
 	return err;
 
 out_cleanup:
