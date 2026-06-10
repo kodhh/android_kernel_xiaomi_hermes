@@ -145,8 +145,8 @@ static AudioHdmi *mHDMIOutput = NULL;
 static AudioMrgIf *mAudioMrg = NULL;
 static AudioDigitalDAIBT *AudioDaiBt = NULL;
 
-static AFE_MEM_CONTROL_T   *AFE_Mem_Control_context[Soc_Aud_Digital_Block_MEM_HDMI + 1] = {NULL};
-static struct snd_dma_buffer *Audio_dma_buf[Soc_Aud_Digital_Block_MEM_HDMI + 1] = {NULL};
+static AFE_MEM_CONTROL_T   *AFE_Mem_Control_context[Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK] = {NULL};
+static struct snd_dma_buffer *Audio_dma_buf[Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK] = {NULL};
 
 static AudioMemIFAttribute *mAudioMEMIF[Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK] = {NULL};
 static int mAPLL1I2SDividercounter[AUDIO_APLL1_DIV_NUM] = {0};
@@ -317,8 +317,10 @@ void DumpMemifSubStream(void)
 {
     int i = 0;
     //printk("+%s \n ", __func__);
-    for (i = 0 ; i <= Soc_Aud_Digital_Block_MEM_HDMI ; i++)
+    for (i = 0 ; i < Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK ; i++)
     {
+        if (!AFE_Mem_Control_context[i])
+            continue;
         substreamList *head = AFE_Mem_Control_context[i]->substreamL;
         while (head != NULL)
         {
@@ -445,15 +447,15 @@ bool InitAfeControl(void)
         {
             mAudioMEMIF[i] = kzalloc(sizeof(AudioMemIFAttribute), GFP_KERNEL);
         }
-        for (i = 0; i <= Soc_Aud_Digital_Block_MEM_HDMI ; i ++)
+        for (i = 0; i < Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK ; i ++)
         {
             AFE_Mem_Control_context[i]  = kzalloc(sizeof(AFE_MEM_CONTROL_T), GFP_KERNEL);
             AFE_Mem_Control_context[i]->substreamL = NULL;
             spin_lock_init(&AFE_Mem_Control_context[i]->substream_lock);
         }
-        for (i = 0; i <=  Soc_Aud_Digital_Block_MEM_HDMI ; i ++)
+        for (i = 0; i < Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK ; i ++)
         {
-            Audio_dma_buf[i]  = kzalloc(sizeof(Audio_dma_buf), GFP_KERNEL);
+            Audio_dma_buf[i]  = kzalloc(sizeof(struct snd_dma_buffer), GFP_KERNEL);
         }
 
 		memset((void *)&AFE_dL_Abnormal_context, 0, sizeof(AFE_DL_ABNORMAL_CONTROL_T));
@@ -469,7 +471,11 @@ bool InitAfeControl(void)
 
     mAudioMrg->Mrg_I2S_SampleRate = SampleRateTransform(44100);
 
-    for (i = AUDIO_APLL1_DIV0 ; i <=  AUDIO_APLL2_DIV5 ; i++)
+    for (i = AUDIO_APLL1_DIV0 ; i <= AUDIO_APLL1_DIV5 ; i++)
+    {
+        EnableI2SDivPower(i , false);
+    }
+    for (i = AUDIO_APLL2_DIV0 ; i <= AUDIO_APLL2_DIV5 ; i++)
     {
         EnableI2SDivPower(i , false);
     }
@@ -492,7 +498,7 @@ bool ResetAfeControl(void)
     {
         memset((void *)(mAudioMEMIF[i]), 0, sizeof(AudioMemIFAttribute));
     }
-    for (i = 0; i < (Soc_Aud_Digital_Block_MEM_HDMI + 1) ; i ++)
+    for (i = 0; i < Soc_Aud_Digital_Block_NUM_OF_DIGITAL_BLOCK ; i ++)
     {
         memset((void *)(AFE_Mem_Control_context[i]), 0, sizeof(AFE_MEM_CONTROL_T));
     }
