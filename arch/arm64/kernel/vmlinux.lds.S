@@ -49,9 +49,11 @@ SECTIONS
 			*(.exception.text)
 			__exception_text_end = .;
 			IRQENTRY_TEXT
+			ENTRY_TEXT
 			TEXT_TEXT
 			SCHED_TEXT
 			LOCK_TEXT
+			KPROBES_TEXT
 			*(.fixup)
 			*(.gnu.warning)
 		. = ALIGN(16);
@@ -106,7 +108,7 @@ SECTIONS
 		 */
 		. = ALIGN(32);
 		__start___ex_table = .;
-		*(__ex_table)
+		KEEP(*(__ex_table))
 		__stop___ex_table = .;
 
 		/*
