@@ -61,6 +61,7 @@ SECTIONS
 	}
 
 	RO_DATA(PAGE_SIZE)
+	EXCEPTION_TABLE(8)
 
 	_etext = .;			/* End of text and rodata section */
 
@@ -102,14 +103,6 @@ SECTIONS
 		NOSAVE_DATA
 		CACHELINE_ALIGNED_DATA(64)
 		READ_MOSTLY_DATA(64)
-
-		/*
-		 * The exception fixup table (might need resorting at runtime)
-		 */
-		. = ALIGN(32);
-		__start___ex_table = .;
-		KEEP(*(__ex_table))
-		__stop___ex_table = .;
 
 		/*
 		 * and the usual data section
