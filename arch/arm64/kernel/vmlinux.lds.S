@@ -62,6 +62,7 @@ SECTIONS
 
 	RO_DATA(PAGE_SIZE)
 	EXCEPTION_TABLE(8)
+	NOTES
 
 	_etext = .;			/* End of text and rodata section */
 
@@ -109,12 +110,9 @@ SECTIONS
 		 */
 		DATA_DATA
 		CONSTRUCTORS
-
 		_edata = .;
 	}
 	_edata_loc = __data_loc + SIZEOF(.data);
-
-	NOTES
 
 	BSS_SECTION(0, 0, 0)
 	_end = .;
