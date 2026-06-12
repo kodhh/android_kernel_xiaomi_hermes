@@ -21,6 +21,7 @@
 
 #include "cust_gpio_usage.h"
 #include <linux/input/mt.h>		//slot
+#include <linux/input/doubletap2wake.h>
 
 static bool TP_gesture_Switch;
 #define GESTURE_SWITCH_FILE 		"/data/data/com.example.setgesture/shared_prefs/gesture.xml"  //总开关文件,获取第一个value的值,为1开,为0关
@@ -1137,11 +1138,17 @@ static int tpd_local_init(void)
 		input_report_key(tpd->dev, BTN_TOUCH, 0);
 	input_sync(tpd->dev);
 	
-	DBG("zax TPD enter sleep done\n");
+ 	DBG("zax TPD enter sleep done\n");
+
+	if (dt2w_switch) {
+		DBG("TPD dt2w enabled, stay awake for doubletap\n");
+		return;
+	}
+
  	 tpd_halt = 1;
 
 	DBG("TPD enter sleep\n");
-	 mt_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
+ 	 mt_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
 	//mutex_lock(&i2c_access);
 	i2c_smbus_write_i2c_block_data(i2c_client, 0xA5, 1, &data);  //TP enter sleep mode
 	//mutex_unlock(&i2c_access);
