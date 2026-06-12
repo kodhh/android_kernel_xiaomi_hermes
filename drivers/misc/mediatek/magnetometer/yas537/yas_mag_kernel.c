@@ -1043,6 +1043,10 @@ static int yas_probe(struct i2c_client *i2c,
 	if (ret)
 		goto error_free_device;
 
+	input_abs_set_val(euler, ABS_X, MAG_INVALID_VALUE);
+	input_abs_set_val(euler, ABS_Y, MAG_INVALID_VALUE);
+	input_abs_set_val(euler, ABS_Z, MAG_INVALID_VALUE);
+
 	ret = sysfs_create_group(&cal->dev.kobj, &yas_mag_attribute_group);
 	if (ret)
 		goto error_free_device;

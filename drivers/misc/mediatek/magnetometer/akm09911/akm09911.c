@@ -3215,6 +3215,7 @@ static int akm09911_remove(void)
 static int	akm09911_local_init(void)
 {
 	struct mag_hw *hw = get_cust_mag_hw();
+	int i;
 
 	akm09911_power(hw, 1);
 	if(i2c_add_driver(&akm09911_i2c_driver))
@@ -3226,6 +3227,8 @@ static int	akm09911_local_init(void)
 	{
 	   return -1;
 	}
+	for (i = 0; i < CALIBRATION_DATA_SIZE; i++)
+		sensor_data[i] = MAG_INVALID_VALUE;
 	return 0;
 }
 

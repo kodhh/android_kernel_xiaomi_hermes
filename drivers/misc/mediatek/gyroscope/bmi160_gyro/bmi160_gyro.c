@@ -1317,11 +1317,11 @@ static DRIVER_ATTR(firlen, S_IWUSR | S_IRUGO,
 static DRIVER_ATTR(trace, S_IWUSR | S_IRUGO,
 		show_trace_value, store_trace_value);
 static DRIVER_ATTR(status, S_IRUGO, show_status_value, NULL);
-static DRIVER_ATTR(powermode, S_IWUSR | S_IRUGO,
+static DRIVER_ATTR(powermode, S_IWUSR | S_IWGRP | S_IWOTH | S_IRUGO,
 		show_power_mode_value, store_power_mode_value);
-static DRIVER_ATTR(range, S_IWUSR | S_IRUGO,
+static DRIVER_ATTR(range, S_IWUSR | S_IWGRP | S_IWOTH | S_IRUGO,
 		show_range_value, store_range_value);
-static DRIVER_ATTR(datarate, S_IWUSR | S_IRUGO,
+static DRIVER_ATTR(datarate, S_IWUSR | S_IWGRP | S_IWOTH | S_IRUGO,
 		show_datarate_value, store_datarate_value);
 static DRIVER_ATTR(selftest, S_IRUGO, show_selftest_value, NULL);
 

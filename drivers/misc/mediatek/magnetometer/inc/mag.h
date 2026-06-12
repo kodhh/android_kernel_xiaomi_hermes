@@ -105,6 +105,7 @@ struct mag_init_info
 struct mag_data{
 	hwm_sensor_data mag_data ;
 	int data_updata;
+	bool is_first_data_after_enable;
 	//struct mutex lock;
 };
 

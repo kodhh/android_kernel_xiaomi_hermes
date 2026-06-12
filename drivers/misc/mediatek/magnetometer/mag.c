@@ -70,7 +70,7 @@ static void mag_work_func(struct work_struct *work)
 			err = cxt->mag_dev_data.get_data_m(&x, &y, &z, &status);
 			if (err) {
 		  		MAG_ERR("get %d data fails!!\n" ,i);
-		  		return;
+		  		continue;
 	   		}
 			cxt->drv_data[i].mag_data.values[0]=x;
 			cxt->drv_data[i].mag_data.values[1]=y;
@@ -78,17 +78,15 @@ static void mag_work_func(struct work_struct *work)
 			cxt->drv_data[i].mag_data.status = status;
 			m_pre_ns = cxt->drv_data[i].mag_data.time;
 			cxt->drv_data[i].mag_data.time = cur_ns;
-			if (true ==  cxt->is_first_data_after_enable) {
+			if (true == cxt->drv_data[i].is_first_data_after_enable) {
 				m_pre_ns = cur_ns;
-				cxt->is_first_data_after_enable = false;
-		   		//filter -1 value
 				if (MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[0] ||
-		   	     MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[1] ||
-					MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[2]) {
-						MAG_LOG("read invalid data\n");
-	       	  		continue;
-			
-	       		}
+				MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[1] ||
+				MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[2]) {
+					MAG_LOG("read invalid data\n");
+					continue;
+				}
+				cxt->drv_data[i].is_first_data_after_enable = false;
 	    	}
 			while ((cur_ns - m_pre_ns) >= delay_ms*1800000LL) {
 				m_pre_ns += delay_ms*1000000LL;
@@ -110,7 +108,7 @@ static void mag_work_func(struct work_struct *work)
 			err = cxt->mag_dev_data.get_data_o(&x, &y, &z, &status);
 			if (err) {
 				MAG_ERR("get %d data fails!!\n" , i);
-				return;
+				continue;
 			}
 			cxt->drv_data[i].mag_data.values[0] = x;
 			cxt->drv_data[i].mag_data.values[1] = y;
@@ -118,16 +116,15 @@ static void mag_work_func(struct work_struct *work)
 			cxt->drv_data[i].mag_data.status = status;
 			o_pre_ns = cxt->drv_data[i].mag_data.time;
 			cxt->drv_data[i].mag_data.time = cur_ns;
-			if (true ==  cxt->is_first_data_after_enable) {
+			if (true == cxt->drv_data[i].is_first_data_after_enable) {
 				o_pre_ns = cur_ns;
-				cxt->is_first_data_after_enable = false;
-				/* filter -1 value */
 				if (MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[0] ||
 				MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[1] ||
 				MAG_INVALID_VALUE == cxt->drv_data[i].mag_data.values[2]) {
 					MAG_LOG(" read invalid data\n");
 					continue;
 				}
+				cxt->drv_data[i].is_first_data_after_enable = false;
 			}
 			while ((cur_ns - o_pre_ns) >= delay_ms*1800000LL) {
 				o_pre_ns += delay_ms*1000000LL;
@@ -181,7 +178,8 @@ static struct mag_context *mag_context_alloc_object(void)
 		return NULL;
 	}
 	initTimer(&obj->hrTimer, mag_poll);
-	obj->is_first_data_after_enable = false;
+	obj->drv_data[ID_M_V_MAGNETIC].is_first_data_after_enable = false;
+	obj->drv_data[ID_M_V_ORIENTATION].is_first_data_after_enable = false;
 	obj->is_polling_run = false;
 	obj->active_data_sensor = 0;
 	obj->active_nodata_sensor = 0;
@@ -205,7 +203,7 @@ static int mag_enable_data(int handle,int enable)
     if(1 == enable)
     {
        MAG_LOG("MAG(%d) enable \n",handle);
-       cxt->is_first_data_after_enable = true;
+       cxt->drv_data[handle].is_first_data_after_enable = true;
 	   cxt->active_data_sensor |= 1<<handle;
 	   
 	   if(ID_M_V_ORIENTATION == handle)

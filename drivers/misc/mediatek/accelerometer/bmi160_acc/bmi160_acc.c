@@ -2377,8 +2377,8 @@ static ssize_t store_layout_value(struct device_driver *ddri, const char *buf, s
 /*----------------------------------------------------------------------------*/
 static DRIVER_ATTR(chipinfo,   S_IWUSR | S_IRUGO, show_chipinfo_value,      NULL);
 static DRIVER_ATTR(cpsdata, 	 S_IWUSR | S_IRUGO, show_cpsdata_value,    NULL);
-static DRIVER_ATTR(cpsopmode,  S_IWUSR | S_IRUGO, show_cpsopmode_value,    store_cpsopmode_value);
-static DRIVER_ATTR(cpsrange, 	 S_IWUSR | S_IRUGO, show_cpsrange_value,     store_cpsrange_value);
+static DRIVER_ATTR(cpsopmode,  S_IWUSR | S_IWGRP | S_IWOTH | S_IRUGO, show_cpsopmode_value,    store_cpsopmode_value);
+static DRIVER_ATTR(cpsrange, 	 S_IWUSR | S_IWGRP | S_IWOTH | S_IRUGO, show_cpsrange_value,     store_cpsrange_value);
 static DRIVER_ATTR(cpsbandwidth, S_IWUSR | S_IRUGO, show_cpsbandwidth_value,    store_cpsbandwidth_value);
 static DRIVER_ATTR(sensordata, S_IWUSR | S_IRUGO, show_sensordata_value,    NULL);
 static DRIVER_ATTR(cali,       S_IWUSR | S_IRUGO, show_cali_value,          store_cali_value);
@@ -3914,7 +3914,7 @@ int bmi160_o_get_data(int* x ,int* y,int* z, int* status)
 
 	return 0;
 }
-
+ 
 /*----------------------------------------------------------------------------*/
 static int bmi160_acc_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -3992,8 +3992,13 @@ static int bmi160_acc_i2c_probe(struct i2c_client *client, const struct i2c_devi
 		goto exit_init_failed;
 	}
 
-	       atomic_set(&bosch_chip, 1);        // bosch chip exist 
+	       atomic_set(&bosch_chip, 1);        // bosch chip exist
 #ifdef MISC_FOR_DAEMON
+	{
+		int i;
+		for (i = 0; i < CALIBRATION_DATA_SIZE; i++)
+			sensor_data[i] = -1;
+	}
 	err = misc_register(&bmi160_acc_device);
 	if(err) {
 		GSE_ERR("bmi160_acc_device register failed\n");
