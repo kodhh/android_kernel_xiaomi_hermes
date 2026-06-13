@@ -12,6 +12,7 @@
 #include <linux/idr.h>
 #include <linux/slab.h>
 #include <linux/uio.h>
+#include <linux/aio.h>
 
 static void fuse_copyattr(struct file *dst_file, struct file *src_file)
 {
@@ -52,13 +53,20 @@ ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
 	const struct cred *old_cred;
+	struct kiocb iocb;
 
 	if (!passthrough_filp)
 		return -EINVAL;
 
+	init_sync_kiocb(&iocb, passthrough_filp);
+	iocb.ki_pos = *ppos;
+	iocb.ki_nbytes = iov_length(iov, nr_segs);
+
 	old_cred = override_creds(ff->passthrough.cred);
-	ret = call_read_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
+	ret = call_read_iter(passthrough_filp, &iocb, iov, nr_segs, *ppos);
 	revert_creds(old_cred);
+
+	*ppos = iocb.ki_pos;
 
 	fuse_file_accessed(file, passthrough_filp);
 
@@ -74,9 +82,14 @@ ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 	struct file *passthrough_filp = ff->passthrough.filp;
 	struct inode *fuse_inode = file_inode(file);
 	const struct cred *old_cred;
+	struct kiocb iocb;
 
 	if (!passthrough_filp)
 		return -EINVAL;
+
+	init_sync_kiocb(&iocb, passthrough_filp);
+	iocb.ki_pos = *ppos;
+	iocb.ki_nbytes = iov_length(iov, nr_segs);
 
 	mutex_lock(&fuse_inode->i_mutex);
 
@@ -84,9 +97,11 @@ ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 
 	old_cred = override_creds(ff->passthrough.cred);
 	file_start_write(passthrough_filp);
-	ret = call_write_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
+	ret = call_write_iter(passthrough_filp, &iocb, iov, nr_segs, *ppos);
 	file_end_write(passthrough_filp);
 	revert_creds(old_cred);
+
+	*ppos = iocb.ki_pos;
 
 	if (ret > 0)
 		fuse_copyattr(file, passthrough_filp);
