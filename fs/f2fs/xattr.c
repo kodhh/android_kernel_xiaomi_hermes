@@ -704,8 +704,19 @@ static int __f2fs_setxattr(struct inode *inode, int index,
 			!strcmp(name, F2FS_XATTR_NAME_ENCRYPTION_CONTEXT))
 		f2fs_set_encrypted_inode(inode);
 	f2fs_mark_inode_dirty_sync(inode, true);
-	if (!error && S_ISDIR(inode->i_mode))
+	if (!S_ISDIR(inode->i_mode))
+		goto xattr_done;
+	/*
+	 * In strict mode, fsync() always try to trigger checkpoint for all
+	 * metadata consistency. In other mode, it triggers checkpoint when
+	 * parent's xattr metadata was updated.
+	 */
+	if (F2FS_OPTION(F2FS_I_SB(inode)).fsync_mode == FSYNC_MODE_STRICT)
 		set_sbi_flag(F2FS_I_SB(inode), SBI_NEED_CP);
+	else
+		f2fs_add_ino_entry(F2FS_I_SB(inode), inode->i_ino,
+							XATTR_DIR_INO);
+xattr_done:
 exit:
 	kzfree(base_addr);
 	return error;
