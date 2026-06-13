@@ -583,10 +583,10 @@ static int parse_options(struct super_block *sb, char *options)
 			if (strlen(name) == 5 &&
 					!strncmp(name, "posix", 5)) {
 				F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_POSIX;
-			} else if (strlen(name) == 6 &&
-					!strncmp(name, "strict", 6)) {
-				F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_STRICT;
-			} else if (strlen(name) == 9 &&
+	} else if (strlen(name) == 6 &&
+			!strncmp(name, "strict", 6)) {
+		F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_STRICT;
+	} else if (strlen(name) == 9 &&
 					!strncmp(name, "nobarrier", 9)) {
 				F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_NOBARRIER;
 			} else {
@@ -1080,7 +1080,7 @@ static void default_options(struct f2fs_sb_info *sbi)
 {
 	/* init some FS parameters */
 	sbi->active_logs = NR_CURSEG_TYPE;
-	F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_STRICT;
+	F2FS_OPTION(sbi).fsync_mode = FSYNC_MODE_POSIX;
 
 	set_opt(sbi, BG_GC);
 	set_opt(sbi, INLINE_XATTR);
