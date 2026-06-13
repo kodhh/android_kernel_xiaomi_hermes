@@ -26,7 +26,8 @@ static void fuse_copyattr(struct file *dst_file, struct file *src_file)
 
 static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 {
-	struct inode *dst_inode, *src_inode;
+	struct inode *dst_inode;
+	struct inode *src_inode;
 
 	if (dst_file->f_flags & O_NOATIME)
 		return;
@@ -38,13 +39,9 @@ static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 	     !timespec_equal(&dst_inode->i_ctime, &src_inode->i_ctime))) {
 		dst_inode->i_mtime = src_inode->i_mtime;
 		dst_inode->i_ctime = src_inode->i_ctime;
-		mark_inode_dirty_sync(dst_inode);
 	}
 
-	if (timespec_compare(&src_inode->i_atime, &dst_inode->i_atime) > 0) {
-		dst_inode->i_atime = src_inode->i_atime;
-		mark_inode_dirty_sync(dst_inode);
-	}
+	touch_atime(&dst_file->f_path);
 }
 
 ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
@@ -75,13 +72,20 @@ ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 	ssize_t ret;
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
+	struct inode *fuse_inode = file_inode(file);
 	const struct cred *old_cred;
 
 	if (!passthrough_filp)
 		return -EINVAL;
 
+	mutex_lock(&fuse_inode->i_mutex);
+
+	fuse_copyattr(file, passthrough_filp);
+
 	old_cred = override_creds(ff->passthrough.cred);
+	file_start_write(passthrough_filp);
 	ret = call_write_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
+	file_end_write(passthrough_filp);
 	revert_creds(old_cred);
 
 	if (ret > 0)
@@ -89,26 +93,34 @@ ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 
 	fuse_file_accessed(file, passthrough_filp);
 
+	mutex_unlock(&fuse_inode->i_mutex);
+
 	return ret;
 }
 
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	int ret;
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
 	const struct cred *old_cred;
-	int ret;
 
 	if (!passthrough_filp->f_op->mmap)
 		return -ENODEV;
 
-	if (vma->vm_file)
-		fput(vma->vm_file);
+	if (WARN_ON(file != vma->vm_file))
+		return -EIO;
+
 	vma->vm_file = get_file(passthrough_filp);
 
 	old_cred = override_creds(ff->passthrough.cred);
-	ret = call_mmap(passthrough_filp, vma);
+	ret = call_mmap(vma->vm_file, vma);
 	revert_creds(old_cred);
+
+	if (ret)
+		fput(passthrough_filp);
+	else
+		fput(file);
 
 	fuse_file_accessed(file, passthrough_filp);
 
@@ -117,48 +129,47 @@ ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 
 int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd)
 {
+	int res;
 	struct file *passthrough_filp;
 	struct inode *passthrough_inode;
 	struct super_block *passthrough_sb;
 	struct fuse_passthrough *passthrough;
-	int res;
 
 	if (!fc->passthrough)
-		return -EOPNOTSUPP;
+		return -EPERM;
 
 	passthrough_filp = fget(lower_fd);
 	if (!passthrough_filp) {
 		pr_err("FUSE: invalid file descriptor for passthrough.\n");
-		return -EINVAL;
+		return -EBADF;
 	}
 
 	if (!passthrough_filp->f_op->aio_read ||
 	    !passthrough_filp->f_op->aio_write) {
 		pr_err("FUSE: passthrough file misses file operations.\n");
-		fput(passthrough_filp);
-		return -EINVAL;
+		res = -EBADF;
+		goto err_free_file;
 	}
 
 	passthrough_inode = file_inode(passthrough_filp);
 	passthrough_sb = passthrough_inode->i_sb;
 	if (passthrough_sb->s_stack_depth >= FILESYSTEM_MAX_STACK_DEPTH) {
 		pr_err("FUSE: fs stacking depth exceeded for passthrough\n");
-		fput(passthrough_filp);
-		return -EINVAL;
+		res = -EINVAL;
+		goto err_free_file;
 	}
 
 	passthrough = kmalloc(sizeof(struct fuse_passthrough), GFP_KERNEL);
 	if (!passthrough) {
-		fput(passthrough_filp);
-		return -ENOMEM;
+		res = -ENOMEM;
+		goto err_free_file;
 	}
 
 	passthrough->filp = passthrough_filp;
 	passthrough->cred = prepare_creds();
 	if (!passthrough->cred) {
-		fput(passthrough_filp);
-		kfree(passthrough);
-		return -ENOMEM;
+		res = -ENOMEM;
+		goto err_free_passthrough;
 	}
 
 	spin_lock(&fc->passthrough_req_lock);
@@ -171,6 +182,12 @@ int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd)
 	}
 
 	return res;
+
+err_free_passthrough:
+	kfree(passthrough);
+err_free_file:
+	fput(passthrough_filp);
+	return res;
 }
 
 int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
@@ -182,6 +199,7 @@ int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
 	if (!fc->passthrough)
 		return 0;
 
+	/* Default case, passthrough is not requested */
 	if (passthrough_fh <= 0)
 		return 0;
 

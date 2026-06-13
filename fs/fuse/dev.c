@@ -2162,7 +2162,7 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 {
 	struct fuse_conn *fc;
 	int res;
-	int oldfd;
+	u32 oldfd;
 
 	fc = fuse_get_conn(file);
 	if (!fc)
