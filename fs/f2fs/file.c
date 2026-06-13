@@ -141,6 +141,11 @@ static inline bool need_do_checkpoint(struct inode *inode)
 		need_cp = true;
 	else if (sbi->active_logs == 2)
 		need_cp = true;
+	else if (F2FS_OPTION(sbi).fsync_mode == FSYNC_MODE_STRICT &&
+		f2fs_need_dentry_mark(sbi, inode->i_ino) &&
+		exist_written_data(sbi, F2FS_I(inode)->i_pino,
+					TRANS_DIR_INO))
+		need_cp = true;
 
 	return need_cp;
 }
@@ -271,8 +276,8 @@ sync_nodes:
 	remove_ino_entry(sbi, ino, APPEND_INO);
 	clear_inode_flag(inode, FI_APPEND_WRITE);
 flush_out:
-	if (!atomic)
-		ret = f2fs_issue_flush(sbi);
+	if (!atomic && F2FS_OPTION(sbi).fsync_mode != FSYNC_MODE_NOBARRIER)
+		ret = f2fs_issue_flush(sbi, inode->i_ino);
 	if (!ret) {
 		remove_ino_entry(sbi, ino, UPDATE_INO);
 		clear_inode_flag(inode, FI_UPDATE_WRITE);

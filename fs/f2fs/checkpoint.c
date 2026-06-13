@@ -1277,6 +1277,8 @@ static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 
 	release_ino_entry(sbi, false);
 
+	f2fs_reset_fsync_node_info(sbi);
+
 	if (unlikely(f2fs_cp_error(sbi)))
 		return -EIO;
 
