@@ -169,6 +169,12 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	ff->open_flags = outarg.open_flags;
 	file->private_data = fuse_file_get(ff);
 
+	err = fuse_passthrough_setup(fc, ff, &outarg);
+	if (err) {
+		fuse_release_common(file, FUSE_RELEASE);
+		return err;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_do_open);
@@ -267,6 +273,7 @@ void fuse_release_common(struct file *file, int opcode)
 	 * synchronous RELEASE is allowed (and desirable) in this case
 	 * because the server can be trusted not to screw up.
 	 */
+	fuse_passthrough_release(&ff->passthrough);
 	fuse_file_put(ff, ff->fc->destroy_req != NULL);
 }
 
@@ -843,8 +850,13 @@ out:
 static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 				  unsigned long nr_segs, loff_t pos)
 {
+	struct fuse_file *ff = iocb->ki_filp->private_data;
 	struct inode *inode = iocb->ki_filp->f_mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	if (ff->passthrough.filp)
+		return fuse_passthrough_read_iter(iocb->ki_filp, iocb,
+						  iov, nr_segs, &pos);
 
 	/*
 	 * In auto invalidate mode, always update attributes on read.
@@ -1091,6 +1103,7 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 				   unsigned long nr_segs, loff_t pos)
 {
 	struct file *file = iocb->ki_filp;
+	struct fuse_file *ff = file->private_data;
 	struct address_space *mapping = file->f_mapping;
 	size_t count = 0;
 	size_t ocount = 0;
@@ -1100,6 +1113,10 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	ssize_t err;
 	struct iov_iter i;
 	loff_t endbyte = 0;
+
+	if (ff->passthrough.filp)
+		return fuse_passthrough_write_iter(file, iocb, iov,
+						    nr_segs, &pos);
 
 	WARN_ON(iocb->ki_pos != pos);
 
@@ -1624,11 +1641,15 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct fuse_file *ff = file->private_data;
+
+	if (ff->passthrough.filp)
+		return fuse_passthrough_mmap(file, vma);
+
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE)) {
 		struct inode *inode = file_inode(file);
 		struct fuse_conn *fc = get_fuse_conn(inode);
 		struct fuse_inode *fi = get_fuse_inode(inode);
-		struct fuse_file *ff = file->private_data;
 		/*
 		 * file may be written through mmap, so chain it onto the
 		 * inodes's write_file list

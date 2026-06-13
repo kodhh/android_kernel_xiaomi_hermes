@@ -9,7 +9,20 @@
 
 #include <linux/file.h>
 #include <linux/fuse.h>
+#include <linux/idr.h>
 #include <linux/slab.h>
+#include <linux/uio.h>
+
+static void fuse_copyattr(struct file *dst_file, struct file *src_file)
+{
+	struct inode *dst = file_inode(dst_file);
+	struct inode *src = file_inode(src_file);
+
+	dst->i_atime = src->i_atime;
+	dst->i_mtime = src->i_mtime;
+	dst->i_ctime = src->i_ctime;
+	i_size_write(dst, i_size_read(src));
+}
 
 static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 {
@@ -38,6 +51,7 @@ ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
 				   const struct iovec *iov, unsigned long nr_segs,
 				   loff_t *ppos)
 {
+	ssize_t ret;
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
 	const struct cred *old_cred;
@@ -46,18 +60,19 @@ ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
 		return -EINVAL;
 
 	old_cred = override_creds(ff->passthrough.cred);
-	call_read_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
+	ret = call_read_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
 	revert_creds(old_cred);
 
 	fuse_file_accessed(file, passthrough_filp);
 
-	return 0;
+	return ret;
 }
 
 ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 				    const struct iovec *iov, unsigned long nr_segs,
 				    loff_t *ppos)
 {
+	ssize_t ret;
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
 	const struct cred *old_cred;
@@ -66,12 +81,15 @@ ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
 		return -EINVAL;
 
 	old_cred = override_creds(ff->passthrough.cred);
-	call_write_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
+	ret = call_write_iter(passthrough_filp, iocb_fuse, iov, nr_segs, *ppos);
 	revert_creds(old_cred);
+
+	if (ret > 0)
+		fuse_copyattr(file, passthrough_filp);
 
 	fuse_file_accessed(file, passthrough_filp);
 
-	return 0;
+	return ret;
 }
 
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
@@ -97,9 +115,8 @@ ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 	return ret;
 }
 
-int fuse_passthrough_open(struct fuse_dev *fud, u32 lower_fd)
+int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd)
 {
-	struct fuse_conn *fc = fud->fc;
 	struct file *passthrough_filp;
 	struct inode *passthrough_inode;
 	struct super_block *passthrough_sb;
@@ -150,7 +167,6 @@ int fuse_passthrough_open(struct fuse_dev *fud, u32 lower_fd)
 	if (res < 0) {
 		fuse_passthrough_release(passthrough);
 		kfree(passthrough);
-		fput(passthrough_filp);
 		return res;
 	}
 

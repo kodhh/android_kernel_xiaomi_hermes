@@ -2157,6 +2157,31 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 	return fasync_helper(fd, file, on, &fc->fasync);
 }
 
+static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
+			   unsigned long arg)
+{
+	struct fuse_conn *fc;
+	int res;
+	int oldfd;
+
+	fc = fuse_get_conn(file);
+	if (!fc)
+		return -EPERM;
+
+	switch (cmd) {
+	case FUSE_DEV_IOC_PASSTHROUGH_OPEN:
+		res = -EFAULT;
+		if (!get_user(oldfd, (__u32 __user *)arg))
+			res = fuse_passthrough_open(fc, oldfd);
+		break;
+
+	default:
+		res = -ENOTTY;
+		break;
+	}
+	return res;
+}
+
 const struct file_operations fuse_dev_operations = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
@@ -2167,6 +2192,7 @@ const struct file_operations fuse_dev_operations = {
 	.aio_write	= fuse_dev_write,
 	.splice_write	= fuse_dev_splice_write,
 	.poll		= fuse_dev_poll,
+	.unlocked_ioctl	= fuse_dev_ioctl,
 	.release	= fuse_dev_release,
 	.fasync		= fuse_dev_fasync,
 };
