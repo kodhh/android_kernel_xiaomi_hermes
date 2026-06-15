@@ -132,6 +132,24 @@ void prandom_bytes(void *buf, size_t bytes)
 }
 EXPORT_SYMBOL(prandom_bytes);
 
+void prandom_seed_full_state(struct rnd_state __percpu *pcpu_state)
+{
+	int i;
+
+	for_each_possible_cpu(i) {
+		struct rnd_state *state = per_cpu_ptr(pcpu_state, i);
+		u32 seeds[3];
+
+		get_random_bytes(&seeds, sizeof(seeds));
+		state->s1 = __seed(seeds[0], 2);
+		state->s2 = __seed(seeds[1], 8);
+		state->s3 = __seed(seeds[2], 16);
+
+		prandom_u32_state(state);
+	}
+}
+EXPORT_SYMBOL(prandom_seed_full_state);
+
 static void prandom_warmup(struct rnd_state *state)
 {
 	/* Calling RNG ten times to satisfy recurrence condition */

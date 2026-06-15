@@ -226,7 +226,26 @@ void perf_trace_del(struct perf_event *p_event, int flags)
 	tp_event->class->reg(tp_event, TRACE_REG_PERF_DEL, p_event);
 }
 
-__kprobes void *perf_trace_buf_prepare(int size, unsigned short type,
+__kprobes void *perf_trace_buf_alloc(int size, struct pt_regs *regs, int *rctxp)
+{
+	char *raw_data;
+	int rctx;
+
+	BUILD_BUG_ON(PERF_MAX_TRACE_SIZE % sizeof(unsigned long));
+
+	*rctxp = rctx = perf_swevent_get_recursion_context();
+	if (rctx < 0)
+		return NULL;
+
+	raw_data = this_cpu_ptr(perf_trace_buf[rctx]);
+
+	/* zero the dead bytes from align to not leak stack to user */
+	memset(&raw_data[size - sizeof(u64)], 0, sizeof(u64));
+	return raw_data;
+}
+EXPORT_SYMBOL_GPL(perf_trace_buf_alloc);
+
+ __kprobes void *perf_trace_buf_prepare(int size, unsigned short type,
 				       struct pt_regs *regs, int *rctxp)
 {
 	struct trace_entry *entry;

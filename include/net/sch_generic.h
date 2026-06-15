@@ -226,12 +226,13 @@ struct tcf_proto {
 	const struct tcf_proto_ops	*ops;
 };
 
-struct qdisc_skb_cb {
-	unsigned int		pkt_len;
-	u16			slave_dev_queue_mapping;
-	u16			_pad;
-	unsigned char		data[20];
-};
+ struct qdisc_skb_cb {
+ 	unsigned int		pkt_len;
+ 	u16			slave_dev_queue_mapping;
+ 	u16			_pad;
+ 	u16			tc_classid;
+ 	unsigned char		data[20];
+ };
 
 static inline void qdisc_cb_private_validate(const struct sk_buff *skb, int sz)
 {

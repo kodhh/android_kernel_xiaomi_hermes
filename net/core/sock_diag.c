@@ -13,6 +13,12 @@ static const struct sock_diag_handler *sock_diag_handlers[AF_MAX];
 static int (*inet_rcv_compat)(struct sk_buff *skb, struct nlmsghdr *nlh);
 static DEFINE_MUTEX(sock_diag_table_mutex);
 
+u64 sock_gen_cookie(struct sock *sk)
+{
+	return (u64)(unsigned long)sk;
+}
+EXPORT_SYMBOL_GPL(sock_gen_cookie);
+
 int sock_diag_check_cookie(void *sk, __u32 *cookie)
 {
 	if ((cookie[0] != INET_DIAG_NOCOOKIE ||
@@ -52,9 +58,10 @@ EXPORT_SYMBOL_GPL(sock_diag_put_meminfo);
 int sock_diag_put_filterinfo(bool may_report_filterinfo, struct sock *sk,
 			     struct sk_buff *skb, int attrtype)
 {
-	struct nlattr *attr;
+	struct sock_fprog_kern *fprog;
 	struct sk_filter *filter;
-	unsigned int len;
+	struct nlattr *attr;
+	unsigned int flen;
 	int err = 0;
 
 	if (!may_report_filterinfo) {
@@ -63,24 +70,23 @@ int sock_diag_put_filterinfo(bool may_report_filterinfo, struct sock *sk,
 	}
 
 	rcu_read_lock();
-
 	filter = rcu_dereference(sk->sk_filter);
-	len = filter ? filter->len * sizeof(struct sock_filter) : 0;
+	if (!filter)
+		goto out;
 
-	attr = nla_reserve(skb, attrtype, len);
+	fprog = filter->prog->orig_prog;
+	if (!fprog)
+		goto out;
+
+	flen = bpf_classic_proglen(fprog);
+
+	attr = nla_reserve(skb, attrtype, flen);
 	if (attr == NULL) {
 		err = -EMSGSIZE;
 		goto out;
 	}
 
-	if (filter) {
-		struct sock_filter *fb = (struct sock_filter *)nla_data(attr);
-		int i;
-
-		for (i = 0; i < filter->len; i++, fb++)
-			sk_decode_filter(&filter->insns[i], fb);
-	}
-
+	memcpy(nla_data(attr), fprog->filter, flen);
 out:
 	rcu_read_unlock();
 	return err;

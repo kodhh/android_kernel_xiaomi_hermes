@@ -705,7 +705,7 @@ perf_trace_##call(void *__data, proto)					\
 	struct ftrace_data_offsets_##call __maybe_unused __data_offsets;\
 	struct ftrace_raw_##call *entry;				\
 	struct pt_regs __regs;						\
-	u64 __addr = 0, __count = 1;					\
+	u64 __count = 1;					\
 	struct task_struct *__task = NULL;				\
 	struct hlist_head *head;					\
 	int __entry_size;						\
@@ -723,8 +723,7 @@ perf_trace_##call(void *__data, proto)					\
 		      "profile buffer not large enough"))		\
 		return;							\
 									\
-	entry = (struct ftrace_raw_##call *)perf_trace_buf_prepare(	\
-		__entry_size, event_call->event.type, &__regs, &rctx);	\
+	entry = (struct ftrace_raw_##call *) perf_trace_buf_alloc(__entry_size, &__regs, &rctx);	\
 	if (!entry)							\
 		return;							\
 									\
@@ -733,8 +732,9 @@ perf_trace_##call(void *__data, proto)					\
 	{ assign; }							\
 									\
 	head = this_cpu_ptr(event_call->perf_events);			\
-	perf_trace_buf_submit(entry, __entry_size, rctx, __addr,	\
-		__count, &__regs, head, __task);			\
+	perf_trace_run_bpf_submit(entry, __entry_size, rctx,		\
+				  event_call, __count, &__regs,		\
+				  head, __task);			\
 }
 
 /*

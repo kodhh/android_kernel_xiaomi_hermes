@@ -331,6 +331,9 @@ struct sock {
 	int			sk_rcvbuf;
 
 	struct sk_filter __rcu	*sk_filter;
+#ifdef CONFIG_CGROUP_BPF
+	struct cgroup		*skcg;
+#endif
 	struct socket_wq __rcu	*sk_wq;
 
 #ifdef CONFIG_NET_DMA
@@ -1102,6 +1105,11 @@ static inline struct cg_proto *parent_cg_proto(struct proto *proto,
 }
 #endif
 
+static inline int sk_under_cgroup_hierarchy(struct sock *sk,
+					    struct cgroup *ancestor)
+{
+	return cgroup_is_descendant(sk->skcg, ancestor);
+}
 
 static inline bool sk_has_memory_pressure(const struct sock *sk)
 {
@@ -1630,26 +1638,6 @@ extern void sk_filter_release_rcu(struct rcu_head *rcu);
  *
  *	Remove a filter from a socket and release its resources.
  */
-
-static inline void sk_filter_release(struct sk_filter *fp)
-{
-	if (atomic_dec_and_test(&fp->refcnt))
-		call_rcu(&fp->rcu, sk_filter_release_rcu);
-}
-
-static inline void sk_filter_uncharge(struct sock *sk, struct sk_filter *fp)
-{
-	unsigned int size = sk_filter_len(fp);
-
-	atomic_sub(size, &sk->sk_omem_alloc);
-	sk_filter_release(fp);
-}
-
-static inline void sk_filter_charge(struct sock *sk, struct sk_filter *fp)
-{
-	atomic_inc(&fp->refcnt);
-	atomic_add(sk_filter_len(fp), &sk->sk_omem_alloc);
-}
 
 /*
  * Socket reference counting postulates.

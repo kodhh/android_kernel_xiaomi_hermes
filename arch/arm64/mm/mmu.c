@@ -436,6 +436,42 @@ int kern_addr_valid(unsigned long addr)
 
 	return pfn_valid(pte_pfn(*pte));
 }
+static int set_page_attributes(unsigned long virt, int numpages,
+			       pte_t (*f)(pte_t))
+{
+	unsigned long start = virt;
+	unsigned long end = virt + (numpages << PAGE_SHIFT);
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+
+	while (virt < end) {
+		pgd = pgd_offset_k(virt);
+		pud = pud_offset(pgd, virt);
+		pmd = pmd_offset(pud, virt);
+		pte = pte_offset_kernel(pmd, virt);
+		set_pte(pte, f(*pte));
+		virt += PAGE_SIZE;
+	}
+
+	flush_tlb_kernel_range(start, end);
+
+	return 0;
+}
+
+int set_memory_ro(unsigned long addr, int numpages)
+{
+	return set_page_attributes(addr, numpages, pte_wrprotect);
+}
+EXPORT_SYMBOL(set_memory_ro);
+
+int set_memory_rw(unsigned long addr, int numpages)
+{
+	return set_page_attributes(addr, numpages, pte_mkwrite);
+}
+EXPORT_SYMBOL(set_memory_rw);
+
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 #ifdef CONFIG_ARM64_64K_PAGES
 int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)

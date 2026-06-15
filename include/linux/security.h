@@ -26,6 +26,7 @@
 #include <linux/capability.h>
 #include <linux/slab.h>
 #include <linux/err.h>
+#include <linux/bpf.h>
 
 struct linux_binprm;
 struct cred;
@@ -1693,6 +1694,17 @@ struct security_operations {
 				 struct audit_context *actx);
 	void (*audit_rule_free) (void *lsmrule);
 #endif /* CONFIG_AUDIT */
+
+#ifdef CONFIG_BPF_SYSCALL
+	int (*bpf)(int cmd, union bpf_attr *attr,
+				 unsigned int size);
+	int (*bpf_map)(struct bpf_map *map, fmode_t fmode);
+	int (*bpf_prog)(struct bpf_prog *prog);
+	int (*bpf_map_alloc_security)(struct bpf_map *map);
+	void (*bpf_map_free_security)(struct bpf_map *map);
+	int (*bpf_prog_alloc_security)(struct bpf_prog_aux *aux);
+	void (*bpf_prog_free_security)(struct bpf_prog_aux *aux);
+#endif /* CONFIG_BPF_SYSCALL */
 };
 
 /* prototypes */
@@ -1703,6 +1715,16 @@ extern void __init security_fixup_ops(struct security_operations *ops);
 
 
 /* Security operations */
+#ifdef CONFIG_BPF_SYSCALL
+extern int security_bpf(int cmd, union bpf_attr *attr, unsigned int size);
+extern int security_bpf_map(struct bpf_map *map, fmode_t fmode);
+extern int security_bpf_prog(struct bpf_prog *prog);
+extern int security_bpf_map_alloc(struct bpf_map *map);
+extern void security_bpf_map_free(struct bpf_map *map);
+extern int security_bpf_prog_alloc(struct bpf_prog_aux *aux);
+extern void security_bpf_prog_free(struct bpf_prog_aux *aux);
+#endif /* CONFIG_BPF_SYSCALL */
+
 int security_binder_set_context_mgr(struct task_struct *mgr);
 int security_binder_transaction(struct task_struct *from, struct task_struct *to);
 int security_binder_transfer_binder(struct task_struct *from, struct task_struct *to);
@@ -1874,6 +1896,40 @@ int security_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen);
 #else /* CONFIG_SECURITY */
 struct security_mnt_opts {
 };
+
+#ifdef CONFIG_BPF_SYSCALL
+static inline int security_bpf(int cmd, union bpf_attr *attr,
+					     unsigned int size)
+{
+	return 0;
+}
+
+static inline int security_bpf_map(struct bpf_map *map, fmode_t fmode)
+{
+	return 0;
+}
+
+static inline int security_bpf_prog(struct bpf_prog *prog)
+{
+	return 0;
+}
+
+static inline int security_bpf_map_alloc(struct bpf_map *map)
+{
+	return 0;
+}
+
+static inline void security_bpf_map_free(struct bpf_map *map)
+{ }
+
+static inline int security_bpf_prog_alloc(struct bpf_prog_aux *aux)
+{
+	return 0;
+}
+
+static inline void security_bpf_prog_free(struct bpf_prog_aux *aux)
+{ }
+#endif
 
 static inline void security_init_mnt_opts(struct security_mnt_opts *opts)
 {

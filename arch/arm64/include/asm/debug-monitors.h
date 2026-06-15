@@ -52,6 +52,9 @@
  */
 #define AARCH64_BREAK_MON	0xd4200000
 
+#define FAULT_BRK_IMM		0x100
+#define AARCH64_BREAK_FAULT	(AARCH64_BREAK_MON | (FAULT_BRK_IMM << 5))
+
 /*
  * Extract byte from BRK instruction
  */

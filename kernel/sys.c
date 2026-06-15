@@ -1388,18 +1388,32 @@ static int override_release(char __user *release, size_t len)
 
 SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 {
-	int errno = 0;
+	struct new_utsname tmp;
 
 	down_read(&uts_sem);
-	if (copy_to_user(name, utsname(), sizeof *name))
-		errno = -EFAULT;
-	up_read(&uts_sem);
 
-	if (!errno && override_release(name->release, sizeof(name->release)))
-		errno = -EFAULT;
-	if (!errno && override_architecture(name))
-		errno = -EFAULT;
-	return errno;
+	memcpy(&tmp, utsname(), sizeof(tmp));
+	if (!strncmp(current->comm, "bpfloader", 6) ||
+	    !strncmp(current->comm, "zygote", 6) ||
+	    !strncmp(current->comm, "zygote64", 8) ||
+	    !strncmp(current->comm, "perfetto", 8) ||
+	    !strncmp(current->comm, "system_server", 12) ||
+	    !strncmp(current->comm, "vendor_init", 11) ||
+	    !strncmp(current->comm, "main", 4) ||
+	    !strncmp(current->comm, "init", 4)) {
+		strcpy(tmp.release, "4.9.337");
+		pr_debug("fake uname: %s/%d release=%s\n",
+			 current->comm, current->pid, tmp.release);
+	}
+	up_read(&uts_sem);
+	if (copy_to_user(name, &tmp, sizeof(tmp)))
+		return -EFAULT;
+
+	if (override_release(name->release, sizeof(name->release)))
+		return -EFAULT;
+	if (override_architecture(name))
+		return -EFAULT;
+	return 0;
 }
 
 #ifdef __ARCH_WANT_SYS_OLD_UNAME

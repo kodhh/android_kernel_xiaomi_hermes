@@ -42,6 +42,7 @@
 #include <linux/inet.h>
 #include <linux/netdevice.h>
 #include <linux/icmpv6.h>
+#include <linux/bpf-cgroup.h>
 #include <linux/netfilter_ipv6.h>
 
 #include <net/ip.h>
@@ -261,6 +262,14 @@ lookup_protocol:
 	}
 	if (sk->sk_prot->init) {
 		err = sk->sk_prot->init(sk);
+		if (err) {
+			sk_common_release(sk);
+			goto out;
+		}
+	}
+
+	if (!kern) {
+		err = BPF_CGROUP_RUN_PROG_INET_SOCK(sk);
 		if (err) {
 			sk_common_release(sk);
 			goto out;
