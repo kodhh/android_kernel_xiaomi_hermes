@@ -582,7 +582,6 @@ struct cgroup_subsys {
 	void (*css_offline)(struct cgroup *cgrp);
 	void (*css_free)(struct cgroup *cgrp);
 
-	int (*allow_attach)(struct cgroup *cgrp, struct cgroup_taskset *tset);
 	int (*can_attach)(struct cgroup *cgrp, struct cgroup_taskset *tset);
 	void (*cancel_attach)(struct cgroup *cgrp, struct cgroup_taskset *tset);
 	void (*attach)(struct cgroup *cgrp, struct cgroup_taskset *tset);
@@ -874,16 +873,9 @@ unsigned short css_depth(struct cgroup_subsys_state *css);
 struct cgroup_subsys_state *cgroup_css_from_dir(struct file *f, int id);
 struct cgroup *cgroup_get_from_fd(int fd);
 
-/*
- * Default Android check for whether the current process is allowed to move a
- * task across cgroups, either because CAP_SYS_NICE is set or because the uid
- * of the calling process is the same as the moved task or because we are
- * running as root.
- * Returns 0 if this is allowed, or -EACCES otherwise.
- */
-int subsys_cgroup_allow_attach(struct cgroup *cgrp,
-			       struct cgroup_taskset *tset);
-
+void cgroup_sk_alloc(struct cgroup **skcg);
+void cgroup_sk_clone(struct cgroup *skcg);
+void cgroup_sk_free(struct cgroup *skcg);
 
 #else /* !CONFIG_CGROUPS */
 
@@ -908,11 +900,9 @@ static inline int cgroup_attach_task_all(struct task_struct *from,
 	return 0;
 }
 
-static inline int subsys_cgroup_allow_attach(struct cgroup *cgrp,
-					     struct cgroup_taskset *tset)
-{
-	return 0;
-}
+static inline void cgroup_sk_alloc(struct cgroup **skcg) {}
+static inline void cgroup_sk_clone(struct cgroup *skcg) {}
+static inline void cgroup_sk_free(struct cgroup *skcg) {}
 #endif /* !CONFIG_CGROUPS */
 
 #endif /* _LINUX_CGROUP_H */
