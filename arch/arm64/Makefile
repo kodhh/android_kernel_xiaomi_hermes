@@ -55,6 +55,7 @@ ifeq ($(CONFIG_COMPAT_VDSO), y)
     export CONFIG_VDSO32 := y
     vdso32 := -DCONFIG_VDSO32=1
   endif
+endif
 
 KBUILD_CFLAGS	+= -mgeneral-regs-only
 KBUILD_CFLAGS	+= $(lseinstr) $(vdso32)
