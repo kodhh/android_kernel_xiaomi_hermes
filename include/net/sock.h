@@ -331,9 +331,7 @@ struct sock {
 	int			sk_rcvbuf;
 
 	struct sk_filter __rcu	*sk_filter;
-#ifdef CONFIG_CGROUP_BPF
-	struct cgroup		*skcg;
-#endif
+	struct sock_cgroup_data	sk_cgrp_data;
 	struct socket_wq __rcu	*sk_wq;
 
 #ifdef CONFIG_NET_DMA
@@ -1108,7 +1106,7 @@ static inline struct cg_proto *parent_cg_proto(struct proto *proto,
 static inline int sk_under_cgroup_hierarchy(struct sock *sk,
 					    struct cgroup *ancestor)
 {
-	return cgroup_is_descendant(sk->skcg, ancestor);
+	return cgroup_is_descendant(sock_cgroup_ptr(&sk->sk_cgrp_data), ancestor);
 }
 
 static inline bool sk_has_memory_pressure(const struct sock *sk)

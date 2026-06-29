@@ -542,11 +542,12 @@ extern void perf_event_update_userpage(struct perf_event *event);
 extern int perf_event_release_kernel(struct perf_event *event);
 extern struct file *perf_event_get(unsigned int fd);
 extern const struct perf_event_attr *perf_event_attrs(struct perf_event *event);
-extern int get_callchain_buffers(void);
+extern int sysctl_perf_event_max_stack;
+extern int get_callchain_buffers(int max_stack);
 extern void put_callchain_buffers(void);
 struct perf_callchain_entry *
 get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
-		   bool crosstask, bool add_mark);
+		   u32 max_stack, bool crosstask, bool add_mark);
 extern struct perf_event *
 perf_event_create_kernel_counter(struct perf_event_attr *attr,
 				int cpu,
@@ -558,6 +559,12 @@ extern void perf_pmu_migrate_context(struct pmu *pmu,
 extern u64 perf_event_read_value(struct perf_event *event,
 				 u64 *enabled, u64 *running);
 
+static inline int perf_event_read_local(struct perf_event *event, u64 *value)
+{
+	u64 enabled, running;
+	*value = perf_event_read_value(event, &enabled, &running);
+	return 0;
+}
 
 struct perf_sample_data {
 	u64				type;

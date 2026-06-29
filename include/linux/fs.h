@@ -2651,6 +2651,13 @@ extern int simple_link(struct dentry *, struct inode *, struct dentry *);
 extern int simple_unlink(struct inode *, struct dentry *);
 extern int simple_rmdir(struct inode *, struct dentry *);
 extern int simple_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
+extern int __simple_rename(struct inode *, struct dentry *, struct inode *, struct dentry *);
+static inline int simple_rename_flags(struct inode *old_dir, struct dentry *old_dentry,
+                                      struct inode *new_dir, struct dentry *new_dentry,
+                                      unsigned int flags)
+{
+	return __simple_rename(old_dir, old_dentry, new_dir, new_dentry);
+}
 extern int noop_fsync(struct file *, loff_t, loff_t, int);
 extern int simple_empty(struct dentry *);
 extern int simple_readpage(struct file *file, struct page *page);

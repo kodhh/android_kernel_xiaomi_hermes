@@ -27,6 +27,7 @@ void *module_alloc(unsigned long size);
 
 /* Free memory returned from module_alloc. */
 void module_free(struct module *mod, void *module_region);
+void module_memfree(void *module_region);
 
 /*
  * Apply the given relocation to the (simplified) ELF.  Return -error

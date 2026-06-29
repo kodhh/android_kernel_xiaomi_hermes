@@ -87,6 +87,9 @@ struct cgroup_subsys_state {
 
 	/* Used to put @cgroup->dentry on the last css_put() */
 	struct work_struct dput_work;
+#ifdef CONFIG_CGROUP_BPF
+	struct cgroup_subsys_state *parent;
+#endif
 };
 
 /* bits in struct cgroup_subsys_state flags field */
@@ -169,6 +172,10 @@ struct cgroup_name {
 
 struct cgroup {
 	unsigned long flags;		/* "unsigned long" so bitops work */
+
+#ifdef CONFIG_CGROUP_BPF
+	struct cgroup_subsys_state self;
+#endif
 
 	/*
 	 * count users of this cgroup. >0 means busy, but doesn't
@@ -873,9 +880,50 @@ unsigned short css_depth(struct cgroup_subsys_state *css);
 struct cgroup_subsys_state *cgroup_css_from_dir(struct file *f, int id);
 struct cgroup *cgroup_get_from_fd(int fd);
 
+static inline void cgroup_put(struct cgroup *cgrp)
+{
+	atomic_dec(&cgrp->count);
+}
+
+struct sock_cgroup_data {
+	unsigned long val;
+};
+
+#ifdef CONFIG_CGROUP_BPF
+static inline struct cgroup *sock_cgroup_ptr(struct sock_cgroup_data *skcd)
+{
+	return (struct cgroup *)(unsigned long)skcd->val;
+}
+
+static inline struct cgroup *cgroup_parent(struct cgroup *cgrp)
+{
+	struct cgroup_subsys_state *parent_css = cgrp->self.parent;
+
+	if (parent_css)
+		return container_of(parent_css, struct cgroup, self);
+	return NULL;
+}
+
+struct cgroup_subsys_state *css_next_descendant_pre(struct cgroup_subsys_state *pos,
+						    struct cgroup_subsys_state *root);
+
+#define css_for_each_descendant_pre(pos, css)				\
+	for ((pos) = css_next_descendant_pre(NULL, (css)); (pos);	\
+	     (pos) = css_next_descendant_pre((pos), (css)))
+
+void cgroup_sk_alloc(struct sock_cgroup_data *skcd);
+void cgroup_sk_clone(struct sock_cgroup_data *skcd);
+void cgroup_sk_free(struct sock_cgroup_data *skcd);
+#else
+static inline struct cgroup *sock_cgroup_ptr(struct sock_cgroup_data *skcd)
+{
+	return (struct cgroup *)(unsigned long)skcd->val;
+}
+
 void cgroup_sk_alloc(struct cgroup **skcg);
 void cgroup_sk_clone(struct cgroup *skcg);
 void cgroup_sk_free(struct cgroup *skcg);
+#endif
 
 #else /* !CONFIG_CGROUPS */
 
@@ -900,9 +948,15 @@ static inline int cgroup_attach_task_all(struct task_struct *from,
 	return 0;
 }
 
+#ifdef CONFIG_CGROUP_BPF
+static inline void cgroup_sk_alloc(struct sock_cgroup_data *skcd) {}
+static inline void cgroup_sk_clone(struct sock_cgroup_data *skcd) {}
+static inline void cgroup_sk_free(struct sock_cgroup_data *skcd) {}
+#else
 static inline void cgroup_sk_alloc(struct cgroup **skcg) {}
 static inline void cgroup_sk_clone(struct cgroup *skcg) {}
 static inline void cgroup_sk_free(struct cgroup *skcg) {}
+#endif
 #endif /* !CONFIG_CGROUPS */
 
 #endif /* _LINUX_CGROUP_H */

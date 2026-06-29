@@ -18,6 +18,7 @@
 #include <linux/namei.h>
 #include <linux/fs.h>
 #include <linux/kdev_t.h>
+#include <linux/parser.h>
 #include <linux/filter.h>
 #include <linux/bpf.h>
 
@@ -139,8 +140,18 @@ static int bpf_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return 0;
 }
 
+static int bpffs_obj_open(struct inode *inode, struct file *file)
+{
+	return -EIO;
+}
+
+static const struct file_operations bpffs_obj_fops = {
+	.open		= bpffs_obj_open,
+};
+
 static int bpf_mkobj_ops(struct inode *dir, struct dentry *dentry,
-			 umode_t mode, const struct inode_operations *iops)
+			 umode_t mode, const struct inode_operations *iops,
+			 const struct file_operations *fops)
 {
 	struct inode *inode;
 
@@ -149,6 +160,7 @@ static int bpf_mkobj_ops(struct inode *dir, struct dentry *dentry,
 		return PTR_ERR(inode);
 
 	inode->i_op = iops;
+	inode->i_fop = fops;
 	inode->i_private = dentry->d_fsdata;
 
 	d_instantiate(dentry, inode);
@@ -168,9 +180,9 @@ static int bpf_mkobj(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	switch (type) {
 	case BPF_TYPE_PROG:
-		return bpf_mkobj_ops(dir, dentry, mode, &bpf_prog_iops);
+		return bpf_mkobj_ops(dir, dentry, mode, &bpf_prog_iops, &bpffs_obj_fops);
 	case BPF_TYPE_MAP:
-		return bpf_mkobj_ops(dir, dentry, mode, &bpf_map_iops);
+		return bpf_mkobj_ops(dir, dentry, mode, &bpf_map_iops, &bpffs_obj_fops);
 	default:
 		return -EPERM;
 	}
@@ -179,6 +191,9 @@ static int bpf_mkobj(struct inode *dir, struct dentry *dentry, umode_t mode,
 static struct dentry *
 bpf_lookup(struct inode *dir, struct dentry *dentry, unsigned flags)
 {
+	/* Dots in names (e.g. "/sys/fs/bpf/foo.bar") are reserved for future
+	 * extensions.
+	 */
 	if (strchr(dentry->d_name.name, '.'))
 		return ERR_PTR(-EPERM);
 	return simple_lookup(dir, dentry, flags);
@@ -189,7 +204,7 @@ static const struct inode_operations bpf_dir_iops = {
 	.mknod		= bpf_mkobj,
 	.mkdir		= bpf_mkdir,
 	.rmdir		= simple_rmdir,
-	.rename		= simple_rename,
+	.rename2	= simple_rename,
 	.link		= simple_link,
 	.unlink		= simple_unlink,
 };
@@ -362,24 +377,85 @@ static void bpf_evict_inode(struct inode *inode)
 {
 	enum bpf_type type;
 
-	truncate_inode_pages_final(&inode->i_data);
+	truncate_inode_pages(&inode->i_data, 0);
 	clear_inode(inode);
 
 	if (!bpf_inode_type(inode, &type))
 		bpf_any_put(inode->i_private, type);
 }
 
+/*
+ * Display the mount options in /proc/mounts.
+ */
+static int bpf_show_options(struct seq_file *m, struct dentry *root)
+{
+	umode_t mode = d_inode(root)->i_mode & S_IALLUGO & ~S_ISVTX;
+
+	if (mode != S_IRWXUGO)
+		seq_printf(m, ",mode=%o", mode);
+	return 0;
+}
+
 static const struct super_operations bpf_super_ops = {
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
+	.show_options	= bpf_show_options,
 	.evict_inode	= bpf_evict_inode,
 };
+
+enum {
+	OPT_MODE,
+	OPT_ERR,
+};
+
+static const match_table_t bpf_mount_tokens = {
+	{ OPT_MODE, "mode=%o" },
+	{ OPT_ERR, NULL },
+};
+
+struct bpf_mount_opts {
+	umode_t mode;
+};
+
+static int bpf_parse_options(char *data, struct bpf_mount_opts *opts)
+{
+	substring_t args[MAX_OPT_ARGS];
+	int option, token;
+	char *ptr;
+
+	opts->mode = S_IRWXUGO;
+
+	while ((ptr = strsep(&data, ",")) != NULL) {
+		if (!*ptr)
+			continue;
+
+		token = match_token(ptr, bpf_mount_tokens, args);
+		switch (token) {
+		case OPT_MODE:
+			if (match_octal(&args[0], &option))
+				return -EINVAL;
+			opts->mode = option & S_IALLUGO;
+			break;
+		/* We might like to report bad mount options here, but
+		 * traditionally we've ignored all mount options, so we'd
+		 * better continue to ignore non-existing options for bpf.
+		 */
+		}
+	}
+
+	return 0;
+}
 
 static int bpf_fill_super(struct super_block *sb, void *data, int silent)
 {
 	static struct tree_descr bpf_rfiles[] = { { "" } };
+	struct bpf_mount_opts opts;
 	struct inode *inode;
 	int ret;
+
+	ret = bpf_parse_options(data, &opts);
+	if (ret)
+		return ret;
 
 	ret = simple_fill_super(sb, BPF_FS_MAGIC, bpf_rfiles);
 	if (ret)
@@ -390,7 +466,7 @@ static int bpf_fill_super(struct super_block *sb, void *data, int silent)
 	inode = sb->s_root->d_inode;
 	inode->i_op = &bpf_dir_iops;
 	inode->i_mode &= ~S_IALLUGO;
-	inode->i_mode |= S_ISVTX | S_IRWXUGO;
+	inode->i_mode |= S_ISVTX | opts.mode;
 
 	return 0;
 }
@@ -420,7 +496,7 @@ static int __init bpf_init(void)
 	ret = register_filesystem(&bpf_fs_type);
 	if (ret)
 		kobject_put(bpf_kobj);
-
+        
 	return ret;
 }
 fs_initcall(bpf_init);

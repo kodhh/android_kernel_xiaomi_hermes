@@ -369,4 +369,18 @@ static inline ktime_t ns_to_ktime(u64 ns)
 	return ktime_add_ns(ktime_zero, ns);
 }
 
+static inline u64 notrace ktime_get_mono_fast_ns(void)
+{
+	struct timespec ts;
+	ktime_get_ts(&ts);
+	return timespec_to_ns(&ts);
+}
+
+static inline u64 notrace ktime_get_boot_fast_ns(void)
+{
+	struct timespec ts;
+	get_monotonic_boottime(&ts);
+	return timespec_to_ns(&ts);
+}
+
 #endif

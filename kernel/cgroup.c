@@ -3044,6 +3044,19 @@ struct cgroup *cgroup_next_descendant_pre(struct cgroup *pos,
 }
 EXPORT_SYMBOL_GPL(cgroup_next_descendant_pre);
 
+#ifdef CONFIG_CGROUP_BPF
+struct cgroup_subsys_state *css_next_descendant_pre(struct cgroup_subsys_state *pos,
+						    struct cgroup_subsys_state *root)
+{
+	struct cgroup *cgrp_root = container_of(root, struct cgroup, self);
+	struct cgroup *cgrp_pos = pos ? container_of(pos, struct cgroup, self) : NULL;
+	struct cgroup *next = cgroup_next_descendant_pre(cgrp_pos, cgrp_root);
+
+	return next ? &next->self : NULL;
+}
+EXPORT_SYMBOL_GPL(css_next_descendant_pre);
+#endif
+
 /**
  * cgroup_rightmost_descendant - return the rightmost descendant of a cgroup
  * @pos: cgroup of interest
@@ -4192,6 +4205,11 @@ static long cgroup_create(struct cgroup *parent, struct dentry *dentry,
 	cgrp = kzalloc(sizeof(*cgrp), GFP_KERNEL);
 	if (!cgrp)
 		return -ENOMEM;
+
+#ifdef CONFIG_CGROUP_BPF
+	cgrp->self.cgroup = cgrp;
+	cgrp->self.parent = parent ? &parent->self : NULL;
+#endif
 
 	name = cgroup_alloc_name(dentry);
 	if (!name)
@@ -5439,6 +5457,45 @@ static struct cgroupfs_root *findBpfCg(void){
 
 }
 
+#ifdef CONFIG_CGROUP_BPF
+void cgroup_sk_alloc(struct sock_cgroup_data *skcd)
+{
+	struct cgroup *cgrp;
+	static struct cgroupfs_root *bpfRoot = NULL;
+
+	/* Don't associate the sock with unrelated interrupted task's cgroup. */
+	if (in_interrupt())
+		return;
+
+	if(bpfRoot == NULL)
+		bpfRoot = findBpfCg();
+
+	if(bpfRoot){
+		mutex_lock(&cgroup_mutex);
+		cgrp = task_cgroup_from_root(current, bpfRoot);
+	        atomic_inc(&cgrp->count);
+		mutex_unlock(&cgroup_mutex);
+		skcd->val = (unsigned long)cgrp;
+	}
+	else
+		skcd->val = 0;
+}
+
+void cgroup_sk_clone(struct sock_cgroup_data *skcd)
+{
+	struct cgroup *skcg = (struct cgroup *)(unsigned long)skcd->val;
+	/* Socket clone path */
+	if (skcg)
+		atomic_inc(&skcg->count);
+}
+
+void cgroup_sk_free(struct sock_cgroup_data *skcd)
+{
+	struct cgroup *skcg = (struct cgroup *)(unsigned long)skcd->val;
+	if (skcg)
+		atomic_dec(&skcg->count);
+}
+#else
 void cgroup_sk_alloc(struct cgroup **skcg)
 {
 	struct cgroup *cgrp;
@@ -5474,6 +5531,7 @@ void cgroup_sk_free(struct cgroup *skcg)
 	if (skcg)
 		atomic_dec(&skcg->count);
 }
+#endif
 
 #ifdef CONFIG_CGROUP_BPF
 int cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,

@@ -23,6 +23,8 @@ static atomic_t nr_callchain_events;
 static DEFINE_MUTEX(callchain_mutex);
 static struct callchain_cpus_entries *callchain_cpus_entries;
 
+int sysctl_perf_event_max_stack __read_mostly = 127;
+
 
 __weak void perf_callchain_kernel(struct perf_callchain_entry *entry,
 				  struct pt_regs *regs)
@@ -94,7 +96,7 @@ fail:
 	return -ENOMEM;
 }
 
-int get_callchain_buffers(void)
+int get_callchain_buffers(int max_stack)
 {
 	int err = 0;
 	int count;
@@ -207,7 +209,7 @@ exit_put:
 
 struct perf_callchain_entry *
 get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
-		   bool crosstask, bool add_mark)
+		   u32 max_stack, bool crosstask, bool add_mark)
 {
 	struct perf_callchain_entry *entry;
 	int rctx;

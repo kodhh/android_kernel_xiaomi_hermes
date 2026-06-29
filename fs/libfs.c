@@ -997,6 +997,13 @@ EXPORT_SYMBOL(simple_pin_fs);
 EXPORT_SYMBOL(simple_readpage);
 EXPORT_SYMBOL(simple_release_fs);
 EXPORT_SYMBOL(simple_rename);
+
+int __simple_rename(struct inode *old_dir, struct dentry *old_dentry,
+		    struct inode *new_dir, struct dentry *new_dentry)
+{
+	return simple_rename(old_dir, old_dentry, new_dir, new_dentry);
+}
+EXPORT_SYMBOL(__simple_rename);
 EXPORT_SYMBOL(simple_rmdir);
 EXPORT_SYMBOL(simple_statfs);
 EXPORT_SYMBOL(noop_fsync);

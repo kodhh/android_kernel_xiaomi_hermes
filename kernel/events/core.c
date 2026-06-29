@@ -6820,7 +6820,7 @@ err_ns:
 		if (event->attr.task)
 			atomic_inc(&nr_task_events);
 		if (event->attr.sample_type & PERF_SAMPLE_CALLCHAIN) {
-			err = get_callchain_buffers();
+			err = get_callchain_buffers(sysctl_perf_event_max_stack);
 			if (err) {
 				free_event(event);
 				return ERR_PTR(err);
