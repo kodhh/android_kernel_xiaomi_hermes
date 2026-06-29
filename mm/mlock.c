@@ -290,7 +290,7 @@ static int mlock_fixup(struct vm_area_struct *vma, struct vm_area_struct **prev,
 	pgoff = vma->vm_pgoff + ((start - vma->vm_start) >> PAGE_SHIFT);
 	*prev = vma_merge(mm, *prev, start, end, newflags, vma->anon_vma,
 			  vma->vm_file, pgoff, vma_policy(vma),
-			  vma_get_anon_name(vma));
+			  vma->vm_userfaultfd_ctx, vma_get_anon_name(vma));
 	if (*prev) {
 		vma = *prev;
 		goto success;
@@ -333,7 +333,7 @@ out:
 	return ret;
 }
 
-static int do_mlock(unsigned long start, size_t len, int on)
+static int do_mlock(unsigned long start, size_t len, vm_flags_t flags)
 {
 	unsigned long nstart, end, tmp;
 	struct vm_area_struct * vma, * prev;
@@ -359,9 +359,7 @@ static int do_mlock(unsigned long start, size_t len, int on)
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 
-		newflags = vma->vm_flags & ~VM_LOCKED;
-		if (on)
-			newflags |= VM_LOCKED;
+		newflags = (vma->vm_flags & VM_LOCKED_CLEAR_MASK) | flags;
 
 		tmp = vma->vm_end;
 		if (tmp > end)
@@ -470,9 +468,45 @@ SYSCALL_DEFINE2(mlock, unsigned long, start, size_t, len)
 
 	/* check against resource limits */
 	if ((locked <= lock_limit) || capable(CAP_IPC_LOCK))
-		error = do_mlock(start, len, 1);
+		error = do_mlock(start, len, VM_LOCKED);
 	up_write(&current->mm->mmap_sem);
 	if (!error)
+		error = __mm_populate(start, len, 0);
+	return error;
+}
+
+SYSCALL_DEFINE3(mlock2, unsigned long, start, size_t, len, int, flags)
+{
+	unsigned long locked;
+	unsigned long lock_limit;
+	int error = -ENOMEM;
+
+	if (flags & ~MLOCK_ONFAULT)
+		return -EINVAL;
+
+	if (!can_do_mlock())
+		return -EPERM;
+
+	lru_add_drain_all();
+
+	down_write(&current->mm->mmap_sem);
+	len = PAGE_ALIGN(len + (start & ~PAGE_MASK));
+	start &= PAGE_MASK;
+
+	locked = len >> PAGE_SHIFT;
+	locked += current->mm->locked_vm;
+
+	lock_limit = rlimit(RLIMIT_MEMLOCK);
+	lock_limit >>= PAGE_SHIFT;
+
+	if ((locked <= lock_limit) || capable(CAP_IPC_LOCK)) {
+		vm_flags_t vm_flags = VM_LOCKED;
+		if (flags & MLOCK_ONFAULT)
+			vm_flags |= VM_LOCKONFAULT;
+		error = do_mlock(start, len, vm_flags);
+	}
+	up_write(&current->mm->mmap_sem);
+	if (!error && !(flags & MLOCK_ONFAULT))
 		error = __mm_populate(start, len, 0);
 	return error;
 }
@@ -503,7 +537,7 @@ static int do_mlockall(int flags)
 	for (vma = current->mm->mmap; vma ; vma = prev->vm_next) {
 		vm_flags_t newflags;
 
-		newflags = vma->vm_flags & ~VM_LOCKED;
+		newflags = vma->vm_flags & VM_LOCKED_CLEAR_MASK;
 		if (flags & MCL_CURRENT)
 			newflags |= VM_LOCKED;
 

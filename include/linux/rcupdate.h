@@ -499,12 +499,6 @@ static inline void rcu_preempt_sleep_check(void)
 
 #endif /* #else #ifdef CONFIG_PROVE_RCU */
 
-#define lockless_dereference(p) \
-({ \
-	typeof(p) _________p1 = ACCESS_ONCE(p); \
-	smp_read_barrier_depends(); \
-	(_________p1); \
-})
 
 /*
  * Helper functions for rcu_dereference_check(), rcu_dereference_protected()

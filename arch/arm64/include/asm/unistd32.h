@@ -797,3 +797,19 @@ __SYSCALL(__NR_memfd_create, sys_memfd_create)
 __SYSCALL(__NR_bpf, sys_bpf)
 #define __NR_execveat 387
 __SYSCALL(__NR_execveat, compat_sys_execveat)
+#define __NR_userfaultfd 388
+__SYSCALL(__NR_userfaultfd, sys_userfaultfd)
+#define __NR_membarrier 389
+__SYSCALL(__NR_membarrier, sys_membarrier)
+#define __NR_mlock2 390
+__SYSCALL(__NR_mlock2, sys_mlock2)
+#define __NR_copy_file_range 391
+__SYSCALL(__NR_copy_file_range, sys_copy_file_range)
+#define __NR_preadv2 392
+__SYSCALL(__NR_preadv2, compat_sys_preadv2)
+#define __NR_pwritev2 393
+__SYSCALL(__NR_pwritev2, compat_sys_pwritev2)
+#define __NR_pidfd_send_signal 424
+__SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+#define __NR_pidfd_open 434
+__SYSCALL(__NR_pidfd_open, sys_pidfd_open)

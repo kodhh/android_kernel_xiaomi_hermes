@@ -10,4 +10,6 @@
 #define OVERCOMMIT_ALWAYS		1
 #define OVERCOMMIT_NEVER		2
 
+#define MLOCK_ONFAULT	0x01
+
 #endif /* _UAPI_LINUX_MMAN_H */
