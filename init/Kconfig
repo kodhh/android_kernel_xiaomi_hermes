@@ -1480,6 +1480,15 @@ config BPF_JIT_ALWAYS_ON
 	  Enables BPF JIT and removes BPF interpreter to avoid
 	  speculative execution of BPF instructions by the interpreter
 
+config BPF_UNPRIV_DEFAULT_OFF
+	bool "Disable unprivileged BPF by default"
+	depends on BPF_SYSCALL
+	default n
+	help
+	  Disables unprivileged BPF by default by setting
+	  kernel.unprivileged_bpf_disabled to 2.  Any attempt to
+	  load a BPF program by an unprivileged user will fail.
+
 config SHMEM
 	bool "Use full shmem filesystem" if EXPERT
 	default y
