@@ -621,6 +621,12 @@ static inline int hlist_empty(const struct hlist_head *h)
 	return !h->first;
 }
 
+static inline bool
+hlist_is_singular_node(struct hlist_node *n, struct hlist_head *h)
+{
+	return !n->next && n->pprev == &h->first;
+}
+
 static inline void __hlist_del(struct hlist_node *n)
 {
 	struct hlist_node *next = n->next;

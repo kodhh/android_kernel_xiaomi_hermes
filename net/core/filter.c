@@ -49,6 +49,8 @@
 #include <net/sch_generic.h>
 #include <net/cls_cgroup.h>
 #include <net/dst.h>
+#include <net/sock_reuseport.h>
+#include <net/bpf_sk_storage.h>
 
 /**
  *	sk_filter_trim_cap - run a packet through a socket filter
