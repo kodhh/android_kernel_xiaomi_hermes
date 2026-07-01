@@ -694,10 +694,10 @@ static int binderfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (ret)
 		return ret;
 
-	info->root_gid = make_kgid(current_user_ns(), 0);
+	info->root_gid = make_kgid(&init_user_ns, 0);
 	if (!gid_valid(info->root_gid))
 		info->root_gid = GLOBAL_ROOT_GID;
-	info->root_uid = make_kuid(current_user_ns(), 0);
+	info->root_uid = make_kuid(&init_user_ns, 0);
 	if (!uid_valid(info->root_uid))
 		info->root_uid = GLOBAL_ROOT_UID;
 

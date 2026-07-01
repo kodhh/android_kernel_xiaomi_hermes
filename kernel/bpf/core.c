@@ -420,27 +420,23 @@ static bool bpf_prog_kallsyms_verify_off(const struct bpf_prog *fp)
 
 void bpf_prog_kallsyms_add(struct bpf_prog *fp)
 {
-	unsigned long flags;
-
 	if (!bpf_prog_kallsyms_candidate(fp) ||
 	    !capable(CAP_SYS_ADMIN))
 		return;
 
-	spin_lock_irqsave(&bpf_lock, flags);
+	spin_lock_bh(&bpf_lock);
 	bpf_prog_ksym_node_add(fp->aux);
-	spin_unlock_irqrestore(&bpf_lock, flags);
+	spin_unlock_bh(&bpf_lock);
 }
 
 void bpf_prog_kallsyms_del(struct bpf_prog *fp)
 {
-	unsigned long flags;
-
 	if (!bpf_prog_kallsyms_candidate(fp))
 		return;
 
-	spin_lock_irqsave(&bpf_lock, flags);
+	spin_lock_bh(&bpf_lock);
 	bpf_prog_ksym_node_del(fp->aux);
-	spin_unlock_irqrestore(&bpf_lock, flags);
+	spin_unlock_bh(&bpf_lock);
 }
 
 static struct bpf_prog *bpf_prog_kallsyms_find(unsigned long addr)
@@ -989,14 +985,10 @@ select_insn:
 		(*(s64 *) &DST) >>= IMM;
 		CONT;
 	ALU64_MOD_X:
-		if (unlikely(SRC == 0))
-			return 0;
 		div64_u64_rem(DST, SRC, &tmp);
 		DST = tmp;
 		CONT;
 	ALU_MOD_X:
-		if (unlikely((u32)SRC == 0))
-			return 0;
 		tmp = (u32) DST;
 		DST = do_div(tmp, (u32) SRC);
 		CONT;
@@ -1009,13 +1001,9 @@ select_insn:
 		DST = do_div(tmp, (u32) IMM);
 		CONT;
 	ALU64_DIV_X:
-		if (unlikely(SRC == 0))
-			return 0;
 		DST = div64_u64(DST, SRC);
 		CONT;
 	ALU_DIV_X:
-		if (unlikely((u32)SRC == 0))
-			return 0;
 		tmp = (u32) DST;
 		do_div(tmp, (u32) SRC);
 		DST = (u32) tmp;
@@ -1535,6 +1523,44 @@ int bpf_prog_array_copy(struct bpf_prog_array __rcu *old_array,
 		array->progs[new_prog_idx++] = include_prog;
 	array->progs[new_prog_idx] = NULL;
 	*new_array = array;
+	return 0;
+}
+
+int bpf_prog_array_length(struct bpf_prog_array __rcu *progs)
+{
+	struct bpf_prog **prog;
+	u32 cnt = 0;
+
+	rcu_read_lock();
+	prog = rcu_dereference(progs)->progs;
+	for (; *prog; prog++)
+		cnt++;
+	rcu_read_unlock();
+	return cnt;
+}
+
+int bpf_prog_array_copy_to_user(struct bpf_prog_array __rcu *progs,
+				__u32 __user *prog_ids, u32 cnt)
+{
+	struct bpf_prog **prog;
+	u32 i = 0, id;
+
+	rcu_read_lock();
+	prog = rcu_dereference(progs)->progs;
+	for (; *prog; prog++) {
+		id = (*prog)->aux->id;
+		if (copy_to_user(prog_ids + i, &id, sizeof(id))) {
+			rcu_read_unlock();
+			return -EFAULT;
+		}
+		if (++i == cnt) {
+			prog++;
+			break;
+		}
+	}
+	rcu_read_unlock();
+	if (*prog)
+		return -ENOSPC;
 	return 0;
 }
 

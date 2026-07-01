@@ -92,6 +92,9 @@ enum bpf_cmd {
 	BPF_PROG_GET_FD_BY_ID,
 	BPF_MAP_GET_FD_BY_ID,
 	BPF_OBJ_GET_INFO_BY_FD,
+	BPF_PROG_QUERY,
+	BPF_BTF_LOAD = 18,
+	BPF_BTF_GET_FD_BY_ID,
 };
 
 enum bpf_map_type {
@@ -111,7 +114,8 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_HASH_OF_MAPS,
 	BPF_MAP_TYPE_DEVMAP,
 	BPF_MAP_TYPE_DEVMAP_HASH = BPF_MAP_TYPE_DEVMAP + 11,
-	BPF_MAP_TYPE_SK_STORAGE = 21,
+	BPF_MAP_TYPE_SK_STORAGE = 24,
+	BPF_MAP_TYPE_RINGBUF = 27,
 };
 
 enum bpf_prog_type {
@@ -217,6 +221,12 @@ enum bpf_attach_type {
 #define BPF_F_RDONLY		(1U << 3)
 #define BPF_F_WRONLY		(1U << 4)
 
+/* flags for BPF_PROG_QUERY */
+#define BPF_F_QUERY_EFFECTIVE	(1U << 0)
+
+/* Enable memory-mapping BPF map */
+#define BPF_F_MMAPABLE		(1U << 10)
+
 #define BPF_OBJ_NAME_LEN 16U
 
 union bpf_attr {
@@ -231,6 +241,10 @@ union bpf_attr {
  					 * BPF_F_NUMA_NODE is set).
  					 */
 		char	map_name[BPF_OBJ_NAME_LEN];
+		__u32	map_ifindex;	/* ifindex of netdev to create on */
+		__u32	btf_fd;		/* fd pointing to a BTF type data */
+		__u32	btf_key_type_id;	/* BTF type_id of the key */
+		__u32	btf_value_type_id;	/* BTF type_id of the value */
 	};
 
 	struct { /* anonymous struct used by BPF_MAP_*_ELEM commands */
@@ -260,6 +274,14 @@ union bpf_attr {
 		 * (context accesses, allowed helpers, etc).
 		 */
 		__u32		expected_attach_type;
+
+		__u32		prog_btf_fd;	/* fd pointing to BTF type data */
+		__u32		func_info_rec_size;	/* userspace bpf_func_info size */
+		__aligned_u64	func_info;	/* func info */
+		__u32		func_info_cnt;	/* number of bpf_func_info records */
+		__u32		line_info_rec_size;	/* userspace bpf_line_info size */
+		__aligned_u64	line_info;	/* line info */
+		__u32		line_info_cnt;	/* number of bpf_line_info records */
 	};
 
 	struct { /* anonymous struct used by BPF_OBJ_* commands */
@@ -291,8 +313,10 @@ union bpf_attr {
 			__u32		start_id;
 			__u32		prog_id;
 			__u32		map_id;
+			__u32		btf_id;
 		};
 		__u32		next_id;
+		__u32		open_flags;
 	};
 
 	struct { /* anonymous struct used by BPF_OBJ_GET_INFO_BY_FD */
@@ -300,6 +324,28 @@ union bpf_attr {
 		__u32		info_len;
 		__aligned_u64	info;
 	} info;
+
+	struct { /* anonymous struct used by BPF_PROG_QUERY command */
+		__u32		target_fd;	/* container object to query */
+		__u32		attach_type;
+		__u32		query_flags;
+		__u32		attach_flags;
+		__aligned_u64	prog_ids;
+		__u32		prog_cnt;
+	} query;
+
+	struct { /* anonymous struct used by BPF_RAW_TRACEPOINT_OPEN command */
+		__u64 name;
+		__u32 prog_fd;
+	} raw_tracepoint;
+
+	struct { /* anonymous struct for BPF_BTF_LOAD */
+		__aligned_u64	btf;
+		__aligned_u64	btf_log_buf;
+		__u32		btf_size;
+		__u32		btf_log_size;
+		__u32		btf_log_level;
+	};
 } __attribute__((aligned(8)));
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
@@ -696,6 +742,8 @@ enum bpf_func_id {
 	BPF_FUNC_skb_load_bytes_relative = 68,
 
 
+	BPF_FUNC_sk_fullsock = 95,
+
 	/**
 	 * struct bpf_tcp_sock *bpf_tcp_sock(struct bpf_sock *sk)
 	 *	Description
@@ -761,6 +809,13 @@ enum bpf_func_id {
 	 */
 	BPF_FUNC_ktime_get_boot_ns = 125,
 
+
+	BPF_FUNC_ringbuf_output = 130,
+	BPF_FUNC_ringbuf_reserve = 131,
+	BPF_FUNC_ringbuf_submit = 132,
+	BPF_FUNC_ringbuf_discard = 133,
+	BPF_FUNC_ringbuf_query = 134,
+
 	__BPF_FUNC_MAX_ID,
 };
 
@@ -804,6 +859,29 @@ enum bpf_func_id {
 /* BPF_FUNC_sk_storage_get flags */
 #define BPF_SK_STORAGE_GET_F_CREATE	(1ULL << 0)
 
+/* BPF_FUNC_bpf_ringbuf_commit, BPF_FUNC_bpf_ringbuf_discard, and
+ * BPF_FUNC_bpf_ringbuf_output flags.
+ */
+enum {
+	BPF_RB_NO_WAKEUP		= (1ULL << 0),
+	BPF_RB_FORCE_WAKEUP		= (1ULL << 1),
+};
+
+/* BPF_FUNC_bpf_ringbuf_query flags */
+enum {
+	BPF_RB_AVAIL_DATA = 0,
+	BPF_RB_RING_SIZE = 1,
+	BPF_RB_CONS_POS = 2,
+	BPF_RB_PROD_POS = 3,
+};
+
+/* BPF ring buffer constants */
+enum {
+	BPF_RINGBUF_BUSY_BIT		= (1U << 31),
+	BPF_RINGBUF_DISCARD_BIT		= (1U << 30),
+	BPF_RINGBUF_HDR_SZ		= 8,
+};
+
 /* Mode for BPF_FUNC_skb_adjust_room helper. */
 enum bpf_adj_room_mode {
 	BPF_ADJ_ROOM_NET,
@@ -813,6 +891,46 @@ enum bpf_adj_room_mode {
 enum bpf_hdr_start_off {
 	BPF_HDR_START_MAC,
 	BPF_HDR_START_NET,
+};
+
+#define __bpf_md_ptr(type, name)	\
+union {					\
+	type name;			\
+	__u64 :64;			\
+} __attribute__((aligned(8)))
+
+struct bpf_flow_keys {
+	__u16	nhoff;
+	__u16	thoff;
+	__u16	addr_proto;			/* ETH_P_* of valid addrs */
+	__u8	is_frag;
+	__u8	is_first_frag;
+	__u8	is_encap;
+	__u8	ip_proto;
+	__be16	n_proto;
+	__be16	sport;
+	__be16	dport;
+	union {
+		struct {
+			__be32	ipv4_src;
+			__be32	ipv4_dst;
+		};
+		struct {
+			__u32	ipv6_src[4];	/* in6_addr; network order */
+			__u32	ipv6_dst[4];	/* in6_addr; network order */
+		};
+	};
+	__u32	flags;
+	__be32	flow_label;
+};
+
+struct bpf_sock {
+	__u32 bound_dev_if;
+	__u32 family;
+	__u32 type;
+	__u32 protocol;
+	__u32 mark;
+	__u32 priority;
 };
 
 /* user accessible mirror of in-kernel sk_buff.
@@ -836,6 +954,26 @@ struct __sk_buff {
 	__u32 tc_classid;
 	__u32 data;
 	__u32 data_end;
+
+	__u32 napi_id;
+
+	/* Accessed by BPF_PROG_TYPE_sk_skb types from here to ... */
+	__u32 family;
+	__u32 remote_ip4;	/* Stored in network byte order */
+	__u32 local_ip4;	/* Stored in network byte order */
+	__u32 remote_ip6[4];	/* Stored in network byte order */
+	__u32 local_ip6[4];	/* Stored in network byte order */
+	__u32 remote_port;	/* Stored in network byte order */
+	__u32 local_port;	/* stored in host byte order */
+	/* ... here. */
+
+	__u32 data_meta;
+	__bpf_md_ptr(struct bpf_flow_keys *, flow_keys);
+	__u64 tstamp;
+	__u32 wire_len;
+	__u32 gso_segs;
+	__bpf_md_ptr(struct bpf_sock *, sk);
+	__u32 gso_size;
 };
 
 struct bpf_tunnel_key {
@@ -848,10 +986,6 @@ struct bpf_tunnel_key {
 	__u8 tunnel_ttl;
 	__u16 tunnel_ext;
 	__u32 tunnel_label;
-};
-
-struct bpf_sock {
-	__u32 bound_dev_if;
 };
 
 /* User return codes for XDP prog type.
@@ -898,6 +1032,18 @@ struct bpf_map_info {
 	__u32 max_entries;
 	__u32 map_flags;
 	char  name[BPF_OBJ_NAME_LEN];
+	__u32 ifindex;
+	__u64 netns_dev;
+	__u64 netns_ino;
+	__u32 btf_id;
+	__u32 btf_key_type_id;
+	__u32 btf_value_type_id;
+} __attribute__((aligned(8)));
+
+struct bpf_btf_info {
+	__aligned_u64 btf;
+	__u32 btf_size;
+	__u32 id;
 } __attribute__((aligned(8)));
 
 /* User bpf_sock_addr struct to access socket fields and sockaddr struct passed
@@ -925,13 +1071,6 @@ struct bpf_sock_addr {
 				 * Stored in network byte order.
 				 */
 };
-
-
-#define __bpf_md_ptr(type, name)	\
-union {					\
-	type name;			\
-	__u64 :64;			\
-} __attribute__((aligned(8)))
 
 struct bpf_sockopt {
 	__bpf_md_ptr(struct bpf_sock *, sk);

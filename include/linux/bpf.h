@@ -14,9 +14,14 @@
 #include <linux/percpu.h>
 #include <linux/err.h>
 #include <linux/rbtree_latch.h>
+#include <linux/mm_types.h>
+#include <linux/mutex.h>
 
 struct perf_event;
 struct bpf_map;
+struct seq_file;
+struct btf;
+struct poll_table_struct;
 
 /* map is generic key/value storage optionally accesible by eBPF programs */
 struct bpf_map_ops {
@@ -36,6 +41,14 @@ struct bpf_map_ops {
 	void *(*map_fd_get_ptr)(struct bpf_map *map, struct file *map_file,
 				int fd);
 	void (*map_fd_put_ptr)(void *ptr);
+	u32 (*map_fd_sys_lookup_elem)(void *ptr);
+	void (*map_seq_show_elem)(struct bpf_map *map, void *key,
+				  struct seq_file *m);
+	int (*map_check_btf)(const struct bpf_map *map, const struct btf *btf,
+			     u32 key_type_id, u32 value_type_id);
+	int (*map_mmap)(struct bpf_map *map, struct vm_area_struct *vma);
+	unsigned int (*map_poll)(struct bpf_map *map, struct file *filp,
+				 struct poll_table_struct *pts);
 };
 
 struct bpf_map {
@@ -47,13 +60,18 @@ struct bpf_map {
 	u32 map_flags;
 	u32 pages;
 	u32 id;
+	u32 btf_key_type_id;
+	u32 btf_value_type_id;
+	struct btf *btf;
+	char name[BPF_OBJ_NAME_LEN];
 	bool unpriv_array;
 	struct user_struct *user;
 	const struct bpf_map_ops *ops;
 	struct work_struct work;
 	atomic_t usercnt;
-        struct bpf_map *inner_map_meta;
-	char name[BPF_OBJ_NAME_LEN];
+	struct mutex freeze_mutex;
+	u64 writecnt; /* writable mmap cnt; protected by freeze_mutex */
+	struct bpf_map *inner_map_meta;
 
 #ifdef CONFIG_SECURITY
 	void *security;
@@ -65,6 +83,11 @@ struct bpf_map_type_list {
 	const struct bpf_map_ops *ops;
 	enum bpf_map_type type;
 };
+
+static inline bool bpf_map_support_seq_show(const struct bpf_map *map)
+{
+	return map->ops->map_seq_show_elem && map->ops->map_check_btf;
+}
 
 /* function argument constraints */
 enum bpf_arg_type {
@@ -93,10 +116,10 @@ enum bpf_arg_type {
 	ARG_PTR_TO_CTX,		/* pointer to context */
 	ARG_ANYTHING,		/* any (initialized) argument is ok */
 	ARG_PTR_TO_SOCKET,	/* pointer to bpf_sock */
-	ARG_PTR_TO_STACK,	/* pointer to stack memory */
-	ARG_CONST_STACK_SIZE,	/* number of bytes accessed from stack */
-	ARG_PTR_TO_RAW_STACK,	/* pointer to raw stack memory */
-	ARG_CONST_STACK_SIZE_OR_ZERO, /* number of bytes accessed from stack or 0 */
+	ARG_PTR_TO_SOCK_COMMON = ARG_PTR_TO_SOCKET + 2,	/* pointer to sock_common */
+	ARG_PTR_TO_ALLOC_MEM,	/* pointer to dynamically allocated memory */
+	ARG_PTR_TO_ALLOC_MEM_OR_NULL,	/* pointer to dynamically allocated memory or NULL */
+	ARG_CONST_ALLOC_SIZE_OR_ZERO,	/* number of allocated bytes requested */
 };
 
 /* type of values returned from helper functions */
@@ -106,6 +129,7 @@ enum bpf_return_type {
 	RET_PTR_TO_MAP_VALUE_OR_NULL,	/* returns a pointer to map elem value or NULL */
 	RET_PTR_TO_SOCKET_OR_NULL,	/* returns a pointer to a socket or NULL */
 	RET_PTR_TO_TCP_SOCK_OR_NULL,	/* returns a pointer to a tcp_sock or NULL */
+	RET_PTR_TO_ALLOC_MEM_OR_NULL,	/* returns a pointer to dynamically allocated memory or NULL */
 };
 
 /* eBPF function prototype used by verifier to allow BPF_CALLs from eBPF programs
@@ -168,8 +192,12 @@ enum bpf_reg_type {
 
 	PTR_TO_SOCKET,		 /* reg points to struct bpf_sock */
 	PTR_TO_SOCKET_OR_NULL,	 /* reg points to struct bpf_sock or NULL */
+	PTR_TO_SOCK_COMMON,	 /* reg points to sock_common */
+	PTR_TO_SOCK_COMMON_OR_NULL, /* reg points to sock_common or NULL */
 	PTR_TO_TCP_SOCK,	 /* reg points to struct tcp_sock */
 	PTR_TO_TCP_SOCK_OR_NULL, /* reg points to struct tcp_sock or NULL */
+	PTR_TO_MEM,		 /* reg points to valid memory region */
+	PTR_TO_MEM_OR_NULL,	 /* reg points to valid memory region or NULL */
 };
 
 struct bpf_prog;
@@ -278,6 +306,9 @@ struct bpf_prog_array {
 
 struct bpf_prog_array *bpf_prog_array_alloc(u32 prog_cnt, gfp_t flags);
 void bpf_prog_array_free(struct bpf_prog_array __rcu *progs);
+int bpf_prog_array_length(struct bpf_prog_array __rcu *progs);
+int bpf_prog_array_copy_to_user(struct bpf_prog_array __rcu *progs,
+				__u32 __user *prog_ids, u32 cnt);
 bool bpf_prog_array_is_empty(struct bpf_prog_array *array);
 void bpf_prog_array_delete_safe(struct bpf_prog_array __rcu *progs,
 				struct bpf_prog *old_prog);
@@ -334,7 +365,10 @@ struct bpf_map *bpf_map_inc(struct bpf_map *map, bool uref);
 void bpf_map_put_with_uref(struct bpf_map *map);
 void bpf_map_put(struct bpf_map *map);
 int bpf_map_precharge_memlock(u32 pages);
+int bpf_map_charge_memlock(struct bpf_map *map, u32 pages);
+void bpf_map_uncharge_memlock(struct bpf_map *map, u32 pages);
 void *bpf_map_area_alloc(size_t size);
+void *bpf_map_area_mmapable_alloc(size_t size, int numa_node);
 void bpf_map_area_free(void *base);
 
 extern int sysctl_unprivileged_bpf_disabled;
@@ -356,9 +390,11 @@ int bpf_stackmap_copy(struct bpf_map *map, void *key, void *value);
 
 int bpf_fd_array_map_update_elem(struct bpf_map *map, struct file *map_file,
 				 void *key, void *value, u64 map_flags);
+int bpf_fd_array_map_lookup_elem(struct bpf_map *map, void *key, u32 *value);
 void bpf_fd_array_map_clear(struct bpf_map *map);
 int bpf_fd_htab_map_update_elem(struct bpf_map *map, struct file *map_file,
 				void *key, void *value, u64 map_flags);
+int bpf_fd_htab_map_lookup_elem(struct bpf_map *map, void *key, u32 *value);
 
 int bpf_get_file_flag(int flags);
 
@@ -446,6 +482,12 @@ extern const struct bpf_func_proto bpf_skb_vlan_push_proto;
 extern const struct bpf_func_proto bpf_skb_vlan_pop_proto;
 extern const struct bpf_func_proto bpf_get_stackid_proto;
 extern const struct bpf_func_proto bpf_tcp_sock_proto;
+
+extern const struct bpf_func_proto bpf_ringbuf_output_proto;
+extern const struct bpf_func_proto bpf_ringbuf_reserve_proto;
+extern const struct bpf_func_proto bpf_ringbuf_submit_proto;
+extern const struct bpf_func_proto bpf_ringbuf_discard_proto;
+extern const struct bpf_func_proto bpf_ringbuf_query_proto;
 
 /* Shared helpers among cBPF and eBPF. */
 void bpf_user_rnd_init_once(void);

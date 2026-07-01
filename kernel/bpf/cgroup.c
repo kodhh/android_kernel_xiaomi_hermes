@@ -384,6 +384,52 @@ cleanup:
 	return err;
 }
 
+/* Must be called with cgroup_mutex held to avoid races. */
+int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
+		       union bpf_attr __user *uattr)
+{
+	__u32 __user *prog_ids = u64_to_user_ptr(attr->query.prog_ids);
+	enum bpf_attach_type type = attr->query.attach_type;
+	struct list_head *progs = &cgrp->bpf.progs[type];
+	u32 flags = cgrp->bpf.flags[type];
+	int cnt, ret = 0, i;
+
+	if (attr->query.query_flags & BPF_F_QUERY_EFFECTIVE)
+		cnt = bpf_prog_array_length(cgrp->bpf.effective[type]);
+	else
+		cnt = prog_list_length(progs);
+
+	if (copy_to_user(&uattr->query.attach_flags, &flags, sizeof(flags)))
+		return -EFAULT;
+	if (copy_to_user(&uattr->query.prog_cnt, &cnt, sizeof(cnt)))
+		return -EFAULT;
+	if (attr->query.prog_cnt == 0 || !prog_ids || !cnt)
+		/* return early if user requested only program count + flags */
+		return 0;
+	if (attr->query.prog_cnt < cnt) {
+		cnt = attr->query.prog_cnt;
+		ret = -ENOSPC;
+	}
+
+	if (attr->query.query_flags & BPF_F_QUERY_EFFECTIVE) {
+		return bpf_prog_array_copy_to_user(cgrp->bpf.effective[type],
+						   prog_ids, cnt);
+	} else {
+		struct bpf_prog_list *pl;
+		u32 id;
+
+		i = 0;
+		list_for_each_entry(pl, progs, node) {
+			id = pl->prog->aux->id;
+			if (copy_to_user(prog_ids + i, &id, sizeof(id)))
+				return -EFAULT;
+			if (++i == cnt)
+				break;
+		}
+	}
+	return ret;
+}
+
 /**
  * __cgroup_bpf_run_filter() - Run a program for packet filtering
  * @sk: The socket sending or receiving traffic
@@ -486,16 +532,23 @@ static bool __cgroup_bpf_prog_array_is_empty(struct cgroup *cgrp,
 
 static int sockopt_alloc_buf(struct bpf_sockopt_kern *ctx, int max_optlen)
 {
-	if (unlikely(max_optlen > PAGE_SIZE) || max_optlen < 0)
+	if (unlikely(max_optlen < 0))
 		return -EINVAL;
+
+	if (unlikely(max_optlen > PAGE_SIZE)) {
+		/* We don't expose optvals that are greater than PAGE_SIZE
+		 * to the BPF program.
+		 */
+		max_optlen = PAGE_SIZE;
+	}
 
 	ctx->optval = kzalloc(max_optlen, GFP_USER);
 	if (!ctx->optval)
 		return -ENOMEM;
 
 	ctx->optval_end = ctx->optval + max_optlen;
-	ctx->optlen = max_optlen;
-	return 0;
+
+	return max_optlen;
 }
 
 static void sockopt_free_buf(struct bpf_sockopt_kern *ctx)
@@ -513,7 +566,7 @@ int __cgroup_bpf_run_filter_setsockopt(struct sock *sk, int *level,
 		.level = *level,
 		.optname = *optname,
 	};
-	int ret;
+	int ret, max_optlen;
 
 	/* Opportunistic check to see whether we have any BPF program
 	 * attached to the hook so we don't waste time allocating
@@ -522,11 +575,19 @@ int __cgroup_bpf_run_filter_setsockopt(struct sock *sk, int *level,
 	if (__cgroup_bpf_prog_array_is_empty(cgrp, BPF_CGROUP_SETSOCKOPT))
 		return 0;
 
-	ret = sockopt_alloc_buf(&ctx, *optlen);
-	if (ret)
-		return ret;
+	/* Allocate a bit more than the initial user buffer for
+	 * BPF program. The canonical use case is overriding
+	 * TCP_CONGESTION(nv) to TCP_CONGESTION(cubic).
+	 */
+	max_optlen = max_t(int, 16, *optlen);
 
-	if (copy_from_user(ctx.optval, optval, *optlen) != 0) {
+	max_optlen = sockopt_alloc_buf(&ctx, max_optlen);
+	if (max_optlen < 0)
+		return max_optlen;
+
+	ctx.optlen = *optlen;
+
+	if (copy_from_user(ctx.optval, optval, min(*optlen, max_optlen)) != 0) {
 		ret = -EFAULT;
 		goto out;
 	}
@@ -542,7 +603,7 @@ int __cgroup_bpf_run_filter_setsockopt(struct sock *sk, int *level,
 	if (ctx.optlen == -1) {
 		/* optlen set to -1, bypass kernel */
 		ret = 1;
-	} else if (ctx.optlen > *optlen || ctx.optlen < -1) {
+	} else if (ctx.optlen > max_optlen || ctx.optlen < -1) {
 		/* optlen is out of bounds */
 		ret = -EFAULT;
 	} else {
@@ -551,8 +612,14 @@ int __cgroup_bpf_run_filter_setsockopt(struct sock *sk, int *level,
 		/* export any potential modifications */
 		*level = ctx.level;
 		*optname = ctx.optname;
-		*optlen = ctx.optlen;
-		*kernel_optval = ctx.optval;
+
+		/* optlen == 0 from BPF indicates that we should
+		 * use original userspace data.
+		 */
+		if (ctx.optlen != 0) {
+			*optlen = ctx.optlen;
+			*kernel_optval = ctx.optval;
+		}
 	}
 out:
 	if (ret)
@@ -583,9 +650,11 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 	    __cgroup_bpf_prog_array_is_empty(cgrp, BPF_CGROUP_GETSOCKOPT))
 		return retval;
 
-	ret = sockopt_alloc_buf(&ctx, max_optlen);
-	if (ret)
-		return ret;
+	ctx.optlen = max_optlen;
+
+	max_optlen = sockopt_alloc_buf(&ctx, max_optlen);
+	if (max_optlen < 0)
+		return max_optlen;
 
 	if (!retval) {
 		/* If kernel getsockopt finished successfully,
@@ -599,10 +668,13 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 			goto out;
 		}
 
-		if (ctx.optlen > max_optlen)
-			ctx.optlen = max_optlen;
+		if (ctx.optlen < 0) {
+			ret = -EFAULT;
+			goto out;
+		}
 
-		if (copy_from_user(ctx.optval, optval, ctx.optlen) != 0) {
+		if (copy_from_user(ctx.optval, optval,
+				   min(ctx.optlen, max_optlen)) != 0) {
 			ret = -EFAULT;
 			goto out;
 		}
@@ -617,7 +689,7 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 		goto out;
 	}
 
-	if (ctx.optlen > max_optlen) {
+	if (ctx.optlen > max_optlen || ctx.optlen < 0) {
 		ret = -EFAULT;
 		goto out;
 	}
@@ -630,10 +702,12 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 		goto out;
 	}
 
-	if (copy_to_user(optval, ctx.optval, ctx.optlen) ||
-	    put_user(ctx.optlen, optlen)) {
-		ret = -EFAULT;
-		goto out;
+	if (ctx.optlen != 0) {
+		if (copy_to_user(optval, ctx.optval, ctx.optlen) ||
+		    put_user(ctx.optlen, optlen)) {
+			ret = -EFAULT;
+			goto out;
+		}
 	}
 
 	ret = ctx.retval;

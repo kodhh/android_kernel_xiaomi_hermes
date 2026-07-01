@@ -1768,6 +1768,32 @@ void *__vmalloc_node_flags_caller(unsigned long size, int node, gfp_t flags,
 	return __vmalloc_node(size, 1, flags, PAGE_KERNEL, node, caller);
 }
 
+void *kvmalloc_node(size_t size, gfp_t flags, int node)
+{
+	gfp_t kmalloc_flags = flags;
+	void *ret;
+
+	if (size > PAGE_SIZE)
+		kmalloc_flags |= __GFP_NORETRY | __GFP_NOWARN;
+
+	ret = kmalloc_node(size, kmalloc_flags, node);
+
+	if (ret || size <= PAGE_SIZE)
+		return ret;
+
+	return __vmalloc_node_flags(size, node, flags | __GFP_HIGHMEM);
+}
+EXPORT_SYMBOL(kvmalloc_node);
+
+void kvfree(const void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		vfree(addr);
+	else
+		kfree(addr);
+}
+EXPORT_SYMBOL(kvfree);
+
 /**
  *	vmalloc  -  allocate virtually contiguous memory
  *	@size:		allocation size
@@ -1824,6 +1850,25 @@ void *vmalloc_user(unsigned long size)
 	return ret;
 }
 EXPORT_SYMBOL(vmalloc_user);
+
+/**
+ * vmalloc_user_node_flags - allocate zeroed virtually contiguous memory for userspace on a specific node
+ * @size: allocation size
+ * @node: numa node
+ * @flags: flags for the page level allocator
+ *
+ * The resulting memory area is zeroed so it can be mapped to userspace
+ * without leaking data.
+ *
+ * Return: pointer to the allocated memory or %NULL on error
+ */
+void *vmalloc_user_node_flags(unsigned long size, int node, gfp_t flags)
+{
+	return __vmalloc_node_range(size, SHMLBA, VMALLOC_START, VMALLOC_END,
+				    flags | __GFP_ZERO, PAGE_KERNEL,
+				    node, __builtin_return_address(0));
+}
+EXPORT_SYMBOL(vmalloc_user_node_flags);
 
 /**
  *	vmalloc_node  -  allocate memory on a specific node
