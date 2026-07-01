@@ -30,6 +30,8 @@
 #include <linux/rcupdate.h>
 #include <linux/dmaengine.h>
 #include <linux/hrtimer.h>
+
+struct ip_tunnel_info;
 #include <linux/dma-mapping.h>
 #include <linux/netdev_features.h>
 #include <net/flow_keys.h>
@@ -330,6 +332,21 @@ typedef unsigned int sk_buff_data_t;
 #else
 typedef unsigned char *sk_buff_data_t;
 #endif
+
+/**
+ * struct skb_mstamp - multi resolution time stamps
+ * @stamp_us: timestamp in us resolution
+ * @stamp_jiffies: timestamp in jiffies
+ */
+struct skb_mstamp {
+	union {
+		u64		v64;
+		struct {
+			u32	stamp_us;
+			u32	stamp_jiffies;
+		};
+	};
+};
 
 /** 
  *	struct sk_buff - socket buffer
@@ -681,6 +698,8 @@ extern int	       pskb_expand_head(struct sk_buff *skb,
 					gfp_t gfp_mask);
 extern struct sk_buff *skb_realloc_headroom(struct sk_buff *skb,
 					    unsigned int headroom);
+extern int skb_vlan_pop(struct sk_buff *skb);
+extern int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci);
 extern struct sk_buff *skb_copy_expand(const struct sk_buff *skb,
 				       int newheadroom, int newtailroom,
 				       gfp_t priority);
@@ -725,6 +744,27 @@ static inline __u32 skb_get_rxhash(struct sk_buff *skb)
 		__skb_get_rxhash(skb);
 
 	return skb->rxhash;
+}
+
+static inline void skb_clear_hash(struct sk_buff *skb)
+{
+	skb->rxhash = 0;
+	skb->l4_rxhash = 0;
+}
+
+static inline __u32 skb_get_hash(struct sk_buff *skb)
+{
+	return skb_get_rxhash(skb);
+}
+
+static inline u32 skb_mac_header_len(const struct sk_buff *skb)
+{
+	return skb->network_header - skb->mac_header;
+}
+
+static inline bool skb_pkt_type_ok(u32 ptype)
+{
+	return ptype <= 3; /* PACKET_OTHERHOST */
 }
 
 #ifdef NET_SKBUFF_DATA_USES_OFFSET

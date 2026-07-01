@@ -459,6 +459,7 @@ static struct bpf_sk_storage_data *sk_storage_update(struct sock *sk,
 		__selem_unlink_sk(sk_storage, SELEM(old_sdata), false);
 	}
 
+unlock:
 	raw_spin_unlock_bh(&sk_storage->lock);
 	return SDATA(selem);
 
@@ -709,7 +710,7 @@ BPF_CALL_4(bpf_sk_storage_get, struct bpf_map *, map, struct sock *, sk,
 	     * (and also other memory issues during map
 	     *  destruction).
 	     */
-	    atomic_inc_not_zero(&sk->sk_refcnt)) {
+	    refcount_inc_not_zero(&sk->sk_refcnt)) {
 		sdata = sk_storage_update(sk, map, value, BPF_NOEXIST);
 		/* sk must be a fullsock (guaranteed by verifier),
 		 * so sock_gen_put() is unnecessary.
@@ -724,7 +725,7 @@ BPF_CALL_4(bpf_sk_storage_get, struct bpf_map *, map, struct sock *, sk,
 
 BPF_CALL_2(bpf_sk_storage_delete, struct bpf_map *, map, struct sock *, sk)
 {
-	if (atomic_inc_not_zero(&sk->sk_refcnt)) {
+	if (refcount_inc_not_zero(&sk->sk_refcnt)) {
 		int err;
 
 		err = sk_storage_delete(sk, map);
@@ -762,3 +763,15 @@ const struct bpf_func_proto bpf_sk_storage_delete_proto = {
 	.arg1_type	= ARG_CONST_MAP_PTR,
 	.arg2_type	= ARG_PTR_TO_SOCKET,
 };
+
+static struct bpf_map_type_list sk_storage_map_type __read_mostly = {
+	.ops = &sk_storage_map_ops,
+	.type = BPF_MAP_TYPE_SK_STORAGE,
+};
+
+static int __init register_sk_storage_map(void)
+{
+	bpf_register_map_type(&sk_storage_map_type);
+	return 0;
+}
+late_initcall(register_sk_storage_map);

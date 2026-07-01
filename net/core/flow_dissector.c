@@ -169,6 +169,9 @@ static u32 hashrnd __read_mostly;
  * on success, zero indicates no valid hash.  Also, sets l4_rxhash in skb
  * if hash is a canonical 4-tuple hash over transport ports.
  */
+void __skb_get_hash(struct sk_buff *skb) __attribute__((alias("__skb_get_rxhash")));
+EXPORT_SYMBOL(__skb_get_hash);
+
 void __skb_get_rxhash(struct sk_buff *skb)
 {
 	struct flow_keys keys;

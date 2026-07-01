@@ -60,12 +60,31 @@ static inline u32 task_cls_classid(struct task_struct *p)
 	return classid;
 }
 #endif
+
+static inline u32 task_get_classid(const struct sk_buff *skb)
+{
+	u32 classid = task_cls_classid(current);
+
+	if (in_serving_softirq()) {
+		struct sock *sk = skb->sk;
+		if (!sk)
+			return 0;
+		classid = task_cls_classid(current);
+	}
+
+	return classid;
+}
 #else /* !CGROUP_NET_CLS_CGROUP */
 static inline void sock_update_classid(struct sock *sk)
 {
 }
 
 static inline u32 task_cls_classid(struct task_struct *p)
+{
+	return 0;
+}
+
+static inline u32 task_get_classid(const struct sk_buff *skb)
 {
 	return 0;
 }

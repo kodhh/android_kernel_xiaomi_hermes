@@ -9,6 +9,15 @@
 #include <net/gen_stats.h>
 #include <net/rtnetlink.h>
 
+static inline bool skb_at_tc_ingress(const struct sk_buff *skb)
+{
+#ifdef CONFIG_NET_CLS_ACT
+	return G_TC_AT(skb->tc_verd) & AT_INGRESS;
+#else
+	return false;
+#endif
+}
+
 #define QDISC_CB_PRIV_LEN 20
 
 struct Qdisc_ops;

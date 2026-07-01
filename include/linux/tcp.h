@@ -20,6 +20,7 @@
 
 #include <linux/skbuff.h>
 #include <linux/dmaengine.h>
+#include <linux/win_minmax.h>
 #include <net/sock.h>
 #include <net/inet_connection_sock.h>
 #include <net/inet_timewait_sock.h>
@@ -148,10 +149,15 @@ struct tcp_sock {
  *	read the code and the spec side by side (and laugh ...)
  *	See RFC793 and RFC1122. The RFC writes these in capitals.
  */
+	u64	bytes_received;	/* RFC4898 tcpEStatsAppHCThruOctetsReceived */
+	u32	segs_in;	/* RFC4898 tcpEStatsPerfSegsIn */
  	u32	rcv_nxt;	/* What we want to receive next 	*/
 	u32	copied_seq;	/* Head of yet unread data		*/
 	u32	rcv_wup;	/* rcv_nxt on last window update sent	*/
  	u32	snd_nxt;	/* Next sequence we send		*/
+	u32	segs_out;	/* RFC4898 tcpEStatsPerfSegsOut */
+	u64	bytes_acked;	/* RFC4898 tcpEStatsAppHCThruOctetsAcked */
+	struct u64_stats_sync syncp;
 
  	u32	snd_una;	/* First byte we want an ack for	*/
  	u32	snd_sml;	/* Last byte of the most recently transmitted small packet */
@@ -187,6 +193,11 @@ struct tcp_sock {
 	u32	window_clamp;	/* Maximal window to advertise		*/
 	u32	rcv_ssthresh;	/* Current window clamp			*/
 
+	struct tcp_rack {
+		struct skb_mstamp mstamp;
+		u8 advanced;
+		u8 reord;
+	} rack;
 	u16	advmss;		/* Advertised MSS			*/
 	u8	unused;
 	u8	nonagle     : 4,/* Disable Nagle algorithm?             */
@@ -207,6 +218,11 @@ struct tcp_sock {
 	u32	mdev_max;	/* maximal mdev for the last rtt period	*/
 	u32	rttvar;		/* smoothed mdev_max			*/
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
+	u32	srtt_us;	/* smoothed round trip time << 3 in usecs */
+	u32	mdev_us;	/* medium deviation			*/
+	u32	mdev_max_us;	/* maximal mdev for the last rtt period	*/
+	u32	rttvar_us;	/* smoothed mdev_max			*/
+	struct  minmax rtt_min;
 
 	u32	packets_out;	/* Packets which are "in flight"	*/
 	u32	retrans_out;	/* Retransmitted packets out		*/
