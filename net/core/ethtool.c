@@ -227,6 +227,7 @@ static netdev_features_t ethtool_get_feature_mask(u32 eth_cmd)
 		return NETIF_F_GRO;
 	default:
 		BUG();
+		return 0;
 	}
 }
 

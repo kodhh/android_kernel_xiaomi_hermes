@@ -1567,9 +1567,9 @@ static const struct bpf_func_proto bpf_skb_pull_data_proto = {
 
 BPF_CALL_1(bpf_sk_fullsock, struct sock *, sk)
 {
-//	sk = sk_to_full_sk(sk);
-
-	return NULL; //sk_fullsock(sk) ? (unsigned long)sk : (unsigned long)NULL;
+	if (sk_fullsock(sk))
+		return (u64)(unsigned long)sk;
+	return (u64)NULL;
 }
 
 static const struct bpf_func_proto bpf_sk_fullsock_proto = {

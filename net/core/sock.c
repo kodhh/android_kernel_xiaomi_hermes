@@ -1784,7 +1784,7 @@ static int sock_dump_info(struct sock *sk)
 		struct unix_sock *u = unix_sk(sk);
 		struct sock *other = NULL;
 
-		if ((u->path.dentry != NULL) && (u->path.dentry->d_iname != NULL)) {
+		if (u->path.dentry != NULL) {
 #ifdef CONFIG_MTK_NET_LOGGING
 			pr_debug("[mtk_net][sock]sockdbg: socket-Name:%s\n",
 				 u->path.dentry->d_iname);
@@ -1809,8 +1809,7 @@ static int sock_dump_info(struct sock *sk)
 #endif
 		} else {
 
-			if ((((struct unix_sock *)other)->path.dentry != NULL)
-			    && (((struct unix_sock *)other)->path.dentry->d_iname != NULL)) {
+			if (((struct unix_sock *)other)->path.dentry != NULL) {
 #ifdef CONFIG_MTK_NET_LOGGING
 				pr_debug("[mtk_net][sock]sockdbg: Peer Name:%s\n",
 					 ((struct unix_sock *)other)->path.dentry->d_iname);
