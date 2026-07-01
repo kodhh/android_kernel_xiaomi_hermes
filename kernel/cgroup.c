@@ -125,6 +125,13 @@ static struct cgroup_subsys *subsys[CGROUP_SUBSYS_COUNT] = {
 static struct cgroupfs_root rootnode;
 
 /*
+ * The "cgrp_dfl_root" is the default cgroup hierarchy root used as
+ * a fallback for sockets that have no cgroup associated.
+ * It's always present to ensure sock_cgroup_ptr never returns NULL.
+ */
+struct cgroupfs_root cgrp_dfl_root;
+
+/*
  * cgroupfs file entry, pointed to from leaf dentry->d_fsdata.
  */
 struct cfent {
@@ -657,6 +664,8 @@ static void link_css_set(struct list_head *tmp_cg_links,
 	link->cg = cg;
 	link->cgrp = cgrp;
 	atomic_inc(&cgrp->count);
+	if (cgroup_on_dfl(cgrp))
+		cg->dfl_cgrp = cgrp;
 	list_move(&link->cgrp_link_list, &cgrp->css_sets);
 	/*
 	 * Always add links to the tail of the list so that the list
@@ -4745,6 +4754,10 @@ int __init cgroup_init(void)
 	hash_add(css_set_table, &init_css_set.hlist, key);
 	BUG_ON(!init_root_id(&rootnode));
 
+	init_cgroup_root(&cgrp_dfl_root);
+	ida_init(&cgrp_dfl_root.cgroup_ida);
+	cgroup_bpf_inherit(&cgrp_dfl_root.top_cgroup);
+
 	cgroup_kobj = kobject_create_and_add("cgroup", fs_kobj);
 	if (!cgroup_kobj) {
 		err = -ENOMEM;
@@ -5445,40 +5458,28 @@ struct cgroup *cgroup_get_from_fd(int fd)
 }
 EXPORT_SYMBOL_GPL(cgroup_get_from_fd);
 
-static struct cgroupfs_root *findBpfCg(void){
-
-	struct cgroupfs_root *root;
-
-	for_each_active_root(root)
-		if(root->subsys_mask == 0)
-			return root;
-
-	return NULL;
-
-}
-
 #ifdef CONFIG_CGROUP_BPF
 void cgroup_sk_alloc(struct sock_cgroup_data *skcd)
 {
-	struct cgroup *cgrp;
-	static struct cgroupfs_root *bpfRoot = NULL;
-
 	/* Don't associate the sock with unrelated interrupted task's cgroup. */
 	if (in_interrupt())
 		return;
 
-	if(bpfRoot == NULL)
-		bpfRoot = findBpfCg();
-
-	if(bpfRoot){
-		mutex_lock(&cgroup_mutex);
-		cgrp = task_cgroup_from_root(current, bpfRoot);
-	        atomic_inc(&cgrp->count);
-		mutex_unlock(&cgroup_mutex);
-		skcd->val = (unsigned long)cgrp;
+	rcu_read_lock();
+	while (true) {
+		struct css_set *cset = task_css_set(current);
+		struct cgroup *cgrp = cset->dfl_cgrp;
+		if (likely(cgrp && atomic_inc_not_zero(&cgrp->count))) {
+			skcd->val = (unsigned long)cgrp;
+			break;
+		}
+		if (!cgrp) {
+			skcd->val = 0;
+			break;
+		}
+		cpu_relax();
 	}
-	else
-		skcd->val = 0;
+	rcu_read_unlock();
 }
 
 void cgroup_sk_clone(struct sock_cgroup_data *skcd)
@@ -5498,25 +5499,25 @@ void cgroup_sk_free(struct sock_cgroup_data *skcd)
 #else
 void cgroup_sk_alloc(struct cgroup **skcg)
 {
-	struct cgroup *cgrp;
-	static struct cgroupfs_root *bpfRoot = NULL;
-
 	/* Don't associate the sock with unrelated interrupted task's cgroup. */
 	if (in_interrupt())
 		return;
 
-	if(bpfRoot == NULL)
-		bpfRoot = findBpfCg();
-
-	if(bpfRoot){
-		mutex_lock(&cgroup_mutex);
-		cgrp = task_cgroup_from_root(current, bpfRoot);
-	        atomic_inc(&cgrp->count);
-		mutex_unlock(&cgroup_mutex);
-		*skcg = cgrp;
+	rcu_read_lock();
+	while (true) {
+		struct css_set *cset = task_css_set(current);
+		struct cgroup *cgrp = cset->dfl_cgrp;
+		if (likely(cgrp && atomic_inc_not_zero(&cgrp->count))) {
+			*skcg = cgrp;
+			break;
+		}
+		if (!cgrp) {
+			*skcg = NULL;
+			break;
+		}
+		cpu_relax();
 	}
-	else
-		*skcg = NULL;
+	rcu_read_unlock();
 }
 
 void cgroup_sk_clone(struct cgroup *skcg)

@@ -382,6 +382,9 @@ struct css_set {
 	 */
 	struct cgroup_subsys_state *subsys[CGROUP_SUBSYS_COUNT];
 
+	/* the default cgroup associated with this css_set (BPF hierarchy) */
+	struct cgroup *dfl_cgrp;
+
 	/* For RCU-protected deletion */
 	struct rcu_head rcu_head;
 };
@@ -885,6 +888,18 @@ static inline void cgroup_put(struct cgroup *cgrp)
 	atomic_dec(&cgrp->count);
 }
 
+static inline bool cgroup_tryget(struct cgroup *cgrp)
+{
+	return atomic_inc_not_zero(&cgrp->count);
+}
+
+extern struct cgroupfs_root cgrp_dfl_root;
+
+static inline bool cgroup_on_dfl(struct cgroup *cgrp)
+{
+	return cgrp->root->subsys_mask == 0;
+}
+
 struct sock_cgroup_data {
 	unsigned long val;
 };
@@ -892,7 +907,8 @@ struct sock_cgroup_data {
 #ifdef CONFIG_CGROUP_BPF
 static inline struct cgroup *sock_cgroup_ptr(struct sock_cgroup_data *skcd)
 {
-	return (struct cgroup *)(unsigned long)skcd->val;
+	struct cgroup *cgrp = (struct cgroup *)(unsigned long)skcd->val;
+	return cgrp ?: &cgrp_dfl_root.top_cgroup;
 }
 
 static inline struct cgroup *cgroup_parent(struct cgroup *cgrp)
@@ -917,7 +933,8 @@ void cgroup_sk_free(struct sock_cgroup_data *skcd);
 #else
 static inline struct cgroup *sock_cgroup_ptr(struct sock_cgroup_data *skcd)
 {
-	return (struct cgroup *)(unsigned long)skcd->val;
+	struct cgroup *cgrp = (struct cgroup *)(unsigned long)skcd->val;
+	return cgrp ?: &cgrp_dfl_root.top_cgroup;
 }
 
 void cgroup_sk_alloc(struct cgroup **skcg);

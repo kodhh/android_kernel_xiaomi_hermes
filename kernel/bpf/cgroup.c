@@ -737,7 +737,6 @@ int __cgroup_bpf_run_filter_sk(struct sock *sk,
 	struct bpf_prog *prog;
 	int ret = 0;
 
-
 	rcu_read_lock();
 
 	prog = rcu_dereference(cgrp->bpf.effective[type]->progs[0]);
