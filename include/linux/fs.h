@@ -1614,6 +1614,8 @@ struct file_operations {
 	long (*fallocate)(struct file *file, int mode, loff_t offset,
 			  loff_t len);
 	int (*show_fdinfo)(struct seq_file *m, struct file *f);
+	ssize_t (*copy_file_range)(struct file *, loff_t, struct file *,
+				   loff_t, size_t, unsigned int);
 };
 
 struct inode_operations {
@@ -1660,6 +1662,8 @@ ssize_t rw_copy_check_uvector(int type, const struct iovec __user * uvector,
 
 extern ssize_t vfs_read(struct file *, char __user *, size_t, loff_t *);
 extern ssize_t vfs_write(struct file *, const char __user *, size_t, loff_t *);
+extern ssize_t vfs_copy_file_range(struct file *, loff_t, struct file *,
+				   loff_t, size_t, unsigned int);
 extern ssize_t vfs_readv(struct file *, const struct iovec __user *,
 		unsigned long, loff_t *);
 extern ssize_t vfs_writev(struct file *, const struct iovec __user *,

@@ -227,8 +227,8 @@ cond_syscall(sys_bpf);
 cond_syscall(sys_userfaultfd);
 
 /* copy_file_range */
+cond_syscall(sys_execveat);
+
 cond_syscall(sys_copy_file_range);
 
-/* preadv2/pwritev2 */
-cond_syscall(sys_preadv2);
-cond_syscall(sys_pwritev2);
+/* preadv2/pwritev2 removed */

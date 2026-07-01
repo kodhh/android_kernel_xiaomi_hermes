@@ -717,9 +717,9 @@ __SYSCALL(__NR_mlock2, sys_mlock2)
 #define __NR_copy_file_range 285
 __SYSCALL(__NR_copy_file_range, sys_copy_file_range)
 #define __NR_preadv2 286
-__SC_COMP(__NR_preadv2, sys_preadv2, compat_sys_preadv2)
+__SYSCALL(__NR_preadv2, sys_ni_syscall)
 #define __NR_pwritev2 287
-__SC_COMP(__NR_pwritev2, sys_pwritev2, compat_sys_pwritev2)
+__SYSCALL(__NR_pwritev2, sys_ni_syscall)
 #define __NR_pidfd_send_signal 424
 __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
 #define __NR_pidfd_open 434

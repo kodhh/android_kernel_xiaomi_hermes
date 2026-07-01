@@ -874,68 +874,6 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 	return ret;
 }
 
-SYSCALL_DEFINE6(preadv2, unsigned long, fd, const struct iovec __user *, vec,
-		unsigned long, vlen, unsigned long, pos_l, unsigned long, pos_h,
-		int, flags)
-{
-	loff_t pos = pos_from_hilo(pos_h, pos_l);
-	struct fd f;
-	ssize_t ret = -EBADF;
-
-	if (flags)
-		return -EOPNOTSUPP;
-
-	if (pos == -1)
-		return sys_readv(fd, vec, vlen);
-
-	if (pos < 0)
-		return -EINVAL;
-
-	f = fdget(fd);
-	if (f.file) {
-		ret = -ESPIPE;
-		if (f.file->f_mode & FMODE_PREAD)
-			ret = vfs_readv(f.file, vec, vlen, &pos);
-		fdput(f);
-	}
-
-	if (ret > 0)
-		add_rchar(current, ret);
-	inc_syscr(current);
-	return ret;
-}
-
-SYSCALL_DEFINE6(pwritev2, unsigned long, fd, const struct iovec __user *, vec,
-		unsigned long, vlen, unsigned long, pos_l, unsigned long, pos_h,
-		int, flags)
-{
-	loff_t pos = pos_from_hilo(pos_h, pos_l);
-	struct fd f;
-	ssize_t ret = -EBADF;
-
-	if (flags)
-		return -EOPNOTSUPP;
-
-	if (pos == -1)
-		return sys_writev(fd, vec, vlen);
-
-	if (pos < 0)
-		return -EINVAL;
-
-	f = fdget(fd);
-	if (f.file) {
-		ret = -ESPIPE;
-		if (f.file->f_mode & FMODE_PWRITE)
-			ret = vfs_writev(f.file, vec, vlen, &pos);
-		fdput(f);
-	}
-
-	if (ret > 0)
-		add_wchar(current, ret);
-	inc_syscw(current);
-	return ret;
-}
-
 #ifdef CONFIG_COMPAT
 
 static ssize_t compat_do_readv_writev(int type, struct file *file,
@@ -1130,59 +1068,6 @@ COMPAT_SYSCALL_DEFINE5(pwritev, compat_ulong_t, fd,
 	return compat_sys_pwritev64(fd, vec, vlen, pos);
 }
 
-COMPAT_SYSCALL_DEFINE6(preadv2, compat_ulong_t, fd,
-		const struct compat_iovec __user *,vec,
-		compat_ulong_t, vlen, u32, pos_low, u32, pos_high,
-		int, flags)
-{
-	loff_t pos = ((loff_t)pos_high << 32) | pos_low;
-	struct fd f;
-	ssize_t ret;
-
-	if (flags)
-		return -EOPNOTSUPP;
-
-	if (pos == -1)
-		return compat_sys_readv(fd, vec, vlen);
-
-	if (pos < 0)
-		return -EINVAL;
-	f = fdget(fd);
-	if (!f.file)
-		return -EBADF;
-	ret = -ESPIPE;
-	if (f.file->f_mode & FMODE_PREAD)
-		ret = compat_readv(f.file, vec, vlen, &pos);
-	fdput(f);
-	return ret;
-}
-
-COMPAT_SYSCALL_DEFINE6(pwritev2, compat_ulong_t, fd,
-		const struct compat_iovec __user *,vec,
-		compat_ulong_t, vlen, u32, pos_low, u32, pos_high,
-		int, flags)
-{
-	loff_t pos = ((loff_t)pos_high << 32) | pos_low;
-	struct fd f;
-	ssize_t ret;
-
-	if (flags)
-		return -EOPNOTSUPP;
-
-	if (pos == -1)
-		return compat_sys_writev(fd, vec, vlen);
-
-	if (pos < 0)
-		return -EINVAL;
-	f = fdget(fd);
-	if (!f.file)
-		return -EBADF;
-	ret = -ESPIPE;
-	if (f.file->f_mode & FMODE_PWRITE)
-		ret = compat_writev(f.file, vec, vlen, &pos);
-	fdput(f);
-	return ret;
-}
 #endif
 
 static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
@@ -1398,8 +1283,17 @@ ssize_t vfs_copy_file_range(struct file *file_in, loff_t pos_in,
 	if (ret)
 		return ret;
 
+	if (file_out->f_op->copy_file_range) {
+		ret = file_out->f_op->copy_file_range(file_in, pos_in,
+				file_out, pos_out, len, flags);
+		if (ret != -EOPNOTSUPP)
+			goto done;
+	}
+
 	ret = do_splice_direct(file_in, &pos_in, file_out, &pos_out,
 			len > MAX_RW_COUNT ? MAX_RW_COUNT : len, 0);
+
+done:
 
 	if (ret > 0) {
 		fsnotify_access(file_in);
