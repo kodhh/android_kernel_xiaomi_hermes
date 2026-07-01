@@ -3,6 +3,10 @@
 
 #include <linux/types.h>
 
+struct __kernel_timespec {
+	long long	tv_sec;
+	long long	tv_nsec;
+};
 
 #ifndef _STRUCT_TIMESPEC
 #define _STRUCT_TIMESPEC

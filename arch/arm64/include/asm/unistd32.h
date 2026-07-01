@@ -811,3 +811,5 @@ __SYSCALL(__NR_copy_file_range, sys_copy_file_range)
 __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
 #define __NR_pidfd_open 434
 __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
+#define __NR_epoll_pwait2 435
+__SYSCALL(__NR_epoll_pwait2, compat_sys_epoll_pwait2)

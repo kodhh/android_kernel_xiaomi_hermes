@@ -22,6 +22,7 @@
 
 #include <linux/in.h>
 #include <linux/in6.h>
+#include <linux/cache.h>
 
 /* A stub used by bpf helpers. */
 struct ipv6_bpf_stub {
