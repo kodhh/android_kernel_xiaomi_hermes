@@ -2236,7 +2236,7 @@ COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
 COMPAT_SYSCALL_DEFINE6(epoll_pwait2, int, epfd,
 			struct epoll_event __user *, events,
 			int, maxevents,
-			const struct compat_timespec __user *, timeout,
+			const struct __kernel_timespec __user *, timeout,
 			const compat_sigset_t __user *, sigmask,
 			compat_size_t, sigsetsize)
 {
@@ -2246,7 +2246,7 @@ COMPAT_SYSCALL_DEFINE6(epoll_pwait2, int, epfd,
 	struct timespec ts;
 
 	if (timeout) {
-		if (get_compat_timespec(&ts, timeout))
+		if (get_timespec(&ts, timeout))
 			return -EFAULT;
 	}
 

@@ -444,6 +444,13 @@
 		CALL(sys_ni_syscall)
 /* 433 */	CALL(sys_ni_syscall)
 /* 434 */	CALL(sys_pidfd_open)
+/* 435 */	CALL(sys_ni_syscall)
+/* 436 */	CALL(sys_ni_syscall)
+/* 437 */	CALL(sys_ni_syscall)
+/* 438 */	CALL(sys_ni_syscall)
+/* 439 */	CALL(sys_ni_syscall)
+/* 440 */	CALL(sys_ni_syscall)
+/* 441 */	CALL(sys_epoll_pwait2)
 
 #ifndef syscalls_counted
 .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls

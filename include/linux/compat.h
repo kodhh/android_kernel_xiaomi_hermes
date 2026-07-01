@@ -445,7 +445,7 @@ asmlinkage long compat_sys_epoll_pwait(int epfd,
 asmlinkage long compat_sys_epoll_pwait2(int epfd,
 			struct epoll_event __user *events,
 			int maxevents,
-			const struct compat_timespec __user *timeout,
+			const struct __kernel_timespec __user *timeout,
 			const compat_sigset_t __user *sigmask,
 			compat_size_t sigsetsize);
 
