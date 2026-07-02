@@ -246,6 +246,8 @@ static int ip_finish_output(struct sk_buff *skb)
 		return ip_finish_output2(skb);
 }
 
+static int ip_mc_finish_output(struct sk_buff *skb);
+
 int ip_mc_output(struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
@@ -303,8 +305,21 @@ int ip_mc_output(struct sk_buff *skb)
 	}
 
 	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING, skb, NULL,
-			    skb->dev, ip_finish_output,
+			    skb->dev, ip_mc_finish_output,
 			    !(IPCB(skb)->flags & IPSKB_REROUTED));
+}
+
+static int ip_mc_finish_output(struct sk_buff *skb)
+{
+	int ret;
+
+	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(skb->sk, skb);
+	if (ret) {
+		kfree_skb(skb);
+		return ret;
+	}
+
+	return ip_finish_output(skb);
 }
 
 int ip_output(struct sk_buff *skb)
