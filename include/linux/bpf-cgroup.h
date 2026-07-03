@@ -166,7 +166,8 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 				       kernel_optval)			       \
 ({									       \
 	int __ret = 0;							       \
-	__ret = __cgroup_bpf_run_filter_setsockopt(sock, level,	       \
+	if (cgroup_bpf_enabled)						       \
+		__ret = __cgroup_bpf_run_filter_setsockopt(sock, level,	       \
 							   optname, optval,    \
 							   optlen,	       \
 							   kernel_optval);     \
@@ -176,7 +177,8 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 #define BPF_CGROUP_GETSOCKOPT_MAX_OPTLEN(optlen)			       \
 ({									       \
 	int __ret = 0;							       \
-	get_user(__ret, optlen);				       \
+	if (cgroup_bpf_enabled)						       \
+		get_user(__ret, optlen);				       \
 	__ret;								       \
 })
 
@@ -184,7 +186,8 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 				       max_optlen, retval)		       \
 ({									       \
 	int __ret = retval;						       \
-	__ret = __cgroup_bpf_run_filter_getsockopt(sock, level,	       \
+	if (cgroup_bpf_enabled)						       \
+		__ret = __cgroup_bpf_run_filter_getsockopt(sock, level,	       \
 							   optname, optval,    \
 							   optlen, max_optlen, \
 							   retval);	       \
