@@ -243,6 +243,9 @@ int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
 	cgrp->bpf.flags[type] = flags;
 
 	/* allocate and recompute effective prog arrays */
+	err = compute_effective_progs(cgrp, type, &cgrp->bpf.inactive);
+	if (err)
+		goto cleanup;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
@@ -252,6 +255,8 @@ int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
 	}
 
 	/* all allocations were successful. Activate all prog arrays */
+	activate_effective_progs(cgrp, type, cgrp->bpf.inactive);
+	cgrp->bpf.inactive = NULL;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
@@ -270,6 +275,8 @@ cleanup:
 	/* oom while computing effective. Free all computed effective arrays
 	 * since they were not activated
 	 */
+	bpf_prog_array_free(cgrp->bpf.inactive);
+	cgrp->bpf.inactive = NULL;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
@@ -341,6 +348,9 @@ int __cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
 	}
 
 	/* allocate and recompute effective prog arrays */
+	err = compute_effective_progs(cgrp, type, &cgrp->bpf.inactive);
+	if (err)
+		goto cleanup;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
@@ -350,6 +360,8 @@ int __cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
 	}
 
 	/* all allocations were successful. Activate all prog arrays */
+	activate_effective_progs(cgrp, type, cgrp->bpf.inactive);
+	cgrp->bpf.inactive = NULL;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
@@ -372,6 +384,8 @@ cleanup:
 	/* oom while computing effective. Free all computed effective arrays
 	 * since they were not activated
 	 */
+	bpf_prog_array_free(cgrp->bpf.inactive);
+	cgrp->bpf.inactive = NULL;
 	css_for_each_descendant_pre(css, &cgrp->self) {
 		struct cgroup *desc = container_of(css, struct cgroup, self);
 
