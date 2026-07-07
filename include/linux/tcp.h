@@ -159,7 +159,10 @@ struct tcp_sock {
 	u64	bytes_acked;	/* RFC4898 tcpEStatsAppHCThruOctetsAcked */
 	struct u64_stats_sync syncp;
 
- 	u32	snd_una;	/* First byte we want an ack for	*/
+	u32	dsack_dups;	/* RFC4898 tcpEStatsStackDSACKDups
+				 * total number of DSACK blocks received
+				 */
+	u32	snd_una;	/* First byte we want an ack for	*/
  	u32	snd_sml;	/* Last byte of the most recently transmitted small packet */
 	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) */
 	u32	lsndtime;	/* timestamp of last sent data packet (for restart window) */
@@ -251,6 +254,10 @@ struct tcp_sock {
 	u32	prr_delivered;	/* Number of newly delivered packets to
 				 * receiver in Recovery. */
 	u32	prr_out;	/* Total number of pkts sent during Recovery. */
+	u32	delivered;	/* Total data packets delivered incl. rexmits */
+	u32	delivered_ce;	/* Like the above but only ECE marked packets */
+	u32	rate_delivered;	/* saved rate sample: packets delivered */
+	u32	rate_interval_us; /* saved rate sample: time elapsed */
 
  	u32	rcv_wnd;	/* Current receiver window		*/
 	u32	write_seq;	/* Tail(+1) of data held in tcp send buffer */

@@ -1378,7 +1378,6 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 	case BPF_MAP_TYPE_HASH_OF_MAPS:
 		if (func_id != BPF_FUNC_map_lookup_elem)
 			goto error;
-		break;
 	case BPF_MAP_TYPE_SK_STORAGE:
 		if (func_id != BPF_FUNC_sk_storage_get &&
 		    func_id != BPF_FUNC_sk_storage_delete)

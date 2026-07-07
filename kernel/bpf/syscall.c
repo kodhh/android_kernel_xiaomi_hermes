@@ -26,9 +26,6 @@
 #include <linux/ctype.h>
 #include <linux/btf.h>
 #include <linux/poll.h>
-#include <linux/cgroup.h>
-#include <linux/bpf-cgroup.h>
-
 #define BPF_OBJ_FLAG_MASK   (BPF_F_RDONLY | BPF_F_WRONLY)
 
 #define IS_FD_ARRAY(map) ((map)->map_type == BPF_MAP_TYPE_PROG_ARRAY || \
@@ -51,6 +48,7 @@ static LIST_HEAD(bpf_map_types);
 
 static struct bpf_map *find_and_alloc_map(union bpf_attr *attr)
 {
+	const struct bpf_map_ops *ops;
 	struct bpf_map_type_list *tl;
 	struct bpf_map *map;
 	int err;

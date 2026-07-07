@@ -152,12 +152,16 @@ static const struct file_operations bpffs_obj_fops = {
 struct map_iter {
 	void *key;
 	bool done;
-	struct bpf_map *map;
 };
 
 static struct map_iter *map_iter(struct seq_file *m)
 {
 	return m->private;
+}
+
+static struct bpf_map *seq_file_to_map(struct seq_file *m)
+{
+	return file_inode(m->file)->i_private;
 }
 
 static void map_iter_free(struct map_iter *iter)
@@ -180,7 +184,6 @@ static struct map_iter *map_iter_alloc(struct bpf_map *map)
 	if (!iter->key)
 		goto error;
 
-	iter->map = map;
 	return iter;
 
 error:
@@ -190,7 +193,7 @@ error:
 
 static void *map_seq_next(struct seq_file *m, void *v, loff_t *pos)
 {
-	struct bpf_map *map = map_iter(m)->map;
+	struct bpf_map *map = seq_file_to_map(m);
 	void *key = map_iter(m)->key;
 	void *prev_key;
 
@@ -225,7 +228,7 @@ static void map_seq_stop(struct seq_file *m, void *v)
 
 static int map_seq_show(struct seq_file *m, void *v)
 {
-	struct bpf_map *map = map_iter(m)->map;
+	struct bpf_map *map = seq_file_to_map(m);
 	void *key = map_iter(m)->key;
 
 	if (unlikely(v == SEQ_START_TOKEN)) {
@@ -348,7 +351,7 @@ static const struct inode_operations bpf_dir_iops = {
 	.mknod		= bpf_mkobj,
 	.mkdir		= bpf_mkdir,
 	.rmdir		= simple_rmdir,
-	.rename2	= simple_rename_flags,
+	.rename2	= simple_rename,
 	.link		= simple_link,
 	.unlink		= simple_unlink,
 };

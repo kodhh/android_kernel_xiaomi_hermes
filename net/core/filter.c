@@ -3034,7 +3034,17 @@ static bool sock_addr_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
 				      enum bpf_reg_type *reg_type)
 {
-	return true;
+	switch (off) {
+	case offsetof(struct bpf_sock_addr, sk):
+		if (type != BPF_READ)
+			return false;
+		if (size != sizeof(__u64))
+			return false;
+		*reg_type = PTR_TO_SOCKET;
+		return true;
+	default:
+		return true;
+	}
 }
 
 static u32 sk_filter_convert_ctx_access(enum bpf_access_type type, int dst_reg,
@@ -3493,6 +3503,11 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
                         *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct in6_addr, s6_addr32[0]));
                 }
 		break;
+	case offsetof(struct bpf_sock_addr, sk):
+		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, sk),
+				      dst_reg, src_reg,
+				      offsetof(struct bpf_sock_addr_kern, sk));
+		break;
 	}
 
 	return insn - insn_buf;
@@ -3541,6 +3556,10 @@ do {									\
 		CONVERT(bytes_received); break;				\
 	case offsetof(md_type, bytes_acked):				\
 		CONVERT(bytes_acked); break;				\
+	case offsetof(md_type, rate_delivered):				\
+		CONVERT(rate_delivered); break;				\
+	case offsetof(md_type, rate_interval_us):			\
+		CONVERT(rate_interval_us); break;			\
 	}								\
 } while (0)
 
@@ -3560,6 +3579,21 @@ u32 bpf_tcp_sock_convert_ctx_access(enum bpf_access_type type,
 				      dst_reg, src_reg,		\
 				      offsetof(struct tcp_sock, FIELD)); \
 	} while (0)
+
+#define BPF_INET_SOCK_GET_COMMON(FIELD)					\
+	do {								\
+		BUILD_BUG_ON(FIELD_SIZEOF(struct inet_connection_sock,	\
+					  FIELD) >			\
+			     FIELD_SIZEOF(struct bpf_tcp_sock, FIELD));	\
+		*insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(			\
+					struct inet_connection_sock,	\
+					FIELD),				\
+				      dst_reg, src_reg,		\
+				      offsetof(				\
+					struct inet_connection_sock,	\
+					FIELD));			\
+	} while (0)
+
 	CONVERT_COMMON_TCP_SOCK_FIELDS(struct bpf_tcp_sock,
 				       BPF_TCP_SOCK_GET_COMMON);
 	if (insn > insn_buf)
@@ -3574,6 +3608,18 @@ u32 bpf_tcp_sock_convert_ctx_access(enum bpf_access_type type,
 		*insn++ = BPF_LDX_MEM(BPF_W, dst_reg, src_reg,
 				      offsetof(struct tcp_sock, rtt_min) +
 				      offsetof(struct minmax_sample, v));
+		break;
+	case offsetof(struct bpf_tcp_sock, dsack_dups):
+		BPF_TCP_SOCK_GET_COMMON(dsack_dups);
+		break;
+	case offsetof(struct bpf_tcp_sock, delivered):
+		BPF_TCP_SOCK_GET_COMMON(delivered);
+		break;
+	case offsetof(struct bpf_tcp_sock, delivered_ce):
+		BPF_TCP_SOCK_GET_COMMON(delivered_ce);
+		break;
+	case offsetof(struct bpf_tcp_sock, icsk_retransmits):
+		BPF_INET_SOCK_GET_COMMON(icsk_retransmits);
 		break;
 	}
 	return insn - insn_buf;
