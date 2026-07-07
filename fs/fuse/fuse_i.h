@@ -111,6 +111,10 @@ struct fuse_inode {
 
 	/** Miscellaneous bits describing inode state */
 	unsigned long state;
+
+#ifdef CONFIG_FUSE_BPF
+	struct inode *backing_inode;
+#endif
 };
 
 /** FUSE inode state bits */
@@ -132,13 +136,9 @@ struct fuse_passthrough {
 };
 
 #ifdef CONFIG_FUSE_BPF
-struct fuse_bpf_entry {
-	struct {
-		struct fuse_entry_out out;
-	} __attribute__((packed));
-	struct fuse_entry_bpf {
-		u8 placeholders;
-	} __attribute__((packed));
+struct fuse_dentry {
+	struct dentry *dentry;
+	struct path backing_path;
 };
 #endif
 
@@ -183,11 +183,10 @@ struct fuse_file {
 #ifdef CONFIG_FUSE_BPF
 	struct file *backing_file;
 #endif
-
 	/* the read write file */
 	struct file *rw_lower_file;
-	bool shortcircuit_enabled;
 };
+
 
 /** One input argument of a request */
 struct fuse_in_arg {
@@ -945,26 +944,73 @@ int fuse_flush_mtime(struct file *file, bool nofail);
 int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
 
-/* backing.c */
-struct fuse_bpf_in_arg;
-struct fuse_bpf_out_arg;
-int fuse_backing_map(struct fuse_conn *fc, struct file *backing_file, int fd);
-int fuse_handle_backing(struct fuse_conn *fc, struct fuse_file *ff);
-int fuse_bpf_open(struct fuse_conn *fc, struct fuse_file *ff, struct file *backing_file);
-void fuse_bpf_release(struct fuse_file *ff);
-ssize_t fuse_bpf_read_iter(struct file *file, struct kiocb *iocb,
-			   struct iov_iter *to);
-ssize_t fuse_bpf_write_iter(struct file *file, struct kiocb *iocb_fuse,
-			    struct iov_iter *from);
-
 /* passthrough.c */
 int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd);
 int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
-			   struct fuse_passthrough *passthrough);
+			   struct fuse_open_out *openarg);
 void fuse_passthrough_release(struct fuse_passthrough *passthrough);
-ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
+ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 				   struct iov_iter *to);
-ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
+ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 				    struct iov_iter *from);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+
+/* backing.c */
+int fuse_bpf_set_backing_path(struct dentry *entry, int backing_fd);
+int fuse_bpf_lookup(struct inode *dir_ino, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo);
+int fuse_bpf_create(struct inode *dir, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo, umode_t mode);
+int fuse_bpf_open(struct inode *inode, struct file *file);
+int fuse_bpf_release(struct inode *inode, struct file *file);
+ssize_t fuse_bpf_read_iter(struct file *file, struct kiocb *iocb,
+			   const struct iovec *iov, unsigned long nr_segs,
+			   loff_t *ppos);
+ssize_t fuse_bpf_write_iter(struct file *file, struct kiocb *iocb,
+			    const struct iovec *iov, unsigned long nr_segs,
+			    loff_t *ppos);
+ssize_t fuse_bpf_file_read_iter(struct file *file, struct kiocb *iocb,
+				const struct iovec *iov, unsigned long nr_segs,
+				loff_t *ppos);
+ssize_t fuse_bpf_file_write_iter(struct file *file, struct kiocb *iocb,
+				 const struct iovec *iov, unsigned long nr_segs,
+				 loff_t *ppos);
+
+int fuse_bpf_set_backing_path(struct dentry *entry, int backing_fd);
+int fuse_bpf_lookup(struct inode *dir_ino, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo);
+int fuse_bpf_create(struct inode *dir, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo, umode_t mode);
+int fuse_bpf_getattr(struct vfsmount *mnt, struct dentry *entry,
+		     struct kstat *stat);
+int fuse_bpf_setattr(struct dentry *entry, struct iattr *attr);
+int fuse_bpf_setxattr(struct dentry *entry, const char *name,
+		      const void *value, size_t size, int flags);
+ssize_t fuse_bpf_getxattr(struct dentry *entry, const char *name,
+			  void *value, size_t size);
+int fuse_bpf_removexattr(struct dentry *entry, const char *name);
+int fuse_bpf_listxattr(struct dentry *entry, char *buf, size_t size);
+int fuse_bpf_mkdir(struct inode *dir, struct dentry *entry, umode_t mode);
+int fuse_bpf_rmdir(struct inode *dir, struct dentry *entry);
+int fuse_bpf_unlink(struct inode *dir, struct dentry *entry);
+int fuse_bpf_rename(struct inode *olddir, struct dentry *oldent,
+		    struct inode *newdir, struct dentry *newent);
+int fuse_bpf_symlink(struct inode *dir, struct dentry *entry,
+		     const char *link, int len);
+int fuse_bpf_link(struct dentry *entry, struct inode *dir,
+		  struct dentry *newent);
+int fuse_bpf_mknod(struct inode *dir, struct dentry *entry,
+		   umode_t mode, dev_t rdev);
+ssize_t fuse_bpf_readdir(struct file *file, struct dir_context *ctx);
+int fuse_bpf_statfs(struct dentry *dentry, struct kstatfs *buf);
+int fuse_bpf_access(struct inode *inode, int mask);
+long fuse_bpf_ioctl(struct file *file, unsigned int command,
+		    unsigned long arg, int flags);
+int fuse_bpf_fallocate(struct file *file, int mode, loff_t offset,
+		       loff_t length);
+int fuse_bpf_flock(struct file *file, int cmd, struct file_lock *fl);
+ssize_t fuse_bpf_mmap(struct file *file, struct vm_area_struct *vma);
+int fuse_bpf_fsync(struct file *file, loff_t start, loff_t end,
+		   int datasync);
+void fuse_dentry_release(struct dentry *dentry);
 #endif /* _FS_FUSE_I_H */
