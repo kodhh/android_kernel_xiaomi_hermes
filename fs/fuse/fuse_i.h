@@ -89,6 +89,10 @@ struct fuse_inode {
 	/** 64 bit inode number */
 	u64 orig_ino;
 
+#ifdef CONFIG_FUSE_BPF
+	struct inode *backing_inode;
+#endif
+
 	/** Version of last attribute change */
 	u64 attr_version;
 
@@ -110,6 +114,10 @@ struct fuse_inode {
 
 	/** Miscellaneous bits describing inode state */
 	unsigned long state;
+};
+
+struct fuse_dentry {
+	struct path backing_path;
 };
 
 /** FUSE inode state bits */
@@ -164,6 +172,10 @@ struct fuse_file {
 
 	/** Container for data related to the passthrough functionality */
 	struct fuse_passthrough passthrough;
+
+#ifdef CONFIG_FUSE_BPF
+	struct file *backing_file;
+#endif
 
 	/** RB node to be linked on fuse_conn->polled_files */
 	struct rb_node polled_node;
@@ -617,6 +629,11 @@ struct fuse_conn {
 
 	/** Protects passthrough_req */
 	spinlock_t passthrough_req_lock;
+
+#ifdef CONFIG_FUSE_BPF
+	struct super_block *backing_sb;
+	int backing:1;
+#endif
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -657,7 +674,9 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			u64 attr_valid, u64 attr_version);
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg, struct inode **inode);
+		     struct fuse_entry_out *outarg,
+		     struct fuse_entry_bpf_out *bpf_outarg,
+		     struct inode **inode);
 
 /**
  * Send FORGET command
@@ -900,6 +919,32 @@ void fuse_write_update_size(struct inode *inode, loff_t pos);
 
 int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
+
+/* backing.c */
+#ifdef CONFIG_FUSE_BPF
+int fuse_bpf_lookup(struct inode *dir_ino, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo);
+int fuse_bpf_create(struct inode *dir, struct dentry *entry,
+		    struct fuse_entry_bpf_out *febo, umode_t mode);
+int fuse_bpf_open(struct inode *inode, struct file *file);
+int fuse_bpf_release(struct inode *inode, struct file *file);
+ssize_t fuse_bpf_read_iter(struct file *file, struct kiocb *iocb,
+			   const struct iovec *iov, unsigned long nr_segs,
+			   loff_t *ppos);
+ssize_t fuse_bpf_write_iter(struct file *file, struct kiocb *iocb,
+			    const struct iovec *iov, unsigned long nr_segs,
+			    loff_t *ppos);
+int fuse_bpf_getattr(struct vfsmount *mnt, struct dentry *entry,
+		     struct kstat *stat);
+int fuse_bpf_setattr(struct dentry *entry, struct iattr *attr);
+int fuse_bpf_setxattr(struct dentry *dentry, const char *name,
+		      const void *value, size_t size, int flags);
+ssize_t fuse_bpf_getxattr(struct dentry *dentry, const char *name,
+			  void *value, size_t size);
+int fuse_bpf_removexattr(struct dentry *dentry, const char *name);
+int fuse_bpf_listxattr(struct dentry *dentry, char *buf, size_t size);
+void fuse_dentry_release(struct dentry *dentry);
+#endif
 
 /* passthrough.c */
 int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd);

@@ -137,7 +137,8 @@ static void fuse_invalidate_entry(struct dentry *entry)
 
 static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 			     u64 nodeid, struct qstr *name,
-			     struct fuse_entry_out *outarg)
+			     struct fuse_entry_out *outarg,
+			     struct fuse_entry_bpf_out *bpf_outarg)
 {
 	memset(outarg, 0, sizeof(struct fuse_entry_out));
 	req->in.h.opcode = FUSE_LOOKUP;
@@ -151,6 +152,14 @@ static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 	else
 		req->out.args[0].size = sizeof(struct fuse_entry_out);
 	req->out.args[0].value = outarg;
+#ifdef CONFIG_FUSE_BPF
+	if (bpf_outarg && fc->backing) {
+		memset(bpf_outarg, 0, sizeof(*bpf_outarg));
+		req->out.numargs = 2;
+		req->out.args[1].size = sizeof(*bpf_outarg);
+		req->out.args[1].value = bpf_outarg;
+	}
+#endif
 }
 
 u64 fuse_get_attr_version(struct fuse_conn *fc)
@@ -215,7 +224,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 
 		parent = dget_parent(entry);
 		fuse_lookup_init(fc, req, get_node_id(parent->d_inode),
-				 &entry->d_name, &outarg);
+				 &entry->d_name, &outarg, NULL);
 		fuse_request_send(fc, req);
 		dput(parent);
 		err = req->out.h.error;
@@ -304,6 +313,9 @@ static int invalid_nodeid(u64 nodeid)
 const struct dentry_operations fuse_dentry_operations = {
 	.d_revalidate	= fuse_dentry_revalidate,
 	.d_canonical_path = fuse_dentry_canonical_path,
+#ifdef CONFIG_FUSE_BPF
+	.d_release	= fuse_dentry_release,
+#endif
 };
 
 int fuse_valid_type(int m)
@@ -333,7 +345,9 @@ static struct dentry *fuse_d_add_directory(struct dentry *entry,
 }
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg, struct inode **inode)
+		     struct fuse_entry_out *outarg,
+		     struct fuse_entry_bpf_out *bpf_outarg,
+		     struct inode **inode)
 {
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
 	struct fuse_req *req;
@@ -360,7 +374,7 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 
 	attr_version = fuse_get_attr_version(fc);
 
-	fuse_lookup_init(fc, req, nodeid, name, outarg);
+	fuse_lookup_init(fc, req, nodeid, name, outarg, bpf_outarg);
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -399,9 +413,18 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 	struct dentry *newent;
 	struct fuse_conn *fc = get_fuse_conn(dir);
 	bool outarg_valid = true;
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_entry_bpf_out febo;
+#endif
 
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
-			       &outarg, &inode);
+			       &outarg,
+#ifdef CONFIG_FUSE_BPF
+			       fc->backing ? &febo : NULL,
+#else
+			       NULL,
+#endif
+			       &inode);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;
@@ -429,6 +452,11 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 		fuse_change_entry_timeout(entry, &outarg);
 	else
 		fuse_invalidate_entry_cache(entry);
+
+#ifdef CONFIG_FUSE_BPF
+	if (fc->backing && inode && outarg_valid)
+		fuse_bpf_lookup(dir, entry, &febo);
+#endif
 
 	fuse_advise_use_readdirplus(dir);
 	return newent;
@@ -1774,6 +1802,11 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 {
 	struct inode *inode = entry->d_inode;
 
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_setattr(entry, attr);
+#endif
+
 	if (!fuse_allow_current_process(get_fuse_conn(inode)))
 		return -EACCES;
 
@@ -1787,9 +1820,13 @@ static int fuse_getattr(struct vfsmount *mnt, struct dentry *entry,
 			struct kstat *stat)
 {
 	struct inode *inode = entry->d_inode;
-	struct fuse_conn *fc = get_fuse_conn(inode);
 
-	if (!fuse_allow_current_process(fc))
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_getattr(mnt, entry, stat);
+#endif
+
+	if (!fuse_allow_current_process(get_fuse_conn(inode)))
 		return -EACCES;
 
 	return fuse_update_attributes(inode, stat, NULL, NULL);
@@ -1803,6 +1840,11 @@ static int fuse_setxattr(struct dentry *entry, const char *name,
 	struct fuse_req *req;
 	struct fuse_setxattr_in inarg;
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_setxattr(entry, name, value, size, flags);
+#endif
 
 	if (fc->no_setxattr)
 		return -EOPNOTSUPP;
@@ -1844,6 +1886,11 @@ static ssize_t fuse_getxattr(struct dentry *entry, const char *name,
 	struct fuse_getxattr_in inarg;
 	struct fuse_getxattr_out outarg;
 	ssize_t ret;
+
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_getxattr(entry, name, value, size);
+#endif
 
 	if (fc->no_getxattr)
 		return -EOPNOTSUPP;
@@ -1894,6 +1941,11 @@ static ssize_t fuse_listxattr(struct dentry *entry, char *list, size_t size)
 	struct fuse_getxattr_out outarg;
 	ssize_t ret;
 
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_listxattr(entry, list, size);
+#endif
+
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
@@ -1941,6 +1993,11 @@ static int fuse_removexattr(struct dentry *entry, const char *name)
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_req *req;
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	if (get_fuse_inode(inode)->backing_inode)
+		return fuse_bpf_removexattr(entry, name);
+#endif
 
 	if (fc->no_removexattr)
 		return -EOPNOTSUPP;

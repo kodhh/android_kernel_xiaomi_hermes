@@ -733,6 +733,55 @@ struct fuse_notify_retrieve_in {
 	uint64_t	dummy4;
 };
 
+/* FUSE-BPF actions */
+#define FUSE_ACTION_KEEP		0
+#define FUSE_ACTION_REMOVE		1
+#define FUSE_ACTION_REPLACE		2
+
+struct fuse_entry_bpf_out {
+	uint64_t	backing_action;
+	uint64_t	backing_fd;
+	uint64_t	bpf_action;
+	uint64_t	bpf_fd;
+};
+
+#define FUSE_BPF_USER_FILTER	1
+#define FUSE_BPF_BACKING	2
+#define FUSE_BPF_POST_FILTER	4
+
+#define FUSE_OPCODE_FILTER	0x0ffff
+#define FUSE_PREFILTER		0x10000
+#define FUSE_POSTFILTER		0x20000
+
+#define FUSE_MAX_IN_ARGS 5
+#define FUSE_MAX_OUT_ARGS 3
+
+#define FUSE_BPF_FORCE (1 << 0)
+#define FUSE_BPF_OUT_ARGVAR (1 << 6)
+
+struct fuse_bpf_in_arg {
+	uint32_t size;
+	const void *value;
+	const void *end_offset;
+};
+
+struct fuse_bpf_arg {
+	uint32_t size;
+	void *value;
+	void *end_offset;
+};
+
+struct fuse_bpf_args {
+	uint64_t nodeid;
+	uint32_t opcode;
+	uint32_t error_in;
+	uint32_t in_numargs;
+	uint32_t out_numargs;
+	uint32_t flags;
+	struct fuse_bpf_in_arg in_args[FUSE_MAX_IN_ARGS];
+	struct fuse_bpf_arg out_args[FUSE_MAX_OUT_ARGS];
+};
+
 #define FUSE_DEV_IOC_MAGIC	229
 #define FUSE_DEV_IOC_CLONE	_IOR(FUSE_DEV_IOC_MAGIC, 0, uint32_t)
 #define FUSE_DEV_IOC_PASSTHROUGH_OPEN _IOW(FUSE_DEV_IOC_MAGIC, 126, uint32_t)

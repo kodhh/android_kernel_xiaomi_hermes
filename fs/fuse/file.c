@@ -205,6 +205,9 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	int err;
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_file *ff;
+#endif
 
 	err = generic_file_open(inode, file);
 	if (err)
@@ -216,7 +219,16 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 
 	fuse_finish_open(inode, file);
 
-	return 0;
+#ifdef CONFIG_FUSE_BPF
+	ff = file->private_data;
+	if (!isdir && get_fuse_inode(inode)->backing_inode && !ff->backing_file) {
+		err = fuse_bpf_open(inode, file);
+		if (err)
+			fuse_release_common(file, FUSE_RELEASE);
+	}
+#endif
+
+	return err;
 }
 
 static void fuse_prepare_release(struct fuse_file *ff, int flags, int opcode)
@@ -274,6 +286,10 @@ void fuse_release_common(struct file *file, int opcode)
 	 * because the server can be trusted not to screw up.
 	 */
 	fuse_passthrough_release(&ff->passthrough);
+#ifdef CONFIG_FUSE_BPF
+	if (ff->backing_file)
+		fuse_bpf_release(NULL, file);
+#endif
 	fuse_file_put(ff, ff->fc->destroy_req != NULL);
 }
 
@@ -854,6 +870,12 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 	struct inode *inode = iocb->ki_filp->f_mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
+#ifdef CONFIG_FUSE_BPF
+	if (ff->backing_file)
+		return fuse_bpf_read_iter(iocb->ki_filp, iocb,
+					  iov, nr_segs, &pos);
+#endif
+
 	if (ff->passthrough.filp)
 		return fuse_passthrough_read_iter(iocb->ki_filp, iocb,
 						  iov, nr_segs, &pos);
@@ -1113,6 +1135,12 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	ssize_t err;
 	struct iov_iter i;
 	loff_t endbyte = 0;
+
+#ifdef CONFIG_FUSE_BPF
+	if (ff->backing_file)
+		return fuse_bpf_write_iter(file, iocb, iov,
+					    nr_segs, &pos);
+#endif
 
 	if (ff->passthrough.filp)
 		return fuse_passthrough_write_iter(file, iocb, iov,

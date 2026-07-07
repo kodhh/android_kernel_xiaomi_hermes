@@ -130,6 +130,15 @@ static void fuse_evict_inode(struct inode *inode)
 		fuse_queue_forget(fc, fi->forget, fi->nodeid, fi->nlookup);
 		fi->forget = NULL;
 	}
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_inode *fi = get_fuse_inode(inode);
+		if (fi->backing_inode) {
+			iput(fi->backing_inode);
+			fi->backing_inode = NULL;
+		}
+	}
+#endif
 }
 
 static int fuse_remount_fs(struct super_block *sb, int *flags, char *data)
@@ -663,7 +672,7 @@ static struct dentry *fuse_get_dentry(struct super_block *sb,
 		name.len = 1;
 		name.name = (const unsigned char *)".";
 		err = fuse_lookup_name(sb, handle->nodeid, &name, &outarg,
-				       &inode);
+				       NULL, &inode);
 		if (err && err != -ENOENT)
 			goto out_err;
 		if (err || !inode) {
@@ -766,7 +775,7 @@ static struct dentry *fuse_get_parent(struct dentry *child)
 	name.len = 2;
 	name.name = (const unsigned char *)"..";
 	err = fuse_lookup_name(child_inode->i_sb, get_node_id(child_inode),
-			       &name, &outarg, &inode);
+			       &name, &outarg, NULL, &inode);
 	if (err) {
 		if (err == -ENOENT)
 			return ERR_PTR(-ESTALE);
