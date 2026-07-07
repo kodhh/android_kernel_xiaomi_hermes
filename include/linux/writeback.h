@@ -130,6 +130,7 @@ extern unsigned long vm_dirty_bytes;
 extern unsigned int dirty_writeback_interval;
 extern unsigned int dirty_expire_interval;
 extern int vm_highmem_is_dirtyable;
+extern unsigned int dirtytime_expire_interval;
 extern int block_dump;
 extern int laptop_mode;
 
@@ -149,6 +150,8 @@ extern int dirty_bytes_handler(struct ctl_table *table, int write,
 struct ctl_table;
 int dirty_writeback_centisecs_handler(struct ctl_table *, int,
 				      void __user *, size_t *, loff_t *);
+int dirtytime_interval_handler(struct ctl_table *, int,
+			       void __user *, size_t *, loff_t *);
 
 void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty);
 unsigned long bdi_dirty_limit(struct backing_dev_info *bdi,

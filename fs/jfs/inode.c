@@ -178,6 +178,9 @@ void jfs_dirty_inode(struct inode *inode, int flags)
 {
 	static int noisy = 5;
 
+	if (flags == I_DIRTY_TIME)
+		return;
+
 	if (isReadOnly(inode)) {
 		if (!special_file(inode->i_mode) && noisy) {
 			/* kernel allows writes to devices on read-only

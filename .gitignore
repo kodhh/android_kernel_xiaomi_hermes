@@ -71,6 +71,11 @@ patches-*
 patches
 series
 
+# Reference kernel trees (not part of this kernel)
+/android_kernel_lenovo_a6010/
+/kernel_common/
+/msm-4.19/
+
 # cscope files
 cscope.*
 ncscope.*
@@ -114,6 +119,34 @@ include/generated/
 /net/wireless/regdb.c
 /kernel/timeconst.h
 /kernel/hz.bc
+
+# Generated build tools and binaries
+/scripts/asn1_compiler
+/scripts/kallsyms
+/scripts/pnmtologo
+/scripts/sortextable
+/usr/gen_init_cpio
+/scripts/dtc/dtc
+/scripts/dtc/*.lex.c
+/scripts/dtc/*.tab.c
+/scripts/dtc/*.tab.h
+/scripts/mod/devicetable-offsets.h
+/scripts/mod/elfconfig.h
+/scripts/mod/mk_elfconfig
+/scripts/mod/modpost
+/scripts/selinux/genheaders/genheaders
+/scripts/selinux/mdp/mdp
+/lib/gen_crc32table
+/lib/raid6/mktables
+/lib/raid6/int*.c
+/lib/raid6/tables.c
+/lib/crc32table.h
+/lib/oid_registry_data.c
+/drivers/video/logo/*.c
+/crypto/asymmetric_keys/x509-asn1.c
+/crypto/asymmetric_keys/x509-asn1.h
+/crypto/asymmetric_keys/x509_rsakey-asn1.c
+/crypto/asymmetric_keys/x509_rsakey-asn1.h
 
 #
 # building directory
