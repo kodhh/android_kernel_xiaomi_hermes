@@ -5,6 +5,5 @@
 obj-$(CONFIG_FUSE_FS) += fuse.o
 obj-$(CONFIG_CUSE) += cuse.o
 
-fuse-objs := dev.o dir.o file.o inode.o control.o
-fuse-objs += passthrough.o
+fuse-objs := dev.o dir.o file.o inode.o control.o passthrough.o
 fuse-$(CONFIG_FUSE_BPF) += backing.o

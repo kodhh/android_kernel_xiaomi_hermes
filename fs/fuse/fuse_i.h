@@ -10,7 +10,6 @@
 #define _FS_FUSE_I_H
 
 #include <linux/fuse.h>
-#include <linux/idr.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/wait.h>
@@ -23,6 +22,8 @@
 #include <linux/rbtree.h>
 #include <linux/poll.h>
 #include <linux/workqueue.h>
+#include <linux/idr.h>
+#include <linux/cred.h>
 
 /** Max number of pages that can be used in a single read request */
 #define FUSE_MAX_PAGES_PER_REQ 32
@@ -89,10 +90,6 @@ struct fuse_inode {
 	/** 64 bit inode number */
 	u64 orig_ino;
 
-#ifdef CONFIG_FUSE_BPF
-	struct inode *backing_inode;
-#endif
-
 	/** Version of last attribute change */
 	u64 attr_version;
 
@@ -116,33 +113,34 @@ struct fuse_inode {
 	unsigned long state;
 };
 
-struct fuse_dentry {
-	struct path backing_path;
-};
-
 /** FUSE inode state bits */
 enum {
 	/** Advise readdirplus  */
 	FUSE_I_ADVISE_RDPLUS,
 	/** An operation changing file size is in progress  */
 	FUSE_I_SIZE_UNSTABLE,
+	/** i_mtime has been updated locally; a flush to userspace needed */
+	FUSE_I_MTIME_DIRTY,
 };
 
 struct fuse_conn;
 
-struct fuse_dev {
-	struct fuse_conn *fc;
-	struct list_head entry;
-};
-
-/**
- * Reference to lower filesystem file for read/write operations handled in
- * passthrough mode.
- */
+/** FUSE passthrough */
 struct fuse_passthrough {
 	struct file *filp;
 	struct cred *cred;
 };
+
+#ifdef CONFIG_FUSE_BPF
+struct fuse_bpf_entry {
+	struct {
+		struct fuse_entry_out out;
+	} __attribute__((packed));
+	struct fuse_entry_bpf {
+		u8 placeholders;
+	} __attribute__((packed));
+};
+#endif
 
 /** FUSE specific file data */
 struct fuse_file {
@@ -170,13 +168,6 @@ struct fuse_file {
 	/** Entry on inode's write_files list */
 	struct list_head write_entry;
 
-	/** Container for data related to the passthrough functionality */
-	struct fuse_passthrough passthrough;
-
-#ifdef CONFIG_FUSE_BPF
-	struct file *backing_file;
-#endif
-
 	/** RB node to be linked on fuse_conn->polled_files */
 	struct rb_node polled_node;
 
@@ -185,6 +176,17 @@ struct fuse_file {
 
 	/** Has flock been performed on this file? */
 	bool flock:1;
+
+	/** Container for data related to the passthrough functionality */
+	struct fuse_passthrough passthrough;
+
+#ifdef CONFIG_FUSE_BPF
+	struct file *backing_file;
+#endif
+
+	/* the read write file */
+	struct file *rw_lower_file;
+	bool shortcircuit_enabled;
 };
 
 /** One input argument of a request */
@@ -392,6 +394,9 @@ struct fuse_req {
 
 	/** Request is stolen from fuse_file->reserved_req */
 	struct file *stolen_file;
+
+	/** fuse shortcircuit file  */
+	struct file *private_lower_rw_file;
 };
 
 /**
@@ -511,6 +516,27 @@ struct fuse_conn {
 	/** Set if bdi is valid */
 	unsigned bdi_initialized:1;
 
+	/** write-back cache policy (default is write-through) */
+	unsigned writeback_cache:1;
+
+	/** Shortcircuited IO. */
+	unsigned shortcircuit_io:1;
+
+	/** Passthrough enabled */
+	unsigned int passthrough:1;
+
+	/** IDR for passthrough requests */
+	struct idr passthrough_req;
+
+	/** Protects passthrough_req */
+	spinlock_t passthrough_req_lock;
+
+	/** Backing sblock */
+	struct super_block *backing_sb;
+
+	/** Is bpf backed? */
+	int backing:1;
+
 	/*
 	 * The following bitfields are only for optimization purposes
 	 * and hence races in setting them will not cause malfunction
@@ -620,20 +646,6 @@ struct fuse_conn {
 
 	/** Read/write semaphore to hold when accessing sb. */
 	struct rw_semaphore killsb;
-
-	/** Passthrough support for this connection */
-	unsigned int passthrough:1;
-
-	/** IDR for passthrough requests */
-	struct idr passthrough_req;
-
-	/** Protects passthrough_req */
-	spinlock_t passthrough_req_lock;
-
-#ifdef CONFIG_FUSE_BPF
-	struct super_block *backing_sb;
-	int backing:1;
-#endif
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -674,9 +686,7 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			u64 attr_valid, u64 attr_version);
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg,
-		     struct fuse_entry_bpf_out *bpf_outarg,
-		     struct inode **inode);
+		     struct fuse_entry_out *outarg, struct inode **inode);
 
 /**
  * Send FORGET command
@@ -835,6 +845,8 @@ void fuse_invalidate_attr(struct inode *inode);
 
 void fuse_invalidate_entry_cache(struct dentry *entry);
 
+void fuse_invalidate_atime(struct inode *inode);
+
 /**
  * Acquire reference to fuse_conn
  */
@@ -905,9 +917,20 @@ int fuse_reverse_inval_entry(struct super_block *sb, u64 parent_nodeid,
 
 int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 		 bool isdir);
+
+/**
+ * fuse_direct_io() flags
+ */
+
+/** If set, it is WRITE; otherwise - READ */
+#define FUSE_DIO_WRITE (1 << 0)
+
+/** CUSE pass fuse_direct_io() a file which f_mapping->host is not from FUSE */
+#define FUSE_DIO_CUSE  (1 << 1)
+
 ssize_t fuse_direct_io(struct fuse_io_priv *io, const struct iovec *iov,
 		       unsigned long nr_segs, size_t count, loff_t *ppos,
-		       int write);
+		       int flags);
 long fuse_do_ioctl(struct file *file, unsigned int cmd, unsigned long arg,
 		   unsigned int flags);
 long fuse_ioctl_common(struct file *file, unsigned int cmd,
@@ -915,67 +938,33 @@ long fuse_ioctl_common(struct file *file, unsigned int cmd,
 unsigned fuse_file_poll(struct file *file, poll_table *wait);
 int fuse_dev_release(struct inode *inode, struct file *file);
 
-void fuse_write_update_size(struct inode *inode, loff_t pos);
+bool fuse_write_update_size(struct inode *inode, loff_t pos);
+
+int fuse_flush_mtime(struct file *file, bool nofail);
 
 int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		    struct file *file);
 
 /* backing.c */
-#ifdef CONFIG_FUSE_BPF
-int fuse_bpf_lookup(struct inode *dir_ino, struct dentry *entry,
-		    struct fuse_entry_bpf_out *febo);
-int fuse_bpf_create(struct inode *dir, struct dentry *entry,
-		    struct fuse_entry_bpf_out *febo, umode_t mode);
-int fuse_bpf_open(struct inode *inode, struct file *file);
-int fuse_bpf_release(struct inode *inode, struct file *file);
+struct fuse_bpf_in_arg;
+struct fuse_bpf_out_arg;
+int fuse_backing_map(struct fuse_conn *fc, struct file *backing_file, int fd);
+int fuse_handle_backing(struct fuse_conn *fc, struct fuse_file *ff);
+int fuse_bpf_open(struct fuse_conn *fc, struct fuse_file *ff, struct file *backing_file);
+void fuse_bpf_release(struct fuse_file *ff);
 ssize_t fuse_bpf_read_iter(struct file *file, struct kiocb *iocb,
-			   const struct iovec *iov, unsigned long nr_segs,
-			   loff_t *ppos);
-ssize_t fuse_bpf_write_iter(struct file *file, struct kiocb *iocb,
-			    const struct iovec *iov, unsigned long nr_segs,
-			    loff_t *ppos);
-int fuse_bpf_getattr(struct vfsmount *mnt, struct dentry *entry,
-		     struct kstat *stat);
-int fuse_bpf_setattr(struct dentry *entry, struct iattr *attr);
-int fuse_bpf_setxattr(struct dentry *dentry, const char *name,
-		      const void *value, size_t size, int flags);
-ssize_t fuse_bpf_getxattr(struct dentry *dentry, const char *name,
-			  void *value, size_t size);
-int fuse_bpf_removexattr(struct dentry *dentry, const char *name);
-int fuse_bpf_listxattr(struct dentry *dentry, char *buf, size_t size);
-void fuse_dentry_release(struct dentry *dentry);
-#endif
+			   struct iov_iter *to);
+ssize_t fuse_bpf_write_iter(struct file *file, struct kiocb *iocb_fuse,
+			    struct iov_iter *from);
 
 /* passthrough.c */
 int fuse_passthrough_open(struct fuse_conn *fc, u32 lower_fd);
 int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
-			   struct fuse_open_out *openarg);
+			   struct fuse_passthrough *passthrough);
 void fuse_passthrough_release(struct fuse_passthrough *passthrough);
 ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
-				   const struct iovec *iov, unsigned long nr_segs,
-				   loff_t *ppos);
+				   struct iov_iter *to);
 ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
-				    const struct iovec *iov, unsigned long nr_segs,
-				    loff_t *ppos);
+				    struct iov_iter *from);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
-
-static inline ssize_t call_read_iter(struct file *file, struct kiocb *kio,
-				     const struct iovec *iov,
-				     unsigned long nr_segs, loff_t pos)
-{
-	return file->f_op->aio_read(kio, iov, nr_segs, pos);
-}
-
-static inline ssize_t call_write_iter(struct file *file, struct kiocb *kio,
-				      const struct iovec *iov,
-				      unsigned long nr_segs, loff_t pos)
-{
-	return file->f_op->aio_write(kio, iov, nr_segs, pos);
-}
-
-static inline int call_mmap(struct file *file, struct vm_area_struct *vma)
-{
-	return file->f_op->mmap(file, vma);
-}
-
 #endif /* _FS_FUSE_I_H */

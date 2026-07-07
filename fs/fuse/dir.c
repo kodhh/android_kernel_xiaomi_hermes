@@ -112,6 +112,16 @@ void fuse_invalidate_attr(struct inode *inode)
 	get_fuse_inode(inode)->i_time = 0;
 }
 
+/**
+ * Mark the attributes as stale due to an atime change.  Avoid the invalidate if
+ * atime is not used.
+ */
+void fuse_invalidate_atime(struct inode *inode)
+{
+	if (!IS_RDONLY(inode))
+		fuse_invalidate_attr(inode);
+}
+
 /*
  * Just mark the entry as stale, so that a next attempt to look it up
  * will result in a new lookup call to userspace
@@ -137,8 +147,7 @@ static void fuse_invalidate_entry(struct dentry *entry)
 
 static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 			     u64 nodeid, struct qstr *name,
-			     struct fuse_entry_out *outarg,
-			     struct fuse_entry_bpf_out *bpf_outarg)
+			     struct fuse_entry_out *outarg)
 {
 	memset(outarg, 0, sizeof(struct fuse_entry_out));
 	req->in.h.opcode = FUSE_LOOKUP;
@@ -152,14 +161,6 @@ static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 	else
 		req->out.args[0].size = sizeof(struct fuse_entry_out);
 	req->out.args[0].value = outarg;
-#ifdef CONFIG_FUSE_BPF
-	if (bpf_outarg && fc->backing) {
-		memset(bpf_outarg, 0, sizeof(*bpf_outarg));
-		req->out.numargs = 2;
-		req->out.args[1].size = sizeof(*bpf_outarg);
-		req->out.args[1].value = bpf_outarg;
-	}
-#endif
 }
 
 u64 fuse_get_attr_version(struct fuse_conn *fc)
@@ -224,7 +225,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 
 		parent = dget_parent(entry);
 		fuse_lookup_init(fc, req, get_node_id(parent->d_inode),
-				 &entry->d_name, &outarg, NULL);
+				 &entry->d_name, &outarg);
 		fuse_request_send(fc, req);
 		dput(parent);
 		err = req->out.h.error;
@@ -313,9 +314,6 @@ static int invalid_nodeid(u64 nodeid)
 const struct dentry_operations fuse_dentry_operations = {
 	.d_revalidate	= fuse_dentry_revalidate,
 	.d_canonical_path = fuse_dentry_canonical_path,
-#ifdef CONFIG_FUSE_BPF
-	.d_release	= fuse_dentry_release,
-#endif
 };
 
 int fuse_valid_type(int m)
@@ -345,9 +343,7 @@ static struct dentry *fuse_d_add_directory(struct dentry *entry,
 }
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg,
-		     struct fuse_entry_bpf_out *bpf_outarg,
-		     struct inode **inode)
+		     struct fuse_entry_out *outarg, struct inode **inode)
 {
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
 	struct fuse_req *req;
@@ -374,7 +370,7 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 
 	attr_version = fuse_get_attr_version(fc);
 
-	fuse_lookup_init(fc, req, nodeid, name, outarg, bpf_outarg);
+	fuse_lookup_init(fc, req, nodeid, name, outarg);
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -413,18 +409,9 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 	struct dentry *newent;
 	struct fuse_conn *fc = get_fuse_conn(dir);
 	bool outarg_valid = true;
-#ifdef CONFIG_FUSE_BPF
-	struct fuse_entry_bpf_out febo;
-#endif
 
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
-			       &outarg,
-#ifdef CONFIG_FUSE_BPF
-			       fc->backing ? &febo : NULL,
-#else
-			       NULL,
-#endif
-			       &inode);
+			       &outarg, &inode);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;
@@ -452,11 +439,6 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 		fuse_change_entry_timeout(entry, &outarg);
 	else
 		fuse_invalidate_entry_cache(entry);
-
-#ifdef CONFIG_FUSE_BPF
-	if (fc->backing && inode && outarg_valid)
-		fuse_bpf_lookup(dir, entry, &febo);
-#endif
 
 	fuse_advise_use_readdirplus(dir);
 	return newent;
@@ -535,6 +517,9 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 	if (err)
 		goto out_free_ff;
 
+	if (req->private_lower_rw_file != NULL)
+		ff->rw_lower_file = req->private_lower_rw_file;
+
 	err = -EIO;
 	if (!S_ISREG(outentry.attr.mode) || invalid_nodeid(outentry.nodeid))
 		goto out_free_ff;
@@ -561,7 +546,6 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 		fuse_sync_release(ff, flags);
 	} else {
 		file->private_data = fuse_file_get(ff);
-		fuse_passthrough_setup(fc, ff, &outopen);
 		fuse_finish_open(inode, file);
 	}
 	return err;
@@ -620,25 +604,6 @@ no_open:
 	return finish_no_open(file, res);
 }
 
-static int fuse_users(struct inode *dir, struct dentry *entry)
-{
-    int err;
-    struct fuse_conn *fc = get_fuse_conn(dir);
-    struct fuse_req *req = fuse_get_req_nopages(fc);
-    if (IS_ERR(req))
-        return PTR_ERR(req);
-
-    req->in.h.opcode = FUSE_USERS;
-    req->in.h.nodeid = get_node_id(dir);
-    req->in.numargs = 1;
-    req->in.args[0].size = entry->d_name.len + 1;
-    req->in.args[0].value = entry->d_name.name;
-    fuse_request_send(fc, req);
-    err = req->out.h.error;
-    fuse_put_request(fc, req);
-    return err;
-}
-
 /*
  * Code shared between mknod, mkdir, symlink and link
  */
@@ -695,9 +660,6 @@ static int create_new_entry(struct fuse_conn *fc, struct fuse_req *req,
 			mutex_unlock(&fc->inst_mutex);
 			dput(alias);
 			iput(inode);
-            
-            printk(KERN_ERR "fuse:%s: EBUSY caused from that the directory,'%s', has alias. Use FUSE_USERS to find the reason. \n", __FUNCTION__, entry->d_name.name);
-            fuse_users(dir, entry);           
 			return -EBUSY;
 		}
 		d_instantiate(entry, inode);
@@ -947,6 +909,14 @@ static void fuse_fillattr(struct inode *inode, struct fuse_attr *attr,
 			  struct kstat *stat)
 {
 	unsigned int blkbits;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+
+	/* see the comment in fuse_change_attributes() */
+	if (fc->writeback_cache && S_ISREG(inode->i_mode)) {
+		attr->size = i_size_read(inode);
+		attr->mtime = inode->i_mtime.tv_sec;
+		attr->mtimensec = inode->i_mtime.tv_nsec;
+	}
 
 	stat->dev = inode->i_sb->s_dev;
 	stat->ino = attr->ino;
@@ -1295,7 +1265,7 @@ static int fuse_direntplus_link(struct file *file,
 	struct fuse_entry_out *o = &direntplus->entry_out;
 	struct fuse_dirent *dirent = &direntplus->dirent;
 	struct dentry *parent = file->f_path.dentry;
-	struct qstr name = QSTR_INIT((const unsigned char *)dirent->name, dirent->namelen);
+	struct qstr name = QSTR_INIT(dirent->name, dirent->namelen);
 	struct dentry *dentry;
 	struct dentry *alias;
 	struct inode *dir = parent->d_inode;
@@ -1500,7 +1470,7 @@ static int fuse_readdir(struct file *file, void *dstbuf, filldir_t filldir)
 	}
 
 	__free_page(page);
-	fuse_invalidate_attr(inode); /* atime changed */
+	fuse_invalidate_atime(inode);
 	return err;
 }
 
@@ -1533,7 +1503,7 @@ static char *read_link(struct dentry *dentry)
 		link[req->out.args[0].size] = '\0';
  out:
 	fuse_put_request(fc, req);
-	fuse_invalidate_attr(inode); /* atime changed */
+	fuse_invalidate_atime(inode);
 	return link;
 }
 
@@ -1596,10 +1566,14 @@ static long fuse_dir_compat_ioctl(struct file *file, unsigned int cmd,
 				 FUSE_IOCTL_COMPAT | FUSE_IOCTL_DIR);
 }
 
-static bool update_mtime(unsigned ivalid)
+static bool update_mtime(unsigned ivalid, bool trust_local_mtime)
 {
 	/* Always update if mtime is explicitly set  */
 	if (ivalid & ATTR_MTIME_SET)
+		return true;
+
+	/* Or if kernel i_mtime is the official one */
+	if (trust_local_mtime)
 		return true;
 
 	/* If it's an open(O_TRUNC) or an ftruncate(), don't update */
@@ -1610,7 +1584,8 @@ static bool update_mtime(unsigned ivalid)
 	return true;
 }
 
-static void iattr_to_fattr(struct iattr *iattr, struct fuse_setattr_in *arg)
+static void iattr_to_fattr(struct iattr *iattr, struct fuse_setattr_in *arg,
+			   bool trust_local_mtime)
 {
 	unsigned ivalid = iattr->ia_valid;
 
@@ -1629,11 +1604,11 @@ static void iattr_to_fattr(struct iattr *iattr, struct fuse_setattr_in *arg)
 		if (!(ivalid & ATTR_ATIME_SET))
 			arg->valid |= FATTR_ATIME_NOW;
 	}
-	if ((ivalid & ATTR_MTIME) && update_mtime(ivalid)) {
+	if ((ivalid & ATTR_MTIME) && update_mtime(ivalid, trust_local_mtime)) {
 		arg->valid |= FATTR_MTIME;
 		arg->mtime = iattr->ia_mtime.tv_sec;
 		arg->mtimensec = iattr->ia_mtime.tv_nsec;
-		if (!(ivalid & ATTR_MTIME_SET))
+		if (!(ivalid & ATTR_MTIME_SET) && !trust_local_mtime)
 			arg->valid |= FATTR_MTIME_NOW;
 	}
 }
@@ -1682,6 +1657,63 @@ void fuse_release_nowrite(struct inode *inode)
 	spin_unlock(&fc->lock);
 }
 
+static void fuse_setattr_fill(struct fuse_conn *fc, struct fuse_req *req,
+			      struct inode *inode,
+			      struct fuse_setattr_in *inarg_p,
+			      struct fuse_attr_out *outarg_p)
+{
+	req->in.h.opcode = FUSE_SETATTR;
+	req->in.h.nodeid = get_node_id(inode);
+	req->in.numargs = 1;
+	req->in.args[0].size = sizeof(*inarg_p);
+	req->in.args[0].value = inarg_p;
+	req->out.numargs = 1;
+	if (fc->minor < 9)
+		req->out.args[0].size = FUSE_COMPAT_ATTR_OUT_SIZE;
+	else
+		req->out.args[0].size = sizeof(*outarg_p);
+	req->out.args[0].value = outarg_p;
+}
+
+/*
+ * Flush inode->i_mtime to the server
+ */
+int fuse_flush_mtime(struct file *file, bool nofail)
+{
+	struct inode *inode = file->f_mapping->host;
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_req *req = NULL;
+	struct fuse_setattr_in inarg;
+	struct fuse_attr_out outarg;
+	int err;
+
+	if (nofail) {
+		req = fuse_get_req_nofail_nopages(fc, file);
+	} else {
+		req = fuse_get_req_nopages(fc);
+		if (IS_ERR(req))
+			return PTR_ERR(req);
+	}
+
+	memset(&inarg, 0, sizeof(inarg));
+	memset(&outarg, 0, sizeof(outarg));
+
+	inarg.valid |= FATTR_MTIME;
+	inarg.mtime = inode->i_mtime.tv_sec;
+	inarg.mtimensec = inode->i_mtime.tv_nsec;
+
+	fuse_setattr_fill(fc, req, inode, &inarg, &outarg);
+	fuse_request_send(fc, req);
+	err = req->out.h.error;
+	fuse_put_request(fc, req);
+
+	if (!err)
+		clear_bit(FUSE_I_MTIME_DIRTY, &fi->state);
+
+	return err;
+}
+
 /*
  * Set attributes, and at the same time refresh them.
  *
@@ -1699,8 +1731,10 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 	struct fuse_setattr_in inarg;
 	struct fuse_attr_out outarg;
 	bool is_truncate = false;
+	bool is_wb = fc->writeback_cache;
 	loff_t oldsize;
 	int err;
+	bool trust_local_mtime = is_wb && S_ISREG(inode->i_mode);
 
 	if (!(fc->flags & FUSE_DEFAULT_PERMISSIONS))
 		attr->ia_valid |= ATTR_FORCE;
@@ -1729,7 +1763,7 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 
 	memset(&inarg, 0, sizeof(inarg));
 	memset(&outarg, 0, sizeof(outarg));
-	iattr_to_fattr(attr, &inarg);
+	iattr_to_fattr(attr, &inarg, trust_local_mtime);
 	if (file) {
 		struct fuse_file *ff = file->private_data;
 		inarg.valid |= FATTR_FH;
@@ -1740,17 +1774,7 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 		inarg.valid |= FATTR_LOCKOWNER;
 		inarg.lock_owner = fuse_lock_owner_id(fc, current->files);
 	}
-	req->in.h.opcode = FUSE_SETATTR;
-	req->in.h.nodeid = get_node_id(inode);
-	req->in.numargs = 1;
-	req->in.args[0].size = sizeof(inarg);
-	req->in.args[0].value = &inarg;
-	req->out.numargs = 1;
-	if (fc->minor < 9)
-		req->out.args[0].size = FUSE_COMPAT_ATTR_OUT_SIZE;
-	else
-		req->out.args[0].size = sizeof(outarg);
-	req->out.args[0].value = &outarg;
+	fuse_setattr_fill(fc, req, inode, &inarg, &outarg);
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -1767,10 +1791,18 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 	}
 
 	spin_lock(&fc->lock);
+	/* the kernel maintains i_mtime locally */
+	if (trust_local_mtime && (attr->ia_valid & ATTR_MTIME)) {
+		inode->i_mtime = attr->ia_mtime;
+		clear_bit(FUSE_I_MTIME_DIRTY, &fi->state);
+	}
+
 	fuse_change_attributes_common(inode, &outarg.attr,
 				      attr_timeout(&outarg));
 	oldsize = inode->i_size;
-	i_size_write(inode, outarg.attr.size);
+	/* see the comment in fuse_change_attributes() */
+	if (!is_wb || is_truncate || !S_ISREG(inode->i_mode))
+		i_size_write(inode, outarg.attr.size);
 
 	if (is_truncate) {
 		/* NOTE: this may release/reacquire fc->lock */
@@ -1782,7 +1814,8 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 	 * Only call invalidate_inode_pages2() after removing
 	 * FUSE_NOWRITE, otherwise fuse_launder_page() would deadlock.
 	 */
-	if (S_ISREG(inode->i_mode) && oldsize != outarg.attr.size) {
+	if ((is_truncate || !is_wb) &&
+	    S_ISREG(inode->i_mode) && oldsize != outarg.attr.size) {
 		truncate_pagecache(inode, oldsize, outarg.attr.size);
 		invalidate_inode_pages2(inode->i_mapping);
 	}
@@ -1802,11 +1835,6 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 {
 	struct inode *inode = entry->d_inode;
 
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_setattr(entry, attr);
-#endif
-
 	if (!fuse_allow_current_process(get_fuse_conn(inode)))
 		return -EACCES;
 
@@ -1820,13 +1848,9 @@ static int fuse_getattr(struct vfsmount *mnt, struct dentry *entry,
 			struct kstat *stat)
 {
 	struct inode *inode = entry->d_inode;
+	struct fuse_conn *fc = get_fuse_conn(inode);
 
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_getattr(mnt, entry, stat);
-#endif
-
-	if (!fuse_allow_current_process(get_fuse_conn(inode)))
+	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
 	return fuse_update_attributes(inode, stat, NULL, NULL);
@@ -1840,11 +1864,6 @@ static int fuse_setxattr(struct dentry *entry, const char *name,
 	struct fuse_req *req;
 	struct fuse_setxattr_in inarg;
 	int err;
-
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_setxattr(entry, name, value, size, flags);
-#endif
 
 	if (fc->no_setxattr)
 		return -EOPNOTSUPP;
@@ -1886,11 +1905,6 @@ static ssize_t fuse_getxattr(struct dentry *entry, const char *name,
 	struct fuse_getxattr_in inarg;
 	struct fuse_getxattr_out outarg;
 	ssize_t ret;
-
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_getxattr(entry, name, value, size);
-#endif
 
 	if (fc->no_getxattr)
 		return -EOPNOTSUPP;
@@ -1941,11 +1955,6 @@ static ssize_t fuse_listxattr(struct dentry *entry, char *list, size_t size)
 	struct fuse_getxattr_out outarg;
 	ssize_t ret;
 
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_listxattr(entry, list, size);
-#endif
-
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
@@ -1994,11 +2003,6 @@ static int fuse_removexattr(struct dentry *entry, const char *name)
 	struct fuse_req *req;
 	int err;
 
-#ifdef CONFIG_FUSE_BPF
-	if (get_fuse_inode(inode)->backing_inode)
-		return fuse_bpf_removexattr(entry, name);
-#endif
-
 	if (fc->no_removexattr)
 		return -EOPNOTSUPP;
 
@@ -2021,6 +2025,17 @@ static int fuse_removexattr(struct dentry *entry, const char *name)
 	if (!err)
 		fuse_invalidate_attr(inode);
 	return err;
+}
+
+static int fuse_update_time(struct inode *inode, struct timespec *now,
+			    int flags)
+{
+	if (flags & S_MTIME) {
+		inode->i_mtime = *now;
+		set_bit(FUSE_I_MTIME_DIRTY, &get_fuse_inode(inode)->state);
+		BUG_ON(!S_ISREG(inode->i_mode));
+	}
+	return 0;
 }
 
 static const struct inode_operations fuse_dir_inode_operations = {
@@ -2062,6 +2077,7 @@ static const struct inode_operations fuse_common_inode_operations = {
 	.getxattr	= fuse_getxattr,
 	.listxattr	= fuse_listxattr,
 	.removexattr	= fuse_removexattr,
+	.update_time	= fuse_update_time,
 };
 
 static const struct inode_operations fuse_symlink_inode_operations = {
