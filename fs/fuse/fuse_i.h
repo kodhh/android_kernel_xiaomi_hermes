@@ -635,6 +635,9 @@ struct fuse_conn {
 	/** List of device instances belonging to this connection */
 	struct list_head devices;
 
+	/** Number of device instances */
+	atomic_t dev_count;
+
 	/** IDR for passthrough requests */
 	struct idr passthrough_req;
 

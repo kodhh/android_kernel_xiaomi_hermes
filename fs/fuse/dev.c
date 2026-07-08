@@ -2149,23 +2149,16 @@ EXPORT_SYMBOL_GPL(fuse_abort_conn);
 int fuse_dev_release(struct inode *inode, struct file *file)
 {
 	struct fuse_dev *fud = fuse_get_dev(file);
-	struct fuse_conn *fc;
 
-	if (!fud)
-		return 0;
-	fc = fud->fc;
-	if (fc) {
-		spin_lock(&fc->lock);
-		fc->connected = 0;
-		fc->blocked = 0;
-		fc->initialized = 1;
-		end_queued_requests(fc);
-		end_polls(fc);
-		wake_up_all(&fc->blocked_waitq);
-		spin_unlock(&fc->lock);
-		fuse_conn_put(fc);
+	if (fud) {
+		struct fuse_conn *fc = fud->fc;
+
+		/* Are we the last open device? */
+		if (atomic_dec_and_test(&fc->dev_count))
+			fuse_abort_conn(fc);
+
+		fuse_dev_free(fud);
 	}
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_dev_release);
@@ -2187,10 +2180,17 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 
 static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 {
+	struct fuse_dev *fud;
+
 	if (new->private_data)
 		return -EINVAL;
 
-	new->private_data = fuse_conn_get(fc);
+	fud = fuse_dev_alloc(fc);
+	if (!fud)
+		return -ENOMEM;
+
+	new->private_data = fud;
+	atomic_inc(&fc->dev_count);
 
 	return 0;
 }
