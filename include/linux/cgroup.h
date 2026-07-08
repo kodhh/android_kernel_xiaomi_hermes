@@ -553,7 +553,6 @@ int cgroup_add_cftypes(struct cgroup_subsys *ss, struct cftype *cfts);
 int cgroup_rm_cftypes(struct cgroup_subsys *ss, struct cftype *cfts);
 
 int cgroup_is_removed(const struct cgroup *cgrp);
-bool cgroup_is_descendant(struct cgroup *cgrp, struct cgroup *ancestor);
 
 int cgroup_path(const struct cgroup *cgrp, char *buf, int buflen);
 
@@ -898,6 +897,18 @@ extern struct cgroupfs_root cgrp_dfl_root;
 static inline bool cgroup_on_dfl(struct cgroup *cgrp)
 {
 	return cgrp->root->subsys_mask == 0;
+}
+
+bool cgroup_is_descendant(struct cgroup *cgrp, struct cgroup *ancestor);
+
+static inline bool task_under_cgroup_hierarchy(struct task_struct *task,
+					       struct cgroup *ancestor)
+{
+	struct css_set *cset = task_css_set(task);
+
+	if (!cset->dfl_cgrp)
+		return false;
+	return cgroup_is_descendant(cset->dfl_cgrp, ancestor);
 }
 
 struct sock_cgroup_data {
