@@ -17,7 +17,7 @@
 #include <linux/swap.h>
 #include <linux/aio.h>
 #include <linux/falloc.h>
-#include <asm/div64.h>
+#include <linux/fs.h>
 
 static const struct file_operations fuse_direct_io_file_operations;
 
@@ -128,8 +128,15 @@ static void fuse_file_put(struct fuse_file *ff, bool sync)
 	if (atomic_dec_and_test(&ff->count)) {
 		struct fuse_req *req = ff->reserved_req;
 
-		if (sync) {
-			req->force = 1;
+		if (ff->fc->no_open) {
+			/*
+			 * Drop the release request when client does not
+			 * implement 'open'
+			 */
+			req->background = 0;
+			path_put(&req->misc.release.path);
+			fuse_put_request(ff->fc, req);
+		} else if (sync) {
 			req->background = 0;
 			fuse_request_send(ff->fc, req);
 			path_put(&req->misc.release.path);
@@ -146,38 +153,57 @@ static void fuse_file_put(struct fuse_file *ff, bool sync)
 int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 		 bool isdir)
 {
-	struct fuse_open_out outarg;
 	struct fuse_file *ff;
-	int err;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
 
 	ff = fuse_file_alloc(fc);
 	if (!ff)
 		return -ENOMEM;
 
-	err = fuse_send_open(fc, nodeid, file, opcode, &outarg);
-	if (err) {
-		fuse_file_free(ff);
-		return err;
+	ff->fh = 0;
+	ff->open_flags = FOPEN_KEEP_CACHE; /* Default for no-open */
+	if (!fc->no_open || isdir) {
+		struct fuse_open_out outarg;
+		int err;
+
+		err = fuse_send_open(fc, nodeid, file, opcode, &outarg);
+		if (!err) {
+			ff->fh = outarg.fh;
+			ff->open_flags = outarg.open_flags;
+			fuse_passthrough_setup(fc, ff, &outarg);
+		} else if (err != -ENOSYS || isdir) {
+			fuse_file_free(ff);
+			return err;
+		} else {
+			fc->no_open = 1;
+		}
 	}
 
 	if (isdir)
-		outarg.open_flags &= ~FOPEN_DIRECT_IO;
+		ff->open_flags &= ~FOPEN_DIRECT_IO;
 
-	ff->fh = outarg.fh;
 	ff->nodeid = nodeid;
-	ff->open_flags = outarg.open_flags;
 	file->private_data = fuse_file_get(ff);
-
-	err = fuse_passthrough_setup(fc, ff, &outarg);
-	if (err) {
-		fuse_release_common(file, FUSE_RELEASE);
-		return err;
-	}
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_do_open);
+
+static void fuse_link_write_file(struct file *file)
+{
+	struct inode *inode = file_inode(file);
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_file *ff = file->private_data;
+	/*
+	 * file may be written through mmap, so chain it onto the
+	 * inodes's write_file list
+	 */
+	spin_lock(&fc->lock);
+	if (list_empty(&ff->write_entry))
+		list_add(&ff->write_entry, &fi->write_files);
+	spin_unlock(&fc->lock);
+}
 
 void fuse_finish_open(struct inode *inode, struct file *file)
 {
@@ -188,7 +214,9 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 		file->f_op = &fuse_direct_io_file_operations;
 	if (!(ff->open_flags & FOPEN_KEEP_CACHE))
 		invalidate_inode_pages2(inode->i_mapping);
-	if (ff->open_flags & FOPEN_NONSEEKABLE)
+	if (ff->open_flags & FOPEN_STREAM)
+		nonseekable_open(inode, file);
+	else if (ff->open_flags & FOPEN_NONSEEKABLE)
 		nonseekable_open(inode, file);
 	if (fc->atomic_o_trunc && (file->f_flags & O_TRUNC)) {
 		struct fuse_inode *fi = get_fuse_inode(inode);
@@ -198,25 +226,41 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 		i_size_write(inode, 0);
 		spin_unlock(&fc->lock);
 		fuse_invalidate_attr(inode);
+		if (fc->writeback_cache)
+			file_update_time(file);
 	}
+	if ((file->f_mode & FMODE_WRITE) && fc->writeback_cache)
+		fuse_link_write_file(file);
 }
 
 int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	int err;
+	bool is_wb_truncate = (file->f_flags & O_TRUNC) &&
+			  fc->atomic_o_trunc &&
+			  fc->writeback_cache;
 
 	err = generic_file_open(inode, file);
 	if (err)
 		return err;
 
+	if (is_wb_truncate) {
+		mutex_lock(&inode->i_mutex);
+		fuse_set_nowrite(inode);
+	}
+
 	err = fuse_do_open(fc, get_node_id(inode), file, isdir);
-	if (err)
-		return err;
 
-	fuse_finish_open(inode, file);
+	if (!err)
+		fuse_finish_open(inode, file);
 
-	return 0;
+	if (is_wb_truncate) {
+		fuse_release_nowrite(inode);
+		mutex_unlock(&inode->i_mutex);
+	}
+
+	return err;
 }
 
 static void fuse_prepare_release(struct fuse_file *ff, int flags, int opcode)
@@ -919,16 +963,20 @@ static size_t fuse_send_write(struct fuse_req *req, struct fuse_io_priv *io,
 	return req->misc.write.out.size;
 }
 
-void fuse_write_update_size(struct inode *inode, loff_t pos)
+bool fuse_write_update_size(struct inode *inode, loff_t pos)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	bool ret = false;
 
 	spin_lock(&fc->lock);
 	fi->attr_version = ++fc->attr_version;
-	if (pos > inode->i_size)
+	if (pos > inode->i_size) {
 		i_size_write(inode, pos);
+		ret = true;
+	}
 	spin_unlock(&fc->lock);
+	return ret;
 }
 
 static size_t fuse_send_write_pages(struct fuse_req *req, struct file *file,

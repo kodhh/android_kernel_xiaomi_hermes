@@ -94,8 +94,10 @@ static ssize_t cuse_read(struct file *file, char __user *buf, size_t count,
 	loff_t pos = 0;
 	struct iovec iov = { .iov_base = buf, .iov_len = count };
 	struct fuse_io_priv io = { .async = 0, .file = file };
+	struct iov_iter ii;
+	iov_iter_init(&ii, READ, &iov, 1, count);
 
-	return fuse_direct_io(&io, &iov, 1, count, &pos, 0);
+	return fuse_direct_io(&io, &ii, &pos, FUSE_DIO_CUSE);
 }
 
 static ssize_t cuse_write(struct file *file, const char __user *buf,
@@ -104,12 +106,15 @@ static ssize_t cuse_write(struct file *file, const char __user *buf,
 	loff_t pos = 0;
 	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = count };
 	struct fuse_io_priv io = { .async = 0, .file = file };
+	struct iov_iter ii;
+	iov_iter_init(&ii, WRITE, &iov, 1, count);
 
 	/*
 	 * No locking or generic_write_checks(), the server is
 	 * responsible for locking and sanity checks.
 	 */
-	return fuse_direct_io(&io, &iov, 1, count, &pos, 1);
+	return fuse_direct_io(&io, &ii, &pos,
+			      FUSE_DIO_WRITE | FUSE_DIO_CUSE);
 }
 
 static int cuse_open(struct inode *inode, struct file *file)
@@ -473,7 +478,7 @@ err:
 static void cuse_fc_release(struct fuse_conn *fc)
 {
 	struct cuse_conn *cc = fc_to_cc(fc);
-	kfree(cc);
+	kfree_rcu(cc, fc.rcu);
 }
 
 /**
@@ -493,6 +498,7 @@ static void cuse_fc_release(struct fuse_conn *fc)
  */
 static int cuse_channel_open(struct inode *inode, struct file *file)
 {
+	struct fuse_dev *fud;
 	struct cuse_conn *cc;
 	int rc;
 
@@ -503,6 +509,12 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
 
 	fuse_conn_init(&cc->fc);
 
+	fud = fuse_dev_alloc(&cc->fc);
+	if (!fud) {
+		kfree(cc);
+		return -ENOMEM;
+	}
+
 	INIT_LIST_HEAD(&cc->list);
 	cc->fc.release = cuse_fc_release;
 
@@ -510,10 +522,10 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
 	cc->fc.initialized = 1;
 	rc = cuse_send_init(cc);
 	if (rc) {
-		fuse_conn_put(&cc->fc);
+		fuse_dev_free(fud);
 		return rc;
 	}
-	file->private_data = &cc->fc;	/* channel owns base reference to cc */
+	file->private_data = fud;
 
 	return 0;
 }
@@ -531,7 +543,8 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
  */
 static int cuse_channel_release(struct inode *inode, struct file *file)
 {
-	struct cuse_conn *cc = fc_to_cc(file->private_data);
+	struct fuse_dev *fud = file->private_data;
+	struct cuse_conn *cc = fc_to_cc(fud->fc);
 	int rc;
 
 	/* remove from the conntbl, no more access from this point on */
@@ -568,6 +581,7 @@ static ssize_t cuse_class_waiting_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", atomic_read(&cc->fc.num_waiting));
 }
+static DEVICE_ATTR(waiting, 0400, cuse_class_waiting_show, NULL);
 
 static ssize_t cuse_class_abort_store(struct device *dev,
 				      struct device_attribute *attr,
@@ -578,18 +592,23 @@ static ssize_t cuse_class_abort_store(struct device *dev,
 	fuse_abort_conn(&cc->fc);
 	return count;
 }
+static DEVICE_ATTR(abort, 0200, NULL, cuse_class_abort_store);
 
-static struct device_attribute cuse_class_dev_attrs[] = {
-	__ATTR(waiting, S_IFREG | 0400, cuse_class_waiting_show, NULL),
-	__ATTR(abort, S_IFREG | 0200, NULL, cuse_class_abort_store),
-	{ }
+static struct attribute *cuse_class_dev_attrs[] = {
+	&dev_attr_waiting.attr,
+	&dev_attr_abort.attr,
+	NULL,
 };
+ATTRIBUTE_GROUPS(cuse_class_dev);
 
 static struct miscdevice cuse_miscdev = {
-	.minor		= MISC_DYNAMIC_MINOR,
+	.minor		= CUSE_MINOR,
 	.name		= "cuse",
 	.fops		= &cuse_channel_fops,
 };
+
+MODULE_ALIAS_MISCDEV(CUSE_MINOR);
+MODULE_ALIAS("devname:cuse");
 
 static int __init cuse_init(void)
 {
@@ -604,12 +623,14 @@ static int __init cuse_init(void)
 	cuse_channel_fops.owner		= THIS_MODULE;
 	cuse_channel_fops.open		= cuse_channel_open;
 	cuse_channel_fops.release	= cuse_channel_release;
+	/* CUSE is not prepared for FUSE_DEV_IOC_CLONE */
+	cuse_channel_fops.unlocked_ioctl	= NULL;
 
 	cuse_class = class_create(THIS_MODULE, "cuse");
 	if (IS_ERR(cuse_class))
 		return PTR_ERR(cuse_class);
 
-	cuse_class->dev_attrs = cuse_class_dev_attrs;
+	cuse_class->dev_groups = cuse_class_dev_groups;
 
 	rc = misc_register(&cuse_miscdev);
 	if (rc) {
