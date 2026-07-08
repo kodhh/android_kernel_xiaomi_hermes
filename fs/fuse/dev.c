@@ -1328,18 +1328,17 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 		goto out;
 
 	ret = 0;
-	pipe_lock(pipe);
 
-	if (!pipe->readers) {
+	if (unlikely(!pipe->readers)) {
 		send_sig(SIGPIPE, current, 0);
 		if (!ret)
 			ret = -EPIPE;
-		goto out_unlock;
+		goto out;
 	}
 
 	if (pipe->nrbufs + cs.nr_segs > pipe->buffers) {
 		ret = -EIO;
-		goto out_unlock;
+		goto out;
 	}
 
 	while (page_nr < cs.nr_segs) {
@@ -1362,9 +1361,6 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 		if (pipe->files)
 			do_wakeup = 1;
 	}
-
-out_unlock:
-	pipe_unlock(pipe);
 
 	if (do_wakeup) {
 		smp_mb();
@@ -2008,8 +2004,14 @@ out_free:
 
 static unsigned fuse_dev_poll(struct file *file, poll_table *wait)
 {
-	unsigned mask = POLLOUT | POLLWRNORM;
-	struct fuse_conn *fc = fuse_get_dev(file)->fc;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	unsigned mask;
+	struct fuse_conn *fc;
+
+	if (!fud)
+		return POLLERR;
+	mask = POLLOUT | POLLWRNORM;
+	fc = fud->fc;
 	if (!fc)
 		return POLLERR;
 
@@ -2146,7 +2148,12 @@ EXPORT_SYMBOL_GPL(fuse_abort_conn);
 
 int fuse_dev_release(struct inode *inode, struct file *file)
 {
-	struct fuse_conn *fc = fuse_get_dev(file)->fc;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_conn *fc;
+
+	if (!fud)
+		return 0;
+	fc = fud->fc;
 	if (fc) {
 		spin_lock(&fc->lock);
 		fc->connected = 0;
@@ -2165,7 +2172,12 @@ EXPORT_SYMBOL_GPL(fuse_dev_release);
 
 static int fuse_dev_fasync(int fd, struct file *file, int on)
 {
-	struct fuse_conn *fc = fuse_get_dev(file)->fc;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_conn *fc;
+
+	if (!fud)
+		return -EPERM;
+	fc = fud->fc;
 	if (!fc)
 		return -EPERM;
 
