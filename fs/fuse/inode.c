@@ -594,6 +594,7 @@ void fuse_conn_init(struct fuse_conn *fc)
 	mutex_init(&fc->inst_mutex);
 	init_rwsem(&fc->killsb);
 	atomic_set(&fc->count, 1);
+	atomic_set(&fc->dev_count, 1);
 	init_waitqueue_head(&fc->waitq);
 	init_waitqueue_head(&fc->blocked_waitq);
 	init_waitqueue_head(&fc->reserved_req_waitq);
@@ -614,6 +615,8 @@ void fuse_conn_init(struct fuse_conn *fc)
 	fc->initialized = 0;
 	fc->attr_version = 1;
 	get_random_bytes(&fc->scramble_key, sizeof(fc->scramble_key));
+	idr_init(&fc->passthrough_req);
+	spin_lock_init(&fc->passthrough_req_lock);
 }
 EXPORT_SYMBOL_GPL(fuse_conn_init);
 
@@ -623,6 +626,7 @@ void fuse_conn_put(struct fuse_conn *fc)
 		if (fc->destroy_req)
 			fuse_request_free(fc->destroy_req);
 		mutex_destroy(&fc->inst_mutex);
+		idr_destroy(&fc->passthrough_req);
 		fc->release(fc);
 	}
 }
@@ -907,6 +911,11 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->writeback_cache = 0;
 				fc->shortcircuit_io = 1;
 				pr_info("FUSE: SHORTCIRCUIT enabled [%s : %d]!\n",
+					current->comm, current->pid);
+			}
+			if (arg->flags & FUSE_PASSTHROUGH) {
+				fc->passthrough = 1;
+				pr_info("FUSE: passthrough enabled [%s : %d]!\n",
 					current->comm, current->pid);
 			}
 			if (arg->time_gran && arg->time_gran <= 1000000000)

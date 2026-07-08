@@ -17,9 +17,11 @@
 #include <linux/compat.h>
 #include <linux/swap.h>
 #include <linux/aio.h>
+#include <linux/uio.h>
 #include <linux/falloc.h>
 
 static const struct file_operations fuse_direct_io_file_operations;
+static const struct file_operations fuse_passthrough_file_operations;
 
 static int fuse_send_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 			  int opcode, struct fuse_open_out *outargp,
@@ -134,6 +136,9 @@ static void fuse_file_put(struct fuse_file *ff, bool sync)
 	if (atomic_dec_and_test(&ff->count)) {
 		struct fuse_req *req = ff->reserved_req;
 
+		if (ff->passthrough.filp)
+			fuse_passthrough_release(&ff->passthrough);
+
 		if (sync) {
 			req->force = 1;
 			req->background = 0;
@@ -176,6 +181,9 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	ff->open_flags = outarg.open_flags;
 	file->private_data = fuse_file_get(ff);
 
+	if (fc->passthrough && outarg.passthrough_fh > 0)
+		fuse_passthrough_setup(fc, ff, &outarg);
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(fuse_do_open);
@@ -201,7 +209,9 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 	struct fuse_file *ff = file->private_data;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
-	if (ff->open_flags & FOPEN_DIRECT_IO)
+	if (ff->passthrough.filp)
+		file->f_op = &fuse_passthrough_file_operations;
+	else if (ff->open_flags & FOPEN_DIRECT_IO)
 		file->f_op = &fuse_direct_io_file_operations;
 	if (!(ff->open_flags & FOPEN_KEEP_CACHE))
 		invalidate_inode_pages2(inode->i_mapping);
@@ -2764,6 +2774,46 @@ out:
 
 	return err;
 }
+
+static ssize_t fuse_passthrough_aio_read(struct kiocb *iocb,
+					 const struct iovec *iov,
+					 unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter;
+
+	iov_iter_init(&iter, iov, nr_segs, iov_length(iov, nr_segs), 0);
+	return fuse_passthrough_read_iter(iocb, &iter);
+}
+
+static ssize_t fuse_passthrough_aio_write(struct kiocb *iocb,
+					  const struct iovec *iov,
+					  unsigned long nr_segs, loff_t pos)
+{
+	struct iov_iter iter;
+
+	iov_iter_init(&iter, iov, nr_segs, iov_length(iov, nr_segs), 0);
+	return fuse_passthrough_write_iter(iocb, &iter);
+}
+
+static const struct file_operations fuse_passthrough_file_operations = {
+	.llseek		= fuse_file_llseek,
+	.read		= do_sync_read,
+	.aio_read	= fuse_passthrough_aio_read,
+	.write		= do_sync_write,
+	.aio_write	= fuse_passthrough_aio_write,
+	.mmap		= fuse_passthrough_mmap,
+	.open		= fuse_open,
+	.flush		= fuse_flush,
+	.release	= fuse_release,
+	.fsync		= fuse_fsync,
+	.lock		= fuse_file_lock,
+	.flock		= fuse_file_flock,
+	.splice_read	= generic_file_splice_read,
+	.unlocked_ioctl	= fuse_file_ioctl,
+	.compat_ioctl	= fuse_file_compat_ioctl,
+	.poll		= fuse_file_poll,
+	.fallocate	= fuse_file_fallocate,
+};
 
 static const struct file_operations fuse_file_operations = {
 	.llseek		= fuse_file_llseek,

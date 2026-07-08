@@ -2131,14 +2131,16 @@ int fuse_dev_release(struct inode *inode, struct file *file)
 {
 	struct fuse_conn *fc = fuse_get_conn(file);
 	if (fc) {
-		spin_lock(&fc->lock);
-		fc->connected = 0;
-		fc->blocked = 0;
-		fc->initialized = 1;
-		end_queued_requests(fc);
-		end_polls(fc);
-		wake_up_all(&fc->blocked_waitq);
-		spin_unlock(&fc->lock);
+		if (atomic_dec_and_test(&fc->dev_count)) {
+			spin_lock(&fc->lock);
+			fc->connected = 0;
+			fc->blocked = 0;
+			fc->initialized = 1;
+			end_queued_requests(fc);
+			end_polls(fc);
+			wake_up_all(&fc->blocked_waitq);
+			spin_unlock(&fc->lock);
+		}
 		fuse_conn_put(fc);
 	}
 
@@ -2156,6 +2158,49 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 	return fasync_helper(fd, file, on, &fc->fasync);
 }
 
+static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
+			   unsigned long arg)
+{
+	int err = -ENOTTY;
+
+	if (cmd == FUSE_DEV_IOC_CLONE) {
+		int oldfd;
+
+		err = -EFAULT;
+		if (!get_user(oldfd, (u32 __user *)arg)) {
+			struct file *old = fget(oldfd);
+
+			err = -EINVAL;
+			if (old) {
+				struct fuse_conn *fc = fuse_get_conn(old);
+
+				if (fc && old->f_op == file->f_op &&
+				    !file->private_data) {
+					fuse_conn_get(fc);
+					atomic_inc(&fc->dev_count);
+					file->private_data = fc;
+					err = 0;
+				}
+				fput(old);
+			}
+		}
+		return err;
+	}
+
+	if (cmd == FUSE_DEV_IOC_PASSTHROUGH_OPEN) {
+		struct fuse_conn *fc = fuse_get_conn(file);
+		u32 lower_fd;
+
+		if (!fc)
+			return -EPERM;
+		if (get_user(lower_fd, (u32 __user *)arg))
+			return -EFAULT;
+		return fuse_passthrough_open(fc, lower_fd);
+	}
+
+	return err;
+}
+
 const struct file_operations fuse_dev_operations = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
@@ -2166,6 +2211,8 @@ const struct file_operations fuse_dev_operations = {
 	.aio_write	= fuse_dev_write,
 	.splice_write	= fuse_dev_splice_write,
 	.poll		= fuse_dev_poll,
+	.unlocked_ioctl = fuse_dev_ioctl,
+	.compat_ioctl	= fuse_dev_ioctl,
 	.release	= fuse_dev_release,
 	.fasync		= fuse_dev_fasync,
 };

@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/uio.h>
 #include <linux/aio.h>
+#include <linux/cred.h>
 
 static void fuse_copyattr(struct file *dst_file, struct file *src_file)
 {
@@ -55,14 +56,18 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 	struct file *passthrough_filp = ff->passthrough.filp;
 	struct kiocb kiocb;
 
+	const struct cred *old_cred;
+
 	if (!passthrough_filp)
 		return -EINVAL;
 	if (!passthrough_filp->f_op->aio_read)
 		return -EINVAL;
 
+	old_cred = override_creds(ff->passthrough.cred);
 	kiocb_clone(&kiocb, iocb_fuse, passthrough_filp);
 	ret = passthrough_filp->f_op->aio_read(&kiocb, to->iov, to->nr_segs,
 						iocb_fuse->ki_pos);
+	revert_creds(old_cred);
 	iocb_fuse->ki_pos = kiocb.ki_pos;
 
 	fuse_file_accessed(fuse_filp, passthrough_filp);
@@ -76,6 +81,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 	ssize_t ret;
 	struct file *fuse_filp = iocb_fuse->ki_filp;
 	struct fuse_file *ff = fuse_filp->private_data;
+	const struct cred *old_cred;
 	struct inode *fuse_inode = file_inode(fuse_filp);
 	struct file *passthrough_filp = ff->passthrough.filp;
 	struct kiocb kiocb;
@@ -89,11 +95,13 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 
 	fuse_copyattr(fuse_filp, passthrough_filp);
 
+	old_cred = override_creds(ff->passthrough.cred);
 	kiocb_clone(&kiocb, iocb_fuse, passthrough_filp);
 	file_start_write(passthrough_filp);
 	ret = passthrough_filp->f_op->aio_write(&kiocb, from->iov, from->nr_segs,
 						 iocb_fuse->ki_pos);
 	file_end_write(passthrough_filp);
+	revert_creds(old_cred);
 	iocb_fuse->ki_pos = kiocb.ki_pos;
 
 	if (ret > 0)
@@ -106,7 +114,7 @@ ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 	return ret;
 }
 
-ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
+int fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int ret;
 	struct fuse_file *ff = file->private_data;

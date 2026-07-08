@@ -415,6 +415,9 @@ struct fuse_conn {
 	/** Refcount */
 	atomic_t count;
 
+	/** Number of open device file descriptors */
+	atomic_t dev_count;
+
 	/** The user id for this mount */
 	kuid_t user_id;
 
@@ -953,7 +956,7 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
 				   struct iov_iter *to);
 ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
 				    struct iov_iter *from);
-ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+int fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
 
 /* backing.c */
 int fuse_bpf_set_backing_path(struct dentry *entry, int backing_fd);
