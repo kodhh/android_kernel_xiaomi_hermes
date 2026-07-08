@@ -2158,6 +2158,18 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 	return fasync_helper(fd, file, on, &fc->fasync);
 }
 
+static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
+{
+	if (new->private_data)
+		return -EINVAL;
+
+	fuse_conn_get(fc);
+	atomic_inc(&fc->dev_count);
+	new->private_data = fc;
+
+	return 0;
+}
+
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
@@ -2175,11 +2187,11 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 				struct fuse_conn *fc = fuse_get_conn(old);
 
 				if (fc && old->f_op == file->f_op &&
-				    !file->private_data) {
-					fuse_conn_get(fc);
-					atomic_inc(&fc->dev_count);
-					file->private_data = fc;
-					err = 0;
+				    old->f_cred->user_ns ==
+					    file->f_cred->user_ns) {
+					mutex_lock(&fuse_mutex);
+					err = fuse_device_clone(fc, file);
+					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
 			}
