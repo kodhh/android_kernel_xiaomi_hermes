@@ -459,6 +459,20 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 				fput(backing_file);
 			}
 		}
+		if (bpf_ok && *inode &&
+		    bpf_arg.out.bpf_action == FUSE_ACTION_REPLACE) {
+			struct fuse_inode *fi = get_fuse_inode(*inode);
+			if (fi) {
+				struct inode *parent_inode = entry->d_parent->d_inode;
+				int bpf_err = fuse_handle_bpf_prog(&bpf_arg,
+						parent_inode, &fi->bpf);
+				if (bpf_err) {
+					iput(*inode);
+					*inode = NULL;
+					bpf_ok = false;
+				}
+			}
+		}
 		fuse_put_request(fc, req);
 		if (bpf_ok) {
 			err = 0;
