@@ -16,6 +16,16 @@ config FUSE_FS
 	  If you want to develop a userspace FS, or if you want to use
 	  a filesystem based on FUSE, answer Y or M.
 
+config FUSE_BPF
+	bool "FUSE BPF extension"
+	depends on FUSE_FS
+	help
+	  This FUSE extension allows BPF programs to be attached to FUSE
+	  operations, enabling filesystem passthrough and filtering.
+
+	  If you want to use FUSE passthrough or in-process filtering,
+	  answer Y.
+
 config CUSE
 	tristate "Character device in Userspace support"
 	depends on FUSE_FS
@@ -25,11 +35,3 @@ config CUSE
 
 	  If you want to develop or use a userspace character device
 	  based on CUSE, answer Y or M.
-
-config FUSE_BPF
-	bool "FUSE-BPF support"
-	depends on FUSE_FS
-	help
-	  This FUSE extension allows BPF programs to be attached to
-	  FUSE operations, providing a method to passthrough file
-	  operations to backing filesystems.

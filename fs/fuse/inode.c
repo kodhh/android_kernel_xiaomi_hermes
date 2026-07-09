@@ -135,6 +135,7 @@ static void fuse_evict_inode(struct inode *inode)
 
 static int fuse_remount_fs(struct super_block *sb, int *flags, char *data)
 {
+	sync_filesystem(sb);
 	if (*flags & MS_MANDLOCK)
 		return -EINVAL;
 
@@ -174,9 +175,9 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	if (!fc->writeback_cache || !S_ISREG(inode->i_mode)) {
 		inode->i_mtime.tv_sec   = attr->mtime;
 		inode->i_mtime.tv_nsec  = attr->mtimensec;
+		inode->i_ctime.tv_sec   = attr->ctime;
+		inode->i_ctime.tv_nsec  = attr->ctimensec;
 	}
-	inode->i_ctime.tv_sec   = attr->ctime;
-	inode->i_ctime.tv_nsec  = attr->ctimensec;
 
 	if (attr->blksize != 0)
 		inode->i_blkbits = ilog2(attr->blksize);
@@ -255,6 +256,8 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr)
 	inode->i_size = attr->size;
 	inode->i_mtime.tv_sec  = attr->mtime;
 	inode->i_mtime.tv_nsec = attr->mtimensec;
+	inode->i_ctime.tv_sec  = attr->ctime;
+	inode->i_ctime.tv_nsec = attr->ctimensec;
 	if (S_ISREG(inode->i_mode)) {
 		fuse_init_common(inode);
 		fuse_init_file_inode(inode);
@@ -271,21 +274,97 @@ static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr)
 		BUG();
 }
 
-int fuse_inode_eq(struct inode *inode, void *_nodeidp)
+struct fuse_inode_identifier {
+	u64 nodeid;
+#ifdef CONFIG_FUSE_BPF
+	struct inode *backing_inode;
+#endif
+};
+
+#ifdef CONFIG_FUSE_BPF
+static void fuse_fill_attr_from_inode(struct fuse_attr *attr,
+				      const struct inode *inode)
 {
-	u64 nodeid = *(u64 *) _nodeidp;
-	if (get_node_id(inode) == nodeid)
-		return 1;
-	else
+	*attr = (struct fuse_attr) {
+		.ino	   = inode->i_ino,
+		.size	   = inode->i_size,
+		.blocks    = inode->i_blocks,
+		.atime	   = inode->i_atime.tv_sec,
+		.mtime	   = inode->i_mtime.tv_sec,
+		.ctime	   = inode->i_ctime.tv_sec,
+		.atimensec = inode->i_atime.tv_nsec,
+		.mtimensec = inode->i_mtime.tv_nsec,
+		.ctimensec = inode->i_ctime.tv_nsec,
+		.mode	   = inode->i_mode,
+		.nlink	   = inode->i_nlink,
+		.uid	   = __kuid_val(inode->i_uid),
+		.gid	   = __kgid_val(inode->i_gid),
+		.rdev	   = inode->i_rdev,
+		.blksize   = 1u << inode->i_blkbits,
+	};
+}
+#endif
+
+int fuse_inode_eq(struct inode *inode, void *_data)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_inode_identifier *fii = _data;
+#ifdef CONFIG_FUSE_BPF
+	if (fi->backing_inode != fii->backing_inode)
 		return 0;
+#endif
+	return fi->nodeid == fii->nodeid ? 1 : 0;
 }
 
-static int fuse_inode_set(struct inode *inode, void *_nodeidp)
+static int fuse_inode_set(struct inode *inode, void *_data)
 {
-	u64 nodeid = *(u64 *) _nodeidp;
-	get_fuse_inode(inode)->nodeid = nodeid;
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	struct fuse_inode_identifier *fii = _data;
+	fi->nodeid = fii->nodeid;
+#ifdef CONFIG_FUSE_BPF
+	if (fii->backing_inode) {
+		fi->backing_inode = fii->backing_inode;
+		ihold(fi->backing_inode);
+	}
+#endif
 	return 0;
 }
+
+#ifdef CONFIG_FUSE_BPF
+struct inode *fuse_iget_backing(struct super_block *sb,
+				struct inode *backing_inode)
+{
+	struct inode *inode;
+	struct fuse_inode *fi;
+	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	struct fuse_inode_identifier fii = {
+		.backing_inode = backing_inode,
+	};
+	struct fuse_attr attr;
+
+	fuse_fill_attr_from_inode(&attr, backing_inode);
+	inode = iget5_locked(sb, (unsigned long) backing_inode,
+			     fuse_inode_eq, fuse_inode_set, &fii);
+	if (!inode)
+		return NULL;
+
+	if (inode->i_state & I_NEW) {
+		inode->i_flags |= S_NOATIME;
+		if (!fc->writeback_cache)
+			inode->i_flags |= S_NOCMTIME;
+		fuse_init_common(inode);
+		unlock_new_inode(inode);
+	}
+
+	fi = get_fuse_inode(inode);
+	fuse_init_inode(inode, &attr);
+	spin_lock(&fc->lock);
+	fi->nlookup++;
+	spin_unlock(&fc->lock);
+
+	return inode;
+}
+#endif
 
 struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			int generation, struct fuse_attr *attr,
@@ -294,15 +373,16 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 	struct inode *inode;
 	struct fuse_inode *fi;
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	struct fuse_inode_identifier fii = { .nodeid = nodeid };
 
  retry:
-	inode = iget5_locked(sb, nodeid, fuse_inode_eq, fuse_inode_set, &nodeid);
+	inode = iget5_locked(sb, nodeid, fuse_inode_eq, fuse_inode_set, &fii);
 	if (!inode)
 		return NULL;
 
 	if ((inode->i_state & I_NEW)) {
 		inode->i_flags |= S_NOATIME;
-		if (!fc->writeback_cache || !S_ISREG(inode->i_mode))
+		if (!fc->writeback_cache || !S_ISREG(attr->mode))
 			inode->i_flags |= S_NOCMTIME;
 		inode->i_generation = generation;
 		inode->i_data.backing_dev_info = &fc->bdi;
@@ -331,7 +411,8 @@ int fuse_reverse_inval_inode(struct super_block *sb, u64 nodeid,
 	pgoff_t pg_start;
 	pgoff_t pg_end;
 
-	inode = ilookup5(sb, nodeid, fuse_inode_eq, &nodeid);
+	inode = ilookup5(sb, nodeid, fuse_inode_eq,
+			 &(struct fuse_inode_identifier){ .nodeid = nodeid });
 	if (!inode)
 		return -ENOENT;
 
@@ -404,7 +485,7 @@ static void fuse_put_super(struct super_block *sb)
 	fuse_conn_put(fc);
 }
 
-static void convert_fuse_statfs(struct kstatfs *stbuf, struct fuse_kstatfs *attr)
+void convert_fuse_statfs(struct kstatfs *stbuf, struct fuse_kstatfs *attr)
 {
 	stbuf->f_type    = FUSE_SUPER_MAGIC;
 	stbuf->f_bsize   = attr->bsize;
@@ -591,10 +672,9 @@ void fuse_conn_init(struct fuse_conn *fc)
 {
 	memset(fc, 0, sizeof(*fc));
 	spin_lock_init(&fc->lock);
-	mutex_init(&fc->inst_mutex);
+	spin_lock_init(&fc->passthrough_req_lock);
 	init_rwsem(&fc->killsb);
 	atomic_set(&fc->count, 1);
-	atomic_set(&fc->dev_count, 1);
 	init_waitqueue_head(&fc->waitq);
 	init_waitqueue_head(&fc->blocked_waitq);
 	init_waitqueue_head(&fc->reserved_req_waitq);
@@ -604,6 +684,9 @@ void fuse_conn_init(struct fuse_conn *fc)
 	INIT_LIST_HEAD(&fc->interrupts);
 	INIT_LIST_HEAD(&fc->bg_queue);
 	INIT_LIST_HEAD(&fc->entry);
+	INIT_LIST_HEAD(&fc->devices);
+	atomic_set(&fc->dev_count, 1);
+	idr_init(&fc->passthrough_req);
 	fc->forget_list_tail = &fc->forget_list_head;
 	atomic_set(&fc->num_waiting, 0);
 	fc->max_background = FUSE_DEFAULT_MAX_BACKGROUND;
@@ -615,8 +698,6 @@ void fuse_conn_init(struct fuse_conn *fc)
 	fc->initialized = 0;
 	fc->attr_version = 1;
 	get_random_bytes(&fc->scramble_key, sizeof(fc->scramble_key));
-	idr_init(&fc->passthrough_req);
-	spin_lock_init(&fc->passthrough_req_lock);
 }
 EXPORT_SYMBOL_GPL(fuse_conn_init);
 
@@ -625,8 +706,6 @@ void fuse_conn_put(struct fuse_conn *fc)
 	if (atomic_dec_and_test(&fc->count)) {
 		if (fc->destroy_req)
 			fuse_request_free(fc->destroy_req);
-		mutex_destroy(&fc->inst_mutex);
-		idr_destroy(&fc->passthrough_req);
 		fc->release(fc);
 	}
 }
@@ -666,7 +745,8 @@ static struct dentry *fuse_get_dentry(struct super_block *sb,
 	if (handle->nodeid == 0)
 		goto out_err;
 
-	inode = ilookup5(sb, handle->nodeid, fuse_inode_eq, &handle->nodeid);
+	inode = ilookup5(sb, handle->nodeid, fuse_inode_eq,
+			 &(struct fuse_inode_identifier){ .nodeid = handle->nodeid });
 	if (!inode) {
 		struct fuse_entry_out outarg;
 		struct qstr name;
@@ -805,6 +885,7 @@ static const struct super_operations fuse_super_operations = {
 	.alloc_inode    = fuse_alloc_inode,
 	.destroy_inode  = fuse_destroy_inode,
 	.evict_inode	= fuse_evict_inode,
+	.write_inode	= fuse_write_inode,
 	.drop_inode	= generic_delete_inode,
 	.remount_fs	= fuse_remount_fs,
 	.put_super	= fuse_put_super,
@@ -907,22 +988,14 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->async_dio = 1;
 			if (arg->flags & FUSE_WRITEBACK_CACHE)
 				fc->writeback_cache = 1;
-			if (arg->flags & FUSE_SHORTCIRCUIT) {
-				fc->writeback_cache = 0;
-				fc->shortcircuit_io = 1;
-				pr_info("FUSE: SHORTCIRCUIT enabled [%s : %d]!\n",
-					current->comm, current->pid);
-			}
-			if (arg->flags & FUSE_PASSTHROUGH) {
-				fc->passthrough = 1;
-				pr_info("FUSE: passthrough enabled [%s : %d]!\n",
-					current->comm, current->pid);
-			}
 			if (arg->time_gran && arg->time_gran <= 1000000000)
 				fc->sb->s_time_gran = arg->time_gran;
-			else
-				fc->sb->s_time_gran = 1000000000;
-
+			if (arg->flags & FUSE_PASSTHROUGH) {
+				fc->passthrough = 1;
+				/* Prevent further stacking */
+				fc->sb->s_stack_depth =
+					FILESYSTEM_MAX_STACK_DEPTH;
+			}
 		} else {
 			ra_pages = fc->max_read / PAGE_CACHE_SIZE;
 			fc->no_lock = 1;
@@ -951,7 +1024,7 @@ static void fuse_send_init(struct fuse_conn *fc, struct fuse_req *req)
 		FUSE_SPLICE_WRITE | FUSE_SPLICE_MOVE | FUSE_SPLICE_READ |
 		FUSE_FLOCK_LOCKS | FUSE_HAS_IOCTL_DIR | FUSE_AUTO_INVAL_DATA |
 		FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
-		FUSE_WRITEBACK_CACHE | FUSE_PASSTHROUGH;
+		FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT | FUSE_PASSTHROUGH;
 	req->in.h.opcode = FUSE_INIT;
 	req->in.numargs = 1;
 	req->in.args[0].size = sizeof(*arg);
@@ -967,9 +1040,22 @@ static void fuse_send_init(struct fuse_conn *fc, struct fuse_req *req)
 	fuse_request_send_background(fc, req);
 }
 
+static int free_fuse_passthrough(int id, void *p, void *data)
+{
+	struct fuse_passthrough *passthrough = (struct fuse_passthrough *)p;
+
+	fuse_passthrough_release(passthrough);
+	kfree(p);
+
+	return 0;
+}
+
 static void fuse_free_conn(struct fuse_conn *fc)
 {
-	kfree(fc);
+	WARN_ON(!list_empty(&fc->devices));
+	idr_for_each(&fc->passthrough_req, free_fuse_passthrough, NULL);
+	idr_destroy(&fc->passthrough_req);
+	kfree_rcu(fc, rcu);
 }
 
 static int fuse_bdi_init(struct fuse_conn *fc, struct super_block *sb)
@@ -1014,8 +1100,41 @@ static int fuse_bdi_init(struct fuse_conn *fc, struct super_block *sb)
 	return 0;
 }
 
+struct fuse_dev *fuse_dev_alloc(struct fuse_conn *fc)
+{
+	struct fuse_dev *fud;
+
+	fud = kzalloc(sizeof(struct fuse_dev), GFP_KERNEL);
+	if (fud) {
+		fud->fc = fuse_conn_get(fc);
+
+		spin_lock(&fc->lock);
+		list_add_tail(&fud->entry, &fc->devices);
+		spin_unlock(&fc->lock);
+	}
+
+	return fud;
+}
+EXPORT_SYMBOL_GPL(fuse_dev_alloc);
+
+void fuse_dev_free(struct fuse_dev *fud)
+{
+	struct fuse_conn *fc = fud->fc;
+
+	if (fc) {
+		spin_lock(&fc->lock);
+		list_del(&fud->entry);
+		spin_unlock(&fc->lock);
+
+		fuse_conn_put(fc);
+	}
+	kfree(fud);
+}
+EXPORT_SYMBOL_GPL(fuse_dev_free);
+
 static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 {
+	struct fuse_dev *fud;
 	struct fuse_conn *fc;
 	struct inode *root;
 	struct fuse_mount_data d;
@@ -1029,9 +1148,9 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	if (sb->s_flags & MS_MANDLOCK)
 		goto err;
 
-	sb->s_flags &= ~MS_NOSEC;
+	sb->s_flags &= ~(MS_NOSEC | MS_I_VERSION);
 
-	if (!parse_fuse_opt((char *) data, &d, is_bdev))
+	if (!parse_fuse_opt(data, &d, is_bdev))
 		goto err;
 
 	if (is_bdev) {
@@ -1067,11 +1186,15 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	fuse_conn_init(fc);
 	fc->release = fuse_free_conn;
 
+	fud = fuse_dev_alloc(fc);
+	if (!fud)
+		goto err_put_conn;
+
 	fc->dev = sb->s_dev;
 	fc->sb = sb;
 	err = fuse_bdi_init(fc, sb);
 	if (err)
-		goto err_put_conn;
+		goto err_dev_free;
 
 	sb->s_bdi = &fc->bdi;
 
@@ -1092,7 +1215,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	root = fuse_get_root_inode(sb, d.rootmode);
 	root_dentry = d_make_root(root);
 	if (!root_dentry)
-		goto err_put_conn;
+		goto err_dev_free;
 	/* only now - we want root dentry with NULL ->d_op */
 	sb->s_d_op = &fuse_dentry_operations;
 
@@ -1119,7 +1242,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	list_add_tail(&fc->entry, &fuse_conn_list);
 	sb->s_root = root_dentry;
 	fc->connected = 1;
-	file->private_data = fuse_conn_get(fc);
+	file->private_data = fud;
 	mutex_unlock(&fuse_mutex);
 	/*
 	 * atomic_dec_and_test() in fput() provides the necessary
@@ -1138,9 +1261,12 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	fuse_request_free(init_req);
  err_put_root:
 	dput(root_dentry);
+ err_dev_free:
+	fuse_dev_free(fud);
  err_put_conn:
 	fuse_bdi_destroy(fc);
 	fuse_conn_put(fc);
+	sb->s_fs_info = NULL;
  err_fput:
 	fput(file);
  err:

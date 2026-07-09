@@ -98,6 +98,10 @@
  *  - add FUSE_WRITEBACK_CACHE
  *  - add time_gran to fuse_init_out
  *  - add reserved space to fuse_init_out
+ *  - add FATTR_CTIME
+ *  - add ctime and ctimensec to fuse_setattr_in
+ *  - add FUSE_RENAME2 request
+ *  - add FUSE_NO_OPEN_SUPPORT flag
  */
 
 #ifndef _LINUX_FUSE_H
@@ -157,7 +161,7 @@ struct fuse_attr {
 	uint32_t	gid;
 	uint32_t	rdev;
 	uint32_t	blksize;
-	uint32_t	padding;
+	uint32_t	flags;
 };
 
 struct fuse_kstatfs {
@@ -193,6 +197,7 @@ struct fuse_file_lock {
 #define FATTR_ATIME_NOW	(1 << 7)
 #define FATTR_MTIME_NOW	(1 << 8)
 #define FATTR_LOCKOWNER	(1 << 9)
+#define FATTR_CTIME	(1 << 10)
 
 /**
  * Flags returned by the OPEN request
@@ -200,10 +205,13 @@ struct fuse_file_lock {
  * FOPEN_DIRECT_IO: bypass page cache for this open file
  * FOPEN_KEEP_CACHE: don't invalidate the data cache on open
  * FOPEN_NONSEEKABLE: the file is not seekable
+ * FOPEN_STREAM: the file is stream-like (no file position at all)
  */
 #define FOPEN_DIRECT_IO		(1 << 0)
 #define FOPEN_KEEP_CACHE	(1 << 1)
 #define FOPEN_NONSEEKABLE	(1 << 2)
+#define FOPEN_CACHE_DIR		(1 << 3)
+#define FOPEN_STREAM		(1 << 4)
 
 /**
  * INIT request/reply flags
@@ -225,6 +233,7 @@ struct fuse_file_lock {
  * FUSE_READDIRPLUS_AUTO: adaptive readdirplus
  * FUSE_ASYNC_DIO: asynchronous direct I/O submission
  * FUSE_WRITEBACK_CACHE: use writeback cache for buffered writes
+ * FUSE_NO_OPEN_SUPPORT: kernel supports zero-message opens
  */
 #define FUSE_ASYNC_READ		(1 << 0)
 #define FUSE_POSIX_LOCKS	(1 << 1)
@@ -243,9 +252,18 @@ struct fuse_file_lock {
 #define FUSE_READDIRPLUS_AUTO	(1 << 14)
 #define FUSE_ASYNC_DIO		(1 << 15)
 #define FUSE_WRITEBACK_CACHE	(1 << 16)
-
-#define FUSE_PASSTHROUGH	(1 << 31)
-#define FUSE_SHORTCIRCUIT	FUSE_PASSTHROUGH
+#define FUSE_NO_OPEN_SUPPORT	(1 << 17)
+#define FUSE_PARALLEL_DIROPS	(1 << 18)
+#define FUSE_HANDLE_KILLPRIV	(1 << 19)
+#define FUSE_POSIX_ACL		(1 << 20)
+#define FUSE_ABORT_ERROR	(1 << 21)
+#define FUSE_MAX_PAGES		(1 << 22)
+#define FUSE_CACHE_SYMLINKS	(1 << 23)
+#define FUSE_NO_OPENDIR_SUPPORT	(1 << 24)
+#define FUSE_EXPLICIT_INVAL_DATA (1 << 25)
+#define FUSE_MAP_ALIGNMENT	(1 << 26)
+#define FUSE_SUBMOUNTS		(1 << 27)
+#define FUSE_PASSTHROUGH (1 << 31)
 
 /**
  * CUSE INIT request/reply flags
@@ -278,6 +296,7 @@ struct fuse_file_lock {
  */
 #define FUSE_WRITE_CACHE	(1 << 0)
 #define FUSE_WRITE_LOCKOWNER	(1 << 1)
+#define FUSE_WRITE_KILL_PRIV	(1 << 2)
 
 /**
  * Read flags
@@ -300,6 +319,7 @@ struct fuse_file_lock {
 #define FUSE_IOCTL_RETRY	(1 << 2)
 #define FUSE_IOCTL_32BIT	(1 << 3)
 #define FUSE_IOCTL_DIR		(1 << 4)
+#define FUSE_IOCTL_COMPAT_X32	(1 << 5)
 
 #define FUSE_IOCTL_MAX_IOV	256
 
@@ -309,6 +329,11 @@ struct fuse_file_lock {
  * FUSE_POLL_SCHEDULE_NOTIFY: request poll notify
  */
 #define FUSE_POLL_SCHEDULE_NOTIFY (1 << 0)
+
+/*
+ * FUSE_FSYNC_FDATASYNC: fdatasync is requested
+ */
+#define FUSE_FSYNC_FDATASYNC	(1 << 0)
 
 enum fuse_opcode {
 	FUSE_LOOKUP	   = 1,
@@ -353,11 +378,17 @@ enum fuse_opcode {
 	FUSE_BATCH_FORGET  = 42,
 	FUSE_FALLOCATE     = 43,
 	FUSE_READDIRPLUS   = 44,
+	FUSE_RENAME2       = 45,
+	FUSE_LSEEK         = 46,
+	FUSE_COPY_FILE_RANGE = 47,
+	FUSE_SETUPMAPPING  = 48,
+	FUSE_REMOVEMAPPING = 49,
 	FUSE_CANONICAL_PATH= 2016,
-	FUSE_USERS         = 100,
 
 	/* CUSE specific operations */
 	CUSE_INIT          = 4096,
+	CUSE_INIT_BSWAP_RESERVED  = 1048576,
+	FUSE_INIT_BSWAP_RESERVED  = 436207616,
 };
 
 enum fuse_notify_code {
@@ -433,6 +464,12 @@ struct fuse_rename_in {
 	uint64_t	newdir;
 };
 
+struct fuse_rename2_in {
+	uint64_t	newdir;
+	uint32_t	flags;
+	uint32_t	padding;
+};
+
 struct fuse_link_in {
 	uint64_t	oldnodeid;
 };
@@ -445,10 +482,10 @@ struct fuse_setattr_in {
 	uint64_t	lock_owner;
 	uint64_t	atime;
 	uint64_t	mtime;
-	uint64_t	unused2;
+	uint64_t	ctime;
 	uint32_t	atimensec;
 	uint32_t	mtimensec;
-	uint32_t	unused3;
+	uint32_t	ctimensec;
 	uint32_t	mode;
 	uint32_t	unused4;
 	uint32_t	uid;
@@ -559,6 +596,17 @@ struct fuse_access_in {
 	uint32_t	padding;
 };
 
+struct fuse_lseek_in {
+	uint64_t	fh;
+	uint64_t	offset;
+	uint32_t	whence;
+	uint32_t	padding;
+};
+
+struct fuse_lseek_out {
+	uint64_t	offset;
+};
+
 struct fuse_init_in {
 	uint32_t	major;
 	uint32_t	minor;
@@ -578,7 +626,9 @@ struct fuse_init_out {
 	uint16_t	congestion_threshold;
 	uint32_t	max_write;
 	uint32_t	time_gran;
-	uint32_t	unused[9];
+	uint16_t	max_pages;
+	uint16_t	map_alignment;
+	uint32_t	unused[8];
 };
 
 #define CUSE_INIT_INFO_MAX 4096
@@ -669,7 +719,7 @@ struct fuse_in_header {
 	uint32_t	uid;
 	uint32_t	gid;
 	uint32_t	pid;
-	uint32_t	padding;
+	uint32_t	error_in;
 };
 
 struct fuse_out_header {
@@ -746,6 +796,22 @@ struct fuse_notify_retrieve_in {
 	uint64_t	dummy4;
 };
 
+struct fuse_read_out {
+	uint64_t	offset;
+	uint32_t	again;
+	uint32_t	padding;
+};
+
+struct fuse_copy_file_range_in {
+	uint64_t	fh_in;
+	uint64_t	off_in;
+	uint64_t	nodeid_out;
+	uint64_t	fh_out;
+	uint64_t	off_out;
+	uint64_t	len;
+	uint64_t	flags;
+};
+
 /* FUSE-BPF actions */
 #define FUSE_ACTION_KEEP		0
 #define FUSE_ACTION_REMOVE		1
@@ -795,8 +861,41 @@ struct fuse_bpf_args {
 	struct fuse_bpf_arg out_args[FUSE_MAX_OUT_ARGS];
 };
 
-#define FUSE_DEV_IOC_MAGIC	229
-#define FUSE_DEV_IOC_CLONE	_IOR(FUSE_DEV_IOC_MAGIC, 0, uint32_t)
-#define FUSE_DEV_IOC_PASSTHROUGH_OPEN _IOW(FUSE_DEV_IOC_MAGIC, 126, uint32_t)
+/* Device ioctls: */
+#define FUSE_DEV_IOC_MAGIC		229
+#define FUSE_DEV_IOC_CLONE		_IOR(FUSE_DEV_IOC_MAGIC, 0, uint32_t)
+/* 127 is reserved for the V1 interface implementation in Android (deprecated) */
+/* 126 is reserved for the V2 interface implementation in Android */
+#define FUSE_DEV_IOC_PASSTHROUGH_OPEN	_IOW(FUSE_DEV_IOC_MAGIC, 126, __u32)
+
+/*
+ * FUSE_ATTR_SUBMOUNT: request is for a submount
+ */
+#define FUSE_ATTR_SUBMOUNT		(1 << 0)
+
+/* Setup mapping flags */
+#define FUSE_SETUPMAPPING_FLAG_WRITE	(1ull << 0)
+#define FUSE_SETUPMAPPING_FLAG_READ	(1ull << 1)
+
+/* DAX mapping support (protocol 7.31) */
+struct fuse_setupmapping_in {
+	uint64_t	fh;
+	uint64_t	foffset;
+	uint64_t	len;
+	uint64_t	flags;
+	uint64_t	moffset;
+};
+
+struct fuse_removemapping_in {
+	uint32_t	count;
+};
+
+struct fuse_removemapping_one {
+	uint64_t	moffset;
+	uint64_t	len;
+};
+
+#define FUSE_REMOVEMAPPING_MAX_ENTRY \
+	(PAGE_SIZE / sizeof(struct fuse_removemapping_one))
 
 #endif /* _LINUX_FUSE_H */

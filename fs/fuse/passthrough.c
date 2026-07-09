@@ -1,4 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+/*
+ * FUSE passthrough support
+ * Copyright (C) 2020  Alessio Balsini <alessio.balsini@android.com>
+ *
+ * This program can be distributed under the terms of the GNU GPL.
+ */
+
 #include "fuse_i.h"
 
 #include <linux/file.h>
@@ -7,9 +13,8 @@
 #include <linux/slab.h>
 #include <linux/uio.h>
 #include <linux/aio.h>
-#include <linux/cred.h>
 
-static void fuse_copyattr(struct file *dst_file, struct file *src_file)
+void fuse_copyattr(struct file *dst_file, struct file *src_file)
 {
 	struct inode *dst = file_inode(dst_file);
 	struct inode *src = file_inode(src_file);
@@ -40,88 +45,81 @@ static void fuse_file_accessed(struct file *dst_file, struct file *src_file)
 	touch_atime(&dst_file->f_path);
 }
 
-static inline void kiocb_clone(struct kiocb *kiocb, struct kiocb *kiocb_src,
-			       struct file *filp)
-{
-	kiocb->ki_filp = filp;
-	kiocb->ki_pos = kiocb_src->ki_pos;
-}
-
-ssize_t fuse_passthrough_read_iter(struct kiocb *iocb_fuse,
-				   struct iov_iter *to)
+ssize_t fuse_passthrough_read_iter(struct file *file, struct kiocb *iocb_fuse,
+				   const struct iovec *iov, unsigned long nr_segs,
+				   loff_t *ppos)
 {
 	ssize_t ret;
-	struct file *fuse_filp = iocb_fuse->ki_filp;
-	struct fuse_file *ff = fuse_filp->private_data;
+	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
-	struct kiocb kiocb;
-
 	const struct cred *old_cred;
+	struct kiocb iocb;
 
 	if (!passthrough_filp)
 		return -EINVAL;
-	if (!passthrough_filp->f_op->aio_read)
-		return -EINVAL;
+
+	init_sync_kiocb(&iocb, passthrough_filp);
+	iocb.ki_pos = *ppos;
+	iocb.ki_nbytes = iov_length(iov, nr_segs);
 
 	old_cred = override_creds(ff->passthrough.cred);
-	kiocb_clone(&kiocb, iocb_fuse, passthrough_filp);
-	ret = passthrough_filp->f_op->aio_read(&kiocb, to->iov, to->nr_segs,
-						iocb_fuse->ki_pos);
+	ret = call_read_iter(passthrough_filp, &iocb, iov, nr_segs, *ppos);
 	revert_creds(old_cred);
-	iocb_fuse->ki_pos = kiocb.ki_pos;
 
-	fuse_file_accessed(fuse_filp, passthrough_filp);
+	*ppos = iocb.ki_pos;
+
+	fuse_file_accessed(file, passthrough_filp);
 
 	return ret;
 }
 
-ssize_t fuse_passthrough_write_iter(struct kiocb *iocb_fuse,
-				    struct iov_iter *from)
+ssize_t fuse_passthrough_write_iter(struct file *file, struct kiocb *iocb_fuse,
+				    const struct iovec *iov, unsigned long nr_segs,
+				    loff_t *ppos)
 {
 	ssize_t ret;
-	struct file *fuse_filp = iocb_fuse->ki_filp;
-	struct fuse_file *ff = fuse_filp->private_data;
-	const struct cred *old_cred;
-	struct inode *fuse_inode = file_inode(fuse_filp);
+	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
-	struct kiocb kiocb;
+	struct inode *fuse_inode = file_inode(file);
+	const struct cred *old_cred;
+	struct kiocb iocb;
 
 	if (!passthrough_filp)
 		return -EINVAL;
-	if (!passthrough_filp->f_op->aio_write)
-		return -EINVAL;
+
+	init_sync_kiocb(&iocb, passthrough_filp);
+	iocb.ki_pos = *ppos;
+	iocb.ki_nbytes = iov_length(iov, nr_segs);
 
 	mutex_lock(&fuse_inode->i_mutex);
 
-	fuse_copyattr(fuse_filp, passthrough_filp);
+	fuse_copyattr(file, passthrough_filp);
 
 	old_cred = override_creds(ff->passthrough.cred);
-	kiocb_clone(&kiocb, iocb_fuse, passthrough_filp);
 	file_start_write(passthrough_filp);
-	ret = passthrough_filp->f_op->aio_write(&kiocb, from->iov, from->nr_segs,
-						 iocb_fuse->ki_pos);
+	ret = call_write_iter(passthrough_filp, &iocb, iov, nr_segs, *ppos);
 	file_end_write(passthrough_filp);
 	revert_creds(old_cred);
-	iocb_fuse->ki_pos = kiocb.ki_pos;
+
+	*ppos = iocb.ki_pos;
 
 	if (ret > 0)
-		fuse_copyattr(fuse_filp, passthrough_filp);
+		fuse_copyattr(file, passthrough_filp);
 
-	fuse_file_accessed(fuse_filp, passthrough_filp);
+	fuse_file_accessed(file, passthrough_filp);
 
 	mutex_unlock(&fuse_inode->i_mutex);
 
 	return ret;
 }
 
-int fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
+ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int ret;
 	struct fuse_file *ff = file->private_data;
 	struct file *passthrough_filp = ff->passthrough.filp;
+	const struct cred *old_cred;
 
-	if (!passthrough_filp)
-		return -EINVAL;
 	if (!passthrough_filp->f_op->mmap)
 		return -ENODEV;
 
@@ -129,7 +127,11 @@ int fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EIO;
 
 	vma->vm_file = get_file(passthrough_filp);
-	ret = passthrough_filp->f_op->mmap(vma->vm_file, vma);
+
+	old_cred = override_creds(ff->passthrough.cred);
+	ret = call_mmap(vma->vm_file, vma);
+	revert_creds(old_cred);
+
 	if (ret)
 		fput(passthrough_filp);
 	else
@@ -210,15 +212,15 @@ int fuse_passthrough_setup(struct fuse_conn *fc, struct fuse_file *ff,
 	int passthrough_fh = openarg->passthrough_fh;
 
 	if (!fc->passthrough)
-		return -EPERM;
+		return 0;
 
+	/* Default case, passthrough is not requested */
 	if (passthrough_fh <= 0)
-		return -EINVAL;
+		return 0;
 
 	spin_lock(&fc->passthrough_req_lock);
 	passthrough = idr_find(&fc->passthrough_req, passthrough_fh);
-	if (passthrough)
-		idr_remove(&fc->passthrough_req, passthrough_fh);
+	idr_remove(&fc->passthrough_req, passthrough_fh);
 	spin_unlock(&fc->passthrough_req_lock);
 
 	if (!passthrough)
