@@ -6,6 +6,8 @@
   See the file COPYING.
 */
 
+#include <linux/sched.h>
+
 #include "fuse_i.h"
 
 
@@ -1876,6 +1878,20 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	spin_unlock(&fc->lock);
 
 	err = copy_out_args(cs, &req->out, nbytes);
+	if (!err && (req->in.h.opcode == FUSE_LOOKUP ||
+		     req->in.h.opcode == (FUSE_LOOKUP | FUSE_POSTFILTER)) &&
+	    req->out.numargs >= 2 &&
+	    req->out.args[1].size == sizeof(struct fuse_entry_bpf_out)) {
+		struct fuse_entry_bpf_out *febo =
+			(struct fuse_entry_bpf_out *)req->out.args[1].value;
+		struct fuse_entry_bpf *feb = container_of(febo,
+					struct fuse_entry_bpf, out);
+
+		if (febo->backing_action == FUSE_ACTION_REPLACE)
+			feb->backing_file = fget(febo->backing_fd);
+		if (febo->bpf_action == FUSE_ACTION_REPLACE)
+			feb->bpf_file = fget(febo->bpf_fd);
+	}
 	if (req->in.h.opcode == FUSE_CANONICAL_PATH) {
 		char *path = (char *)req->out.args[0].value;
 

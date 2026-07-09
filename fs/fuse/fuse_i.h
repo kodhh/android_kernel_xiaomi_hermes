@@ -724,7 +724,8 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 			u64 attr_valid, u64 attr_version);
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg, struct inode **inode);
+		     struct fuse_entry_out *outarg, struct inode **inode,
+		     struct dentry *entry);
 
 /**
  * Send FORGET command

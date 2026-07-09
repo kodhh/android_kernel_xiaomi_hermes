@@ -5,6 +5,8 @@
  * This program can be distributed under the terms of the GNU GPL.
  */
 
+#include <linux/sched.h>
+
 #include "fuse_i.h"
 
 #include <linux/file.h>

@@ -6,11 +6,12 @@
   See the file COPYING.
 */
 
+#include <linux/sched.h>
+
 #include "fuse_i.h"
 
 #include <linux/pagemap.h>
 #include <linux/file.h>
-#include <linux/sched.h>
 #include <linux/namei.h>
 #include <linux/slab.h>
 
@@ -147,7 +148,8 @@ static void fuse_invalidate_entry(struct dentry *entry)
 
 static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 			     u64 nodeid, struct qstr *name,
-			     struct fuse_entry_out *outarg)
+			     struct fuse_entry_out *outarg,
+			     struct fuse_entry_bpf_out *bpf_outarg)
 {
 	memset(outarg, 0, sizeof(struct fuse_entry_out));
 	req->in.h.opcode = FUSE_LOOKUP;
@@ -155,12 +157,22 @@ static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_req *req,
 	req->in.numargs = 1;
 	req->in.args[0].size = name->len + 1;
 	req->in.args[0].value = name->name;
-	req->out.numargs = 1;
 	if (fc->minor < 9)
 		req->out.args[0].size = FUSE_COMPAT_ENTRY_OUT_SIZE;
 	else
 		req->out.args[0].size = sizeof(struct fuse_entry_out);
 	req->out.args[0].value = outarg;
+#ifdef CONFIG_FUSE_BPF
+	if (bpf_outarg) {
+		req->out.argvar = 1;
+		req->out.numargs = 2;
+		req->out.args[1].size = sizeof(struct fuse_entry_bpf_out);
+		req->out.args[1].value = bpf_outarg;
+	} else
+#endif
+	{
+		req->out.numargs = 1;
+	}
 }
 
 u64 fuse_get_attr_version(struct fuse_conn *fc)
@@ -231,7 +243,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 
 		parent = dget_parent(entry);
 		fuse_lookup_init(fc, req, get_node_id(parent->d_inode),
-				 &entry->d_name, &outarg);
+				 &entry->d_name, &outarg, NULL);
 		fuse_request_send(fc, req);
 		dput(parent);
 		err = req->out.h.error;
@@ -345,11 +357,13 @@ bool fuse_invalid_attr(struct fuse_attr *attr)
 }
 
 int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
-		     struct fuse_entry_out *outarg, struct inode **inode)
+		     struct fuse_entry_out *outarg, struct inode **inode,
+		     struct dentry *entry)
 {
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
 	struct fuse_req *req;
 	struct fuse_forget_link *forget;
+	struct fuse_entry_bpf bpf_arg;
 	u64 attr_version;
 	int err;
 
@@ -363,40 +377,67 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 	if (IS_ERR(req))
 		goto out;
 
-	forget = fuse_alloc_forget();
-	err = -ENOMEM;
-	if (!forget) {
-		fuse_put_request(fc, req);
-		goto out;
-	}
-
 	attr_version = fuse_get_attr_version(fc);
 
-	fuse_lookup_init(fc, req, nodeid, name, outarg);
+	memset(&bpf_arg, 0, sizeof(bpf_arg));
+	fuse_lookup_init(fc, req, nodeid, name, outarg, &bpf_arg.out);
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
+
+#ifdef CONFIG_FUSE_BPF
+	if (!err && entry && req->out.args[1].size == sizeof(bpf_arg.out)) {
+		struct file *backing_file;
+		struct inode *backing_inode;
+		bool bpf_ok = false;
+
+		if (bpf_arg.out.backing_action == FUSE_ACTION_REPLACE) {
+			backing_file = bpf_arg.backing_file;
+			if (backing_file && !IS_ERR(backing_file)) {
+				backing_inode = backing_file->f_inode;
+				*inode = fuse_iget_backing(sb, backing_inode);
+				if (*inode) {
+					get_fuse_dentry(entry)->backing_path =
+						backing_file->f_path;
+					path_get(&get_fuse_dentry(entry)->backing_path);
+					bpf_ok = true;
+				}
+				fput(backing_file);
+			}
+		}
+		fuse_put_request(fc, req);
+		if (bpf_ok) {
+			err = 0;
+			goto out;
+		}
+		err = *inode ? -ENOMEM : -EINVAL;
+		goto out;
+	}
+#endif
+
 	fuse_put_request(fc, req);
 	/* Zero nodeid is same as -ENOENT, but with valid timeout */
 	if (err || !outarg->nodeid)
-		goto out_put_forget;
+		goto out;
 
 	err = -EIO;
 	if (!outarg->nodeid)
-		goto out_put_forget;
+		goto out;
 	if (fuse_invalid_attr(&outarg->attr))
-		goto out_put_forget;
+		goto out;
+
+	forget = fuse_alloc_forget();
+	err = -ENOMEM;
+	if (!forget)
+		goto out;
 
 	*inode = fuse_iget(sb, outarg->nodeid, outarg->generation,
 			   &outarg->attr, entry_attr_timeout(outarg),
 			   attr_version);
-	err = -ENOMEM;
 	if (!*inode) {
 		fuse_queue_forget(fc, forget, outarg->nodeid, 1);
 		goto out;
 	}
 	err = 0;
-
- out_put_forget:
 	kfree(forget);
  out:
 	return err;
@@ -421,7 +462,7 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 #endif
 
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
-			       &outarg, &inode);
+			       &outarg, &inode, entry);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;

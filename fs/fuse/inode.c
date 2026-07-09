@@ -6,6 +6,8 @@
   See the file COPYING.
 */
 
+#include <linux/sched.h>
+
 #include "fuse_i.h"
 
 #include <linux/pagemap.h>
@@ -18,7 +20,6 @@
 #include <linux/parser.h>
 #include <linux/statfs.h>
 #include <linux/random.h>
-#include <linux/sched.h>
 #include <linux/exportfs.h>
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
@@ -761,7 +762,7 @@ static struct dentry *fuse_get_dentry(struct super_block *sb,
 		name.len = 1;
 		name.name = ".";
 		err = fuse_lookup_name(sb, handle->nodeid, &name, &outarg,
-				       &inode);
+				       &inode, NULL);
 		if (err && err != -ENOENT)
 			goto out_err;
 		if (err || !inode) {
@@ -864,7 +865,7 @@ static struct dentry *fuse_get_parent(struct dentry *child)
 	name.len = 2;
 	name.name = "..";
 	err = fuse_lookup_name(child_inode->i_sb, get_node_id(child_inode),
-			       &name, &outarg, &inode);
+			       &name, &outarg, &inode, NULL);
 	if (err) {
 		if (err == -ENOENT)
 			return ERR_PTR(-ESTALE);
