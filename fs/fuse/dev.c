@@ -29,13 +29,17 @@ MODULE_ALIAS("devname:fuse");
 
 static struct kmem_cache *fuse_req_cachep;
 
+static struct fuse_dev *fuse_get_dev(struct file *file)
+{
+	return file->private_data;
+}
+
 static struct fuse_conn *fuse_get_conn(struct file *file)
 {
-	/*
-	 * Lockless access is OK, because file->private data is set
-	 * once during mount and is valid until the file is released.
-	 */
-	return file->private_data;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	if (!fud)
+		return NULL;
+	return fud->fc;
 }
 
 static void fuse_request_init(struct fuse_req *req, struct page **pages,
@@ -2129,20 +2133,15 @@ EXPORT_SYMBOL_GPL(fuse_abort_conn);
 
 int fuse_dev_release(struct inode *inode, struct file *file)
 {
-	struct fuse_conn *fc = fuse_get_conn(file);
-	if (fc) {
-		if (atomic_dec_and_test(&fc->dev_count)) {
-			spin_lock(&fc->lock);
-			fc->connected = 0;
-			fc->blocked = 0;
-			fc->initialized = 1;
-			end_queued_requests(fc);
-			end_polls(fc);
-			wake_up_all(&fc->blocked_waitq);
-			spin_unlock(&fc->lock);
-		}
-		fuse_conn_put(fc);
-	}
+	struct fuse_dev *fud = fuse_get_dev(file);
+
+	if (!fud)
+		return 0;
+
+	if (atomic_dec_and_test(&fud->fc->dev_count))
+		fuse_abort_conn(fud->fc);
+
+	fuse_dev_free(fud);
 
 	return 0;
 }
@@ -2160,12 +2159,17 @@ static int fuse_dev_fasync(int fd, struct file *file, int on)
 
 static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 {
+	struct fuse_dev *fud;
+
 	if (new->private_data)
 		return -EINVAL;
 
-	fuse_conn_get(fc);
+	fud = fuse_dev_alloc(fc);
+	if (!fud)
+		return -ENOMEM;
+
 	atomic_inc(&fc->dev_count);
-	new->private_data = fc;
+	new->private_data = fud;
 
 	return 0;
 }
@@ -2184,13 +2188,13 @@ static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 
 			err = -EINVAL;
 			if (old) {
-				struct fuse_conn *fc = fuse_get_conn(old);
+				struct fuse_dev *fud = fuse_get_dev(old);
 
-				if (fc && old->f_op == file->f_op &&
+				if (fud && old->f_op == file->f_op &&
 				    old->f_cred->user_ns ==
 					    file->f_cred->user_ns) {
 					mutex_lock(&fuse_mutex);
-					err = fuse_device_clone(fc, file);
+					err = fuse_device_clone(fud->fc, file);
 					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
