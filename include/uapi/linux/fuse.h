@@ -363,8 +363,6 @@ enum fuse_opcode {
 	FUSE_RENAME2       = 45,
 	FUSE_CANONICAL_PATH= 2016,
 
-	FUSE_USERS         = 100,
-
 	/* CUSE specific operations */
 	CUSE_INIT          = 4096,
 };
