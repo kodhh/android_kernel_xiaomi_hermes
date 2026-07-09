@@ -9,6 +9,7 @@
 
 #include "fuse_i.h"
 
+#include <linux/bpf.h>
 #include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/uio.h>
@@ -114,7 +115,23 @@ ssize_t fuse_bpf_simple_request(struct fuse_conn *fc, struct fuse_bpf_args *fa)
 
 struct bpf_prog *fuse_get_bpf_prog(struct file *file)
 {
-	return NULL;
+	struct bpf_prog *bpf_prog = ERR_PTR(-EINVAL);
+
+	if (!file || IS_ERR(file))
+		return bpf_prog;
+
+	if (file->f_op != &bpf_prog_fops)
+		goto out;
+
+	bpf_prog = file->private_data;
+	if (bpf_prog->type == BPF_PROG_TYPE_FUSE)
+		bpf_prog_inc(bpf_prog);
+	else
+		bpf_prog = ERR_PTR(-EINVAL);
+
+out:
+	fput(file);
+	return bpf_prog;
 }
 
 /*
@@ -166,6 +183,7 @@ int fuse_open_backing(struct fuse_bpf_args *fa,
 
 	get_file(backing_file);
 	((struct fuse_file *)file->private_data)->backing_file = backing_file;
+	((struct fuse_file *)file->private_data)->backing_cred = get_current_cred();
 
 	return 0;
 }
@@ -269,6 +287,7 @@ int fuse_create_open_backing(
 
 	get_file(backing_file);
 	((struct fuse_file *)file->private_data)->backing_file = backing_file;
+	((struct fuse_file *)file->private_data)->backing_cred = get_current_cred();
 
 	return 0;
 }
@@ -315,6 +334,10 @@ int fuse_release_initialize(struct fuse_bpf_args *fa,
 		fput(ff->backing_file);
 		ff->backing_file = NULL;
 	}
+	if (ff->backing_cred) {
+		put_cred(ff->backing_cred);
+		ff->backing_cred = NULL;
+	}
 
 	return 0;
 }
@@ -339,6 +362,10 @@ int fuse_releasedir_initialize(struct fuse_bpf_args *fa,
 	if (ff->backing_file) {
 		fput(ff->backing_file);
 		ff->backing_file = NULL;
+	}
+	if (ff->backing_cred) {
+		put_cred(ff->backing_cred);
+		ff->backing_cred = NULL;
 	}
 
 	return 0;
@@ -769,7 +796,7 @@ int fuse_file_read_iter_backing(struct fuse_bpf_args *fa,
 	if (!backing_file)
 		return -ENOTCONN;
 
-	old_cred = override_creds(ff->passthrough.cred);
+	old_cred = override_creds(ff->backing_cred);
 	init_sync_kiocb(&local_iocb, backing_file);
 	local_iocb.ki_pos = iocb->ki_pos;
 	local_iocb.ki_nbytes = iov_iter_count(to);
@@ -823,7 +850,6 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 	struct file *file = iocb->ki_filp;
 	struct fuse_file *ff = file->private_data;
 	struct file *backing_file = ff->backing_file;
-	struct inode *fuse_inode = file->f_path.dentry->d_inode;
 	const struct cred *old_cred;
 	struct kiocb local_iocb;
 	ssize_t ret;
@@ -831,11 +857,11 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 	if (!backing_file)
 		return -ENOTCONN;
 
-	mutex_lock(&fuse_inode->i_mutex);
+	mutex_lock(&backing_file->f_path.dentry->d_inode->i_mutex);
 
 	fuse_copyattr(file, backing_file);
 
-	old_cred = override_creds(ff->passthrough.cred);
+	old_cred = override_creds(ff->backing_cred);
 	init_sync_kiocb(&local_iocb, backing_file);
 	local_iocb.ki_pos = iocb->ki_pos;
 	local_iocb.ki_nbytes = iov_iter_count(from);
@@ -851,7 +877,7 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 		fuse_copyattr(file, backing_file);
 	}
 
-	mutex_unlock(&fuse_inode->i_mutex);
+	mutex_unlock(&backing_file->f_path.dentry->d_inode->i_mutex);
 
 	return ret;
 }
@@ -885,7 +911,7 @@ ssize_t fuse_backing_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EIO;
 
 	vma->vm_file = get_file(backing_file);
-	old_cred = override_creds(ff->passthrough.cred);
+	old_cred = override_creds(ff->backing_cred);
 	ret = call_mmap(vma->vm_file, vma);
 	revert_creds(old_cred);
 
@@ -1002,6 +1028,91 @@ int fuse_lookup_backing(struct fuse_bpf_args *fa, struct inode *dir,
 	return 0;
 }
 
+int fuse_handle_backing(struct fuse_entry_bpf *feb, struct inode **backing_inode,
+			struct path *backing_path)
+{
+	switch (feb->out.backing_action) {
+	case FUSE_ACTION_KEEP:
+		break;
+
+	case FUSE_ACTION_REMOVE:
+		iput(*backing_inode);
+		*backing_inode = NULL;
+		path_put(backing_path);
+		*backing_path = (struct path) {};
+		break;
+
+	case FUSE_ACTION_REPLACE: {
+		struct file *backing_file = feb->backing_file;
+
+		if (!backing_file || IS_ERR(backing_file))
+			return backing_file ? PTR_ERR(backing_file) : -EINVAL;
+
+		if (*backing_inode)
+			iput(*backing_inode);
+		*backing_inode = backing_file->f_inode;
+		ihold(*backing_inode);
+
+		path_put(backing_path);
+		*backing_path = backing_file->f_path;
+		path_get(backing_path);
+
+		fput(backing_file);
+		break;
+	}
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int fuse_handle_bpf_prog(struct fuse_entry_bpf *feb, struct inode *parent,
+			 struct bpf_prog **bpf)
+{
+	struct fuse_inode *pi;
+
+	if (feb->out.bpf_action == FUSE_ACTION_KEEP && !parent)
+		return 0;
+
+	if (*bpf) {
+		bpf_prog_put(*bpf);
+		*bpf = NULL;
+	}
+
+	switch (feb->out.bpf_action) {
+	case FUSE_ACTION_KEEP:
+		pi = get_fuse_inode(parent);
+		*bpf = pi->bpf;
+		if (*bpf)
+			bpf_prog_inc(*bpf);
+		break;
+
+	case FUSE_ACTION_REMOVE:
+		break;
+
+	case FUSE_ACTION_REPLACE: {
+		struct file *bpf_file = feb->bpf_file;
+		struct bpf_prog *bpf_prog = ERR_PTR(-EINVAL);
+
+		if (bpf_file && !IS_ERR(bpf_file))
+			bpf_prog = fuse_get_bpf_prog(bpf_file);
+
+		if (IS_ERR(bpf_prog))
+			return PTR_ERR(bpf_prog);
+
+		*bpf = bpf_prog;
+		break;
+	}
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 struct dentry *fuse_lookup_finalize(struct fuse_bpf_args *fa,
 				    struct inode *dir,
 				    struct dentry *entry, unsigned int flags)
@@ -1026,13 +1137,21 @@ struct dentry *fuse_lookup_finalize(struct fuse_bpf_args *fa,
 			return d;
 		if (d)
 			entry = d;
-	}
 
-	if (feb->out.backing_action == FUSE_ACTION_REMOVE) {
-		struct fuse_dentry *fd = get_fuse_dentry(entry);
-		if (fd && fd->backing_path.dentry) {
-			path_put(&fd->backing_path);
-			fd->backing_path = (struct path) {};
+		if (entry->d_inode) {
+			struct fuse_inode *fi = get_fuse_inode(entry->d_inode);
+			int err;
+
+			err = fuse_handle_bpf_prog(feb, dir, &fi->bpf);
+			if (err)
+				return ERR_PTR(err);
+
+			if (feb->out.backing_action != FUSE_ACTION_KEEP) {
+				struct fuse_dentry *fd = get_fuse_dentry(entry);
+				if (fd)
+					fuse_handle_backing(feb, &fi->backing_inode,
+							    &fd->backing_path);
+			}
 		}
 	}
 

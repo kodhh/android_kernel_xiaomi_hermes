@@ -130,6 +130,15 @@ static void fuse_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages_final(&inode->i_data);
 	clear_inode(inode);
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_inode *fi = get_fuse_inode(inode);
+		iput(fi->backing_inode);
+		if (fi->bpf)
+			bpf_prog_put(fi->bpf);
+		fi->bpf = NULL;
+	}
+#endif
 	if (inode->i_sb->s_flags & MS_ACTIVE) {
 		struct fuse_conn *fc = get_fuse_conn(inode);
 		struct fuse_inode *fi = get_fuse_inode(inode);
@@ -516,6 +525,18 @@ static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
 		buf->f_type = FUSE_SUPER_MAGIC;
 		return 0;
 	}
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(dentry->d_inode, struct fuse_statfs_out,
+				       fuse_statfs_initialize, fuse_statfs_backing,
+				       fuse_statfs_finalize,
+				       dentry, buf);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
 
 	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))
@@ -1464,6 +1485,12 @@ static int __init fuse_init(void)
 	if (res)
 		goto err_sysfs_cleanup;
 
+#ifdef CONFIG_FUSE_BPF
+	res = fuse_bpf_init();
+	if (res)
+		goto err_sysfs_cleanup;
+#endif
+
 	sanitize_global_limit(&max_user_bgreq);
 	sanitize_global_limit(&max_user_congthresh);
 
@@ -1483,6 +1510,9 @@ static void __exit fuse_exit(void)
 {
 	printk(KERN_DEBUG "fuse exit\n");
 
+#ifdef CONFIG_FUSE_BPF
+	fuse_bpf_cleanup();
+#endif
 	fuse_ctl_cleanup();
 	fuse_sysfs_cleanup();
 	fuse_fs_cleanup();

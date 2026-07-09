@@ -263,6 +263,7 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 			if (!IS_ERR(backing_file)) {
 				get_file(backing_file);
 				ff->backing_file = backing_file;
+				ff->backing_cred = get_current_cred();
 			}
 			path_put(&backing_path);
 		}
@@ -316,6 +317,10 @@ void fuse_release_common(struct file *file, int opcode)
 	if (ff->backing_file) {
 		fput(ff->backing_file);
 		ff->backing_file = NULL;
+	}
+	if (ff->backing_cred) {
+		put_cred(ff->backing_cred);
+		ff->backing_cred = NULL;
 	}
 #endif
 
@@ -935,20 +940,19 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 
 #ifdef CONFIG_FUSE_BPF
 	if (ff->backing_file) {
-		const struct cred *old_cred;
-		struct kiocb local_iocb;
-		ssize_t ret;
+		struct iov_iter iter;
+		struct fuse_err_ret fer;
+		size_t count;
 
-		init_sync_kiocb(&local_iocb, ff->backing_file);
-		local_iocb.ki_pos = pos;
-		local_iocb.ki_nbytes = iov_length(iov, nr_segs);
-
-		old_cred = override_creds(ff->passthrough.cred);
-		ret = call_read_iter(ff->backing_file, &local_iocb, iov, nr_segs, pos);
-		revert_creds(old_cred);
-
-		iocb->ki_pos = local_iocb.ki_pos;
-		return ret;
+		count = iov_length(iov, nr_segs);
+		iov_iter_init(&iter, iov, nr_segs, count, 0);
+		fer = fuse_bpf_backing(inode, struct fuse_file_read_iter_io,
+			fuse_file_read_iter_initialize,
+			fuse_file_read_iter_backing,
+			fuse_file_read_iter_finalize,
+			iocb, &iter);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
 	}
 #endif
 	if (ff->passthrough.filp)
@@ -1217,22 +1221,19 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 
 #ifdef CONFIG_FUSE_BPF
 	if (ff->backing_file) {
-		const struct cred *old_cred;
-		struct kiocb local_iocb;
-		ssize_t ret;
+		struct iov_iter iter;
+		struct fuse_err_ret fer;
+		size_t bpf_count;
 
-		init_sync_kiocb(&local_iocb, ff->backing_file);
-		local_iocb.ki_pos = pos;
-		local_iocb.ki_nbytes = iov_length(iov, nr_segs);
-
-		old_cred = override_creds(ff->passthrough.cred);
-		file_start_write(ff->backing_file);
-		ret = call_write_iter(ff->backing_file, &local_iocb, iov, nr_segs, pos);
-		file_end_write(ff->backing_file);
-		revert_creds(old_cred);
-
-		iocb->ki_pos = local_iocb.ki_pos;
-		return ret;
+		bpf_count = iov_length(iov, nr_segs);
+		iov_iter_init(&iter, iov, nr_segs, bpf_count, 0);
+		fer = fuse_bpf_backing(inode, struct fuse_file_write_iter_io,
+			fuse_file_write_iter_initialize,
+			fuse_file_write_iter_backing,
+			fuse_file_write_iter_finalize,
+			iocb, &iter);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
 	}
 #endif
 	if (ff->passthrough.filp)
@@ -1796,11 +1797,8 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct fuse_file *ff = file->private_data;
 
 #ifdef CONFIG_FUSE_BPF
-	if (ff->backing_file) {
-		if (ff->backing_file->f_op->mmap)
-			return call_mmap(ff->backing_file, vma);
-		return -ENODEV;
-	}
+	if (ff->backing_file)
+		return fuse_backing_mmap(file, vma);
 #endif
 	if (ff->passthrough.filp)
 		return fuse_passthrough_mmap(file, vma);
@@ -1968,6 +1966,14 @@ static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 	struct inode *inode = file_inode(file);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	int err;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_file *ff = file->private_data;
+		if (ff->backing_file)
+			return flock_lock_file_wait(ff->backing_file, fl);
+	}
+#endif
 
 	if (fc->no_flock) {
 		err = flock_lock_file_wait(file, fl);
@@ -2408,6 +2414,22 @@ long fuse_ioctl_common(struct file *file, unsigned int cmd,
 {
 	struct inode *inode = file_inode(file);
 	struct fuse_conn *fc = get_fuse_conn(inode);
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_file *ff = file->private_data;
+		if (ff->backing_file) {
+			if (flags & FUSE_IOCTL_COMPAT) {
+				if (ff->backing_file->f_op->compat_ioctl)
+					return ff->backing_file->f_op->compat_ioctl(ff->backing_file, cmd, arg);
+			} else {
+				if (ff->backing_file->f_op->unlocked_ioctl)
+					return ff->backing_file->f_op->unlocked_ioctl(ff->backing_file, cmd, arg);
+			}
+			return -ENOTTY;
+		}
+	}
+#endif
 
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;

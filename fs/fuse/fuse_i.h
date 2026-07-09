@@ -203,6 +203,7 @@ struct fuse_file {
 
 #ifdef CONFIG_FUSE_BPF
 	struct file *backing_file;
+	const struct cred *backing_cred;
 #endif
 
 	/** RB node to be linked on fuse_conn->polled_files */
@@ -1447,6 +1448,11 @@ struct fuse_entry_bpf {
 	struct file *backing_file;
 	struct file *bpf_file;
 };
+
+int fuse_handle_backing(struct fuse_entry_bpf *feb, struct inode **backing_inode,
+			struct path *backing_path);
+int fuse_handle_bpf_prog(struct fuse_entry_bpf *feb, struct inode *parent,
+			 struct bpf_prog **bpf);
 
 struct fuse_lookup_io {
 	struct fuse_entry_out feo;

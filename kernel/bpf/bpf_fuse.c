@@ -9,12 +9,33 @@
 #include <linux/filter.h>
 #include <uapi/linux/fuse.h>
 
+#define FUSE_IN_ARG_VALUE(i)	offsetof(struct fuse_bpf_args, in_args[i].value)
+#define FUSE_OUT_ARG_VALUE(i)	offsetof(struct fuse_bpf_args, out_args[i].value)
+
 static bool fuse_prog_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
 				      enum bpf_reg_type *reg_type)
 {
 	if (off < 0 || off >= sizeof(struct fuse_bpf_args))
 		return false;
+
+	/* Pointers to backing data buffers — BPF may dereference them */
+	switch (off) {
+	case FUSE_IN_ARG_VALUE(0):
+	case FUSE_IN_ARG_VALUE(1):
+	case FUSE_IN_ARG_VALUE(2):
+	case FUSE_IN_ARG_VALUE(3):
+	case FUSE_IN_ARG_VALUE(4):
+		if (type == BPF_WRITE)
+			return false;
+		*reg_type = PTR_TO_MEM;
+		return true;
+	case FUSE_OUT_ARG_VALUE(0):
+	case FUSE_OUT_ARG_VALUE(1):
+	case FUSE_OUT_ARG_VALUE(2):
+		*reg_type = PTR_TO_MEM;
+		return true;
+	}
 
 	if (type == BPF_WRITE) {
 		switch (off) {
@@ -26,14 +47,32 @@ static bool fuse_prog_is_valid_access(int off, int size,
 		}
 	}
 
-	*reg_type = PTR_TO_CTX;
+	*reg_type = UNKNOWN_VALUE;
 	return true;
 }
 
 static const struct bpf_func_proto *
 fuse_prog_func_proto(enum bpf_func_id func_id)
 {
-	return NULL;
+	switch (func_id) {
+	case BPF_FUNC_trace_printk:
+		return bpf_get_trace_printk_proto();
+
+	case BPF_FUNC_get_current_uid_gid:
+		return &bpf_get_current_uid_gid_proto;
+
+	case BPF_FUNC_get_current_pid_tgid:
+		return &bpf_get_current_pid_tgid_proto;
+
+	case BPF_FUNC_map_lookup_elem:
+		return &bpf_map_lookup_elem_proto;
+
+	case BPF_FUNC_map_update_elem:
+		return &bpf_map_update_elem_proto;
+
+	default:
+		return NULL;
+	}
 }
 
 static const struct bpf_verifier_ops fuse_verifier_ops = {

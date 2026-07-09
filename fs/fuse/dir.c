@@ -190,6 +190,18 @@ u64 fuse_get_attr_version(struct fuse_conn *fc)
 	return curr_version;
 }
 
+#ifdef CONFIG_FUSE_BPF
+static void fuse_dentry_release(struct dentry *entry)
+{
+	struct fuse_dentry *fd = entry->d_fsdata;
+
+	if (fd && fd->backing_path.dentry)
+		path_put(&fd->backing_path);
+
+	kfree(fd);
+}
+#endif
+
 /*
  * Check whether the dentry is still valid
  *
@@ -206,6 +218,32 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 	struct fuse_conn *fc;
 	struct fuse_inode *fi;
 	int ret;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_dentry *fd = get_fuse_dentry(entry);
+
+		if (fd && fd->backing_path.dentry) {
+			struct dentry *back = fd->backing_path.dentry;
+
+			spin_lock(&back->d_lock);
+			if (d_unhashed(back)) {
+				spin_unlock(&back->d_lock);
+				goto invalid;
+			}
+			spin_unlock(&back->d_lock);
+
+			if (back->d_op && back->d_op->d_revalidate) {
+				int r = back->d_op->d_revalidate(back, flags);
+				if (r <= 0) {
+					if (!r)
+						goto invalid;
+					return r;
+				}
+			}
+		}
+	}
+#endif
 
 	inode = ACCESS_ONCE(entry->d_inode);
 	if (inode && is_bad_inode(inode))
@@ -303,6 +341,20 @@ static void fuse_dentry_canonical_path(const struct path *path, struct path *can
 	int err;
 	char *path_name;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
+				fuse_canonical_path_initialize,
+				fuse_canonical_path_backing,
+				fuse_canonical_path_finalize, path,
+				canonical_path);
+		if (fer.ret)
+			return;
+	}
+#endif
+
 	req = fuse_get_req(fc, 1);
 	err = PTR_ERR(req);
 	if (IS_ERR(req))
@@ -341,6 +393,9 @@ static int invalid_nodeid(u64 nodeid)
 
 const struct dentry_operations fuse_dentry_operations = {
 	.d_revalidate	= fuse_dentry_revalidate,
+#ifdef CONFIG_FUSE_BPF
+	.d_release	= fuse_dentry_release,
+#endif
 	.d_canonical_path = fuse_dentry_canonical_path,
 };
 
@@ -1358,6 +1413,17 @@ static int fuse_permission(struct inode *inode, int mask)
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_access_in,
+				       fuse_access_initialize, fuse_access_backing,
+				       fuse_access_finalize, inode, mask);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	/*
 	 * If attributes are needed, refresh them before proceeding
 	 */
@@ -1595,6 +1661,27 @@ static int fuse_readdir(struct file *file, struct dir_context *ctx)
 	if (is_bad_inode(inode))
 		return -EIO;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		bool allow_force;
+		bool force_again = false;
+		bool is_continued = false;
+
+again:
+		fer = fuse_bpf_backing(inode, struct fuse_read_io,
+				       fuse_readdir_initialize, fuse_readdir_backing,
+				       fuse_readdir_finalize,
+				       file, ctx, &force_again, &allow_force, is_continued);
+		if (force_again && !IS_ERR(fer.result)) {
+			is_continued = true;
+			goto again;
+		}
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	req = fuse_get_req(fc, 1);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
@@ -1695,6 +1782,18 @@ static int fuse_dir_open(struct inode *inode, struct file *file)
 
 static int fuse_dir_release(struct inode *inode, struct file *file)
 {
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_release_in,
+			       fuse_releasedir_initialize, fuse_release_backing,
+			       fuse_release_finalize,
+			       inode, file);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	fuse_release_common(file, FUSE_RELEASEDIR);
 
 	return 0;
@@ -1703,6 +1802,19 @@ static int fuse_dir_release(struct inode *inode, struct file *file)
 static int fuse_dir_fsync(struct file *file, loff_t start, loff_t end,
 			  int datasync)
 {
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct inode *inode = file_inode(file);
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_fsync_in,
+				fuse_dir_fsync_initialize, fuse_fsync_backing,
+				fuse_fsync_finalize,
+				file, start, end, datasync);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	return fuse_fsync_common(file, start, end, datasync, 1);
 }
 
@@ -2123,6 +2235,18 @@ static int fuse_setxattr(struct dentry *entry, const char *name,
 	if (fc->no_setxattr)
 		return -EOPNOTSUPP;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_setxattr_in,
+				fuse_setxattr_initialize, fuse_setxattr_backing,
+				fuse_setxattr_finalize,
+				entry, name, value, size, flags);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
@@ -2165,6 +2289,18 @@ static ssize_t fuse_getxattr(struct dentry *entry, const char *name,
 
 	if (fc->no_getxattr)
 		return -EOPNOTSUPP;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_getxattr_io,
+				fuse_getxattr_initialize, fuse_getxattr_backing,
+				fuse_getxattr_finalize,
+				entry, name, value, size);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
 
 	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))
@@ -2217,6 +2353,18 @@ static ssize_t fuse_listxattr(struct dentry *entry, char *list, size_t size)
 
 	if (fc->no_listxattr)
 		return -EOPNOTSUPP;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_getxattr_io,
+				fuse_listxattr_initialize, fuse_listxattr_backing,
+				fuse_listxattr_finalize,
+				entry, list, size);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
 
 	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))
