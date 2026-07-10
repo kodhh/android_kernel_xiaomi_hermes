@@ -440,7 +440,9 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 	err = req->out.h.error;
 
 #ifdef CONFIG_FUSE_BPF
-	if (!err && entry && req->out.args[1].size == sizeof(bpf_arg.out)) {
+	if (!err && entry && req->out.args[1].size == sizeof(bpf_arg.out) &&
+	    (bpf_arg.out.backing_action == FUSE_ACTION_REPLACE ||
+	     bpf_arg.out.bpf_action == FUSE_ACTION_REPLACE)) {
 		struct file *backing_file;
 		struct inode *backing_inode;
 		bool bpf_ok = false;
@@ -451,9 +453,18 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 				backing_inode = backing_file->f_inode;
 				*inode = fuse_iget_backing(sb, backing_inode);
 				if (*inode) {
-					get_fuse_dentry(entry)->backing_path =
-						backing_file->f_path;
-					path_get(&get_fuse_dentry(entry)->backing_path);
+					struct fuse_dentry *fd = get_fuse_dentry(entry);
+					/* d_fsdata may not be allocated yet when
+					 * parent dir has no backing_inode */
+					if (!fd) {
+						fd = kzalloc(sizeof(*fd), GFP_KERNEL);
+						if (fd)
+							entry->d_fsdata = fd;
+					}
+					if (fd) {
+						fd->backing_path = backing_file->f_path;
+						path_get(&fd->backing_path);
+					}
 					bpf_ok = true;
 				}
 				fput(backing_file);

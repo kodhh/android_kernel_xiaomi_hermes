@@ -955,9 +955,12 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			return PTR_ERR(fer.result);
 	}
 #endif
-	if (ff->passthrough.filp)
-		return fuse_passthrough_read_iter(iocb->ki_filp, iocb,
+	if (ff->passthrough.filp) {
+		ssize_t pt_ret = fuse_passthrough_read_iter(iocb->ki_filp, iocb,
 						  iov, nr_segs, &pos);
+		iocb->ki_pos = pos;
+		return pt_ret;
+	}
 
 	/*
 	 * In auto invalidate mode, always update attributes on read.
@@ -1236,9 +1239,12 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			return PTR_ERR(fer.result);
 	}
 #endif
-	if (ff->passthrough.filp)
-		return fuse_passthrough_write_iter(file, iocb, iov,
+	if (ff->passthrough.filp) {
+		ssize_t pt_ret = fuse_passthrough_write_iter(file, iocb, iov,
 						    nr_segs, &pos);
+		iocb->ki_pos = pos;
+		return pt_ret;
+	}
 
 	WARN_ON(iocb->ki_pos != pos);
 
