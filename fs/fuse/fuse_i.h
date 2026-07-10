@@ -74,6 +74,7 @@ struct fuse_forget_link {
 #ifdef CONFIG_FUSE_BPF
 struct fuse_dentry {
 	struct path backing_path;
+	struct bpf_prog *bpf;
 };
 
 static inline struct fuse_dentry *get_fuse_dentry(const struct dentry *entry)

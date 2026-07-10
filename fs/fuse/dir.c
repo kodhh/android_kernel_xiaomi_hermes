@@ -749,6 +749,9 @@ static int create_new_entry(struct fuse_conn *fc, struct fuse_req *req,
 	struct inode *inode;
 	int err;
 	struct fuse_forget_link *forget;
+#ifdef CONFIG_FUSE_BPF
+	struct fuse_entry_bpf bpf_arg;
+#endif
 
 	forget = fuse_alloc_forget();
 	if (!forget) {
@@ -764,6 +767,15 @@ static int create_new_entry(struct fuse_conn *fc, struct fuse_req *req,
 	else
 		req->out.args[0].size = sizeof(outarg);
 	req->out.args[0].value = &outarg;
+#ifdef CONFIG_FUSE_BPF
+	{
+		memset(&bpf_arg, 0, sizeof(bpf_arg));
+		req->out.argvar = 1;
+		req->out.numargs = 2;
+		req->out.args[1].size = sizeof(bpf_arg.out);
+		req->out.args[1].value = &bpf_arg.out;
+	}
+#endif
 	fuse_request_send(fc, req);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -776,6 +788,57 @@ static int create_new_entry(struct fuse_conn *fc, struct fuse_req *req,
 
 	if ((outarg.attr.mode ^ mode) & S_IFMT)
 		goto out_put_forget_req;
+
+#ifdef CONFIG_FUSE_BPF
+	if (entry && req->out.args[1].size == sizeof(bpf_arg.out) &&
+	    (bpf_arg.out.backing_action == FUSE_ACTION_REPLACE ||
+	     bpf_arg.out.bpf_action == FUSE_ACTION_REPLACE)) {
+		int bpf_ret = 0;
+		bool have_backing = false;
+
+		if (bpf_arg.out.backing_action == FUSE_ACTION_REPLACE) {
+			struct file *bf = bpf_arg.backing_file;
+			if (bf && !IS_ERR(bf)) {
+				inode = fuse_iget_backing(dir->i_sb,
+					bf->f_inode);
+				if (inode) {
+					struct fuse_dentry *fd;
+					fd = get_fuse_dentry(entry);
+					if (!fd) {
+						fd = kzalloc(sizeof(*fd), GFP_KERNEL);
+						if (fd)
+							entry->d_fsdata = fd;
+					}
+					if (fd) {
+						path_put(&fd->backing_path);
+						fd->backing_path = bf->f_path;
+						path_get(&fd->backing_path);
+					}
+					have_backing = true;
+				}
+			}
+		}
+
+		if (have_backing &&
+		    bpf_arg.out.bpf_action == FUSE_ACTION_REPLACE) {
+			struct file *bpf_file = bpf_arg.bpf_file;
+			if (bpf_file && !IS_ERR(bpf_file))
+				bpf_ret = fuse_handle_bpf_prog(&bpf_arg,
+					dir, &get_fuse_inode(inode)->bpf);
+		}
+
+		if (have_backing) {
+			kfree(forget);
+			err = 0;
+			d_instantiate(entry, inode);
+			fuse_change_entry_timeout(entry, &outarg);
+			fuse_invalidate_attr(dir);
+			return 0;
+		}
+		err = -ENOMEM;
+		goto out_put_forget_req;
+	}
+#endif
 
 	inode = fuse_iget(dir->i_sb, outarg.nodeid, outarg.generation,
 			  &outarg.attr, entry_attr_timeout(&outarg), 0);

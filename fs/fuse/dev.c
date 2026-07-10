@@ -1878,9 +1878,7 @@ static ssize_t fuse_dev_do_write(struct fuse_conn *fc,
 	spin_unlock(&fc->lock);
 
 	err = copy_out_args(cs, &req->out, nbytes);
-	if (!err && (req->in.h.opcode == FUSE_LOOKUP ||
-		     req->in.h.opcode == (FUSE_LOOKUP | FUSE_POSTFILTER)) &&
-	    req->out.numargs >= 2 &&
+	if (!err && req->out.numargs >= 2 &&
 	    req->out.args[1].size == sizeof(struct fuse_entry_bpf_out)) {
 		struct fuse_entry_bpf_out *febo =
 			(struct fuse_entry_bpf_out *)req->out.args[1].value;

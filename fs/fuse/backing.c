@@ -261,6 +261,7 @@ int fuse_create_open_backing(
 	struct fuse_inode *dir_fi = get_fuse_inode(dir);
 	struct fuse_create_in *fci = (struct fuse_create_in *)fa->in_args[0].value;
 	struct path *dir_backing_path = fuse_get_backing_path(entry->d_parent);
+	struct fuse_dentry *fd;
 	struct dentry *backing_dentry = NULL;
 	struct inode *backing_inode;
 	struct file *backing_file;
@@ -293,20 +294,30 @@ int fuse_create_open_backing(
 		return ret;
 	}
 
-	if (!get_fuse_dentry(entry)) {
+	backing_inode = backing_dentry->d_inode;
+	if (!backing_inode) {
 		dput(backing_dentry);
 		return -ENOENT;
 	}
 
-	path_put(&get_fuse_dentry(entry)->backing_path);
-	get_fuse_dentry(entry)->backing_path = (struct path) {
+	fd = get_fuse_dentry(entry);
+	if (!fd) {
+		fd = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!fd) {
+			dput(backing_dentry);
+			return -ENOMEM;
+		}
+		entry->d_fsdata = fd;
+	}
+
+	path_put(&fd->backing_path);
+	fd->backing_path = (struct path) {
 		.mnt = dir_backing_path->mnt,
 		.dentry = backing_dentry,
 	};
-	path_get(&get_fuse_dentry(entry)->backing_path);
+	path_get(&fd->backing_path);
 
-	backing_inode = backing_dentry->d_inode;
-	backing_file = dentry_open(&get_fuse_dentry(entry)->backing_path,
+	backing_file = dentry_open(&fd->backing_path,
 				   fci->flags, current_cred());
 	if (IS_ERR(backing_file))
 		return PTR_ERR(backing_file);
@@ -1279,8 +1290,9 @@ int fuse_mknod_backing(
 {
 	struct fuse_inode *dir_fi = get_fuse_inode(dir);
 	struct path *dir_backing_path = fuse_get_backing_path(entry->d_parent);
+	struct fuse_dentry *fd;
 	struct path backing_path;
-	struct inode *backing_inode;
+	struct inode *inode;
 	struct dentry *backing_dentry;
 	int ret;
 
@@ -1304,13 +1316,38 @@ int fuse_mknod_backing(
 		return ret;
 	}
 
-	backing_inode = backing_dentry->d_inode;
+	if (!backing_dentry->d_inode) {
+		dput(backing_dentry);
+		return -ENOENT;
+	}
+
 	backing_path = (struct path) {
 		.mnt = mntget(dir_backing_path->mnt),
 		.dentry = backing_dentry,
 	};
 
-	get_fuse_dentry(entry)->backing_path = backing_path;
+	fd = get_fuse_dentry(entry);
+	if (!fd) {
+		fd = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!fd) {
+			path_put(&backing_path);
+			return -ENOMEM;
+		}
+		entry->d_fsdata = fd;
+	}
+	path_put(&fd->backing_path);
+	fd->backing_path = backing_path;
+
+	inode = fuse_iget_backing(dir->i_sb, backing_dentry->d_inode);
+	if (IS_ERR_OR_NULL(inode))
+		return inode ? PTR_ERR(inode) : -ENOMEM;
+
+	d_instantiate(entry, inode);
+
+	if (get_fuse_inode(inode)->bpf)
+		bpf_prog_put(get_fuse_inode(inode)->bpf);
+	get_fuse_inode(inode)->bpf = fd->bpf;
+	fd->bpf = NULL;
 
 	return 0;
 }
@@ -1351,8 +1388,9 @@ int fuse_mkdir_backing(
 {
 	struct fuse_inode *dir_fi = get_fuse_inode(dir);
 	struct path *dir_backing_path = fuse_get_backing_path(entry->d_parent);
+	struct fuse_dentry *fd;
 	struct path backing_path;
-	struct inode *backing_inode;
+	struct inode *inode;
 	struct dentry *backing_dentry;
 	int ret;
 
@@ -1376,13 +1414,38 @@ int fuse_mkdir_backing(
 		return ret;
 	}
 
-	backing_inode = backing_dentry->d_inode;
+	if (!backing_dentry->d_inode) {
+		dput(backing_dentry);
+		return -ENOENT;
+	}
+
 	backing_path = (struct path) {
 		.mnt = mntget(dir_backing_path->mnt),
 		.dentry = backing_dentry,
 	};
 
-	get_fuse_dentry(entry)->backing_path = backing_path;
+	fd = get_fuse_dentry(entry);
+	if (!fd) {
+		fd = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!fd) {
+			path_put(&backing_path);
+			return -ENOMEM;
+		}
+		entry->d_fsdata = fd;
+	}
+	path_put(&fd->backing_path);
+	fd->backing_path = backing_path;
+
+	inode = fuse_iget_backing(dir->i_sb, backing_dentry->d_inode);
+	if (IS_ERR_OR_NULL(inode))
+		return inode ? PTR_ERR(inode) : -ENOMEM;
+
+	d_instantiate(entry, inode);
+
+	if (get_fuse_inode(inode)->bpf)
+		bpf_prog_put(get_fuse_inode(inode)->bpf);
+	get_fuse_inode(inode)->bpf = fd->bpf;
+	fd->bpf = NULL;
 
 	return 0;
 }
@@ -1718,7 +1781,9 @@ int fuse_symlink_backing(
 {
 	struct fuse_inode *dir_fi = get_fuse_inode(dir);
 	struct path *dir_backing_path = fuse_get_backing_path(entry->d_parent);
+	struct fuse_dentry *fd;
 	struct path backing_path;
+	struct inode *inode;
 	struct dentry *backing_dentry;
 	int ret;
 
@@ -1742,12 +1807,38 @@ int fuse_symlink_backing(
 		return ret;
 	}
 
+	if (!backing_dentry->d_inode) {
+		dput(backing_dentry);
+		return -ENOENT;
+	}
+
 	backing_path = (struct path) {
 		.mnt = mntget(dir_backing_path->mnt),
 		.dentry = backing_dentry,
 	};
 
-	get_fuse_dentry(entry)->backing_path = backing_path;
+	fd = get_fuse_dentry(entry);
+	if (!fd) {
+		fd = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!fd) {
+			path_put(&backing_path);
+			return -ENOMEM;
+		}
+		entry->d_fsdata = fd;
+	}
+	path_put(&fd->backing_path);
+	fd->backing_path = backing_path;
+
+	inode = fuse_iget_backing(dir->i_sb, backing_dentry->d_inode);
+	if (IS_ERR_OR_NULL(inode))
+		return inode ? PTR_ERR(inode) : -ENOMEM;
+
+	d_instantiate(entry, inode);
+
+	if (get_fuse_inode(inode)->bpf)
+		bpf_prog_put(get_fuse_inode(inode)->bpf);
+	get_fuse_inode(inode)->bpf = fd->bpf;
+	fd->bpf = NULL;
 
 	return 0;
 }
