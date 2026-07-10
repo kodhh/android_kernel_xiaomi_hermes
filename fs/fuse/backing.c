@@ -66,7 +66,9 @@ static struct dentry *fuse_get_backing_dentry(struct dentry *dentry)
 static struct path *fuse_get_backing_path(struct dentry *dentry)
 {
 	struct fuse_dentry *fd = get_fuse_dentry(dentry);
-	return fd ? &fd->backing_path : NULL;
+	if (!fd || !fd->backing_path.dentry)
+		return NULL;
+	return &fd->backing_path;
 }
 
 /* fuse_bpf_init/fuse_bpf_cleanup - module init/exit */
@@ -140,10 +142,8 @@ out:
 int fuse_open_initialize(struct fuse_bpf_args *fa, struct fuse_open_io *foi,
 			 struct inode *inode, struct file *file, bool isdir)
 {
-	struct fuse_file *ff = file->private_data;
-
 	fa->opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
-	fa->nodeid = ff->nodeid;
+	fa->nodeid = get_fuse_inode(inode)->nodeid;
 	fa->in_args[0].size = sizeof(foi->foi);
 	fa->in_args[0].value = &foi->foi;
 	fa->in_numargs = 1;
@@ -160,32 +160,57 @@ int fuse_open_initialize(struct fuse_bpf_args *fa, struct fuse_open_io *foi,
 int fuse_open_backing(struct fuse_bpf_args *fa,
 		      struct inode *inode, struct file *file, bool isdir)
 {
+	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
-	struct fuse_open_in *foi = (struct fuse_open_in *)fa->in_args[0].value;
+	const struct fuse_open_in *foi = fa->in_args[0].value;
+	struct fuse_file *ff;
+	struct fuse_dentry *fd;
 	struct file *backing_file;
-	struct path *backing_path;
-	int ret;
+	int mask;
 
 	if (!fi->backing_inode)
 		return -ENOENT;
 
-	ret = inode_permission(fi->backing_inode, foi->flags & O_ACCMODE);
-	if (ret)
-		return ret;
+	ff = fuse_file_alloc(fc);
+	if (!ff)
+		return -ENOMEM;
+	file->private_data = ff;
 
-	backing_path = fuse_get_backing_path(file->f_path.dentry);
-	if (!backing_path)
-		return -ENOENT;
+	switch (foi->flags & O_ACCMODE) {
+	case O_RDONLY:
+		mask = MAY_READ;
+		break;
+	case O_WRONLY:
+		mask = MAY_WRITE;
+		break;
+	case O_RDWR:
+		mask = MAY_READ | MAY_WRITE;
+		break;
+	default:
+		goto err_free;
+	}
 
-	backing_file = dentry_open(backing_path, foi->flags, current_cred());
+	if (inode_permission(fi->backing_inode, mask))
+		goto err_free;
+
+	fd = get_fuse_dentry(file->f_path.dentry);
+	if (!fd || !fd->backing_path.dentry)
+		goto err_free;
+
+	backing_file = dentry_open(&fd->backing_path,
+				   foi->flags, current_cred());
 	if (IS_ERR(backing_file))
-		return PTR_ERR(backing_file);
+		goto err_free;
 
-	get_file(backing_file);
-	((struct fuse_file *)file->private_data)->backing_file = backing_file;
-	((struct fuse_file *)file->private_data)->backing_cred = get_current_cred();
+	ff->backing_file = backing_file;
+	ff->backing_cred = get_current_cred();
 
 	return 0;
+
+err_free:
+	file->private_data = NULL;
+	fuse_file_free(ff);
+	return -ENOENT;
 }
 
 void *fuse_open_finalize(struct fuse_bpf_args *fa,
@@ -193,7 +218,8 @@ void *fuse_open_finalize(struct fuse_bpf_args *fa,
 {
 	struct fuse_file *ff = file->private_data;
 
-	ff->fh = ((struct fuse_open_out *)fa->out_args[0].value)->fh;
+	if (ff)
+		ff->fh = ((struct fuse_open_out *)fa->out_args[0].value)->fh;
 
 	return NULL;
 }
@@ -1013,13 +1039,16 @@ int fuse_lookup_backing(struct fuse_bpf_args *fa, struct inode *dir,
 		return -ENOENT;
 	}
 
-	fuse_entry = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+	fuse_entry = get_fuse_dentry(entry);
 	if (!fuse_entry) {
-		dput(backing_dentry);
-		return -ENOMEM;
+		fuse_entry = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!fuse_entry) {
+			dput(backing_dentry);
+			return -ENOMEM;
+		}
+		entry->d_fsdata = fuse_entry;
 	}
-
-	entry->d_fsdata = fuse_entry;
+	path_put(&fuse_entry->backing_path);
 	fuse_entry->backing_path = (struct path) {
 		.mnt = mntget(dir_backing_path->mnt),
 		.dentry = backing_dentry,
@@ -1642,11 +1671,14 @@ int fuse_link_backing(struct fuse_bpf_args *fa, struct dentry *entry,
 	if (ret)
 		return ret;
 
-	new_fuse_entry = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
-	if (!new_fuse_entry)
-		return -ENOMEM;
-
-	newent->d_fsdata = new_fuse_entry;
+	new_fuse_entry = get_fuse_dentry(newent);
+	if (!new_fuse_entry) {
+		new_fuse_entry = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+		if (!new_fuse_entry)
+			return -ENOMEM;
+		newent->d_fsdata = new_fuse_entry;
+	}
+	path_put(&new_fuse_entry->backing_path);
 	new_fuse_entry->backing_path = (struct path) {
 		.mnt = mntget(old_backing_path->mnt),
 		.dentry = dget(new_backing_path->dentry),

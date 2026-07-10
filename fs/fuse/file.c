@@ -156,9 +156,14 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 	struct fuse_file *ff;
 	int opcode = isdir ? FUSE_OPENDIR : FUSE_OPEN;
 
-	ff = fuse_file_alloc(fc);
-	if (!ff)
-		return -ENOMEM;
+	if (file->private_data) {
+		ff = file->private_data;
+		file->private_data = NULL;
+	} else {
+		ff = fuse_file_alloc(fc);
+		if (!ff)
+			return -ENOMEM;
+	}
 
 	ff->fh = 0;
 	ff->open_flags = FOPEN_KEEP_CACHE; /* Default for no-open */
@@ -245,30 +250,26 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 	if (err)
 		return err;
 
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode, struct fuse_open_io,
+				       fuse_open_initialize,
+				       fuse_open_backing,
+				       fuse_open_finalize,
+				       inode, file, isdir);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+
 	if (is_wb_truncate) {
 		mutex_lock(&inode->i_mutex);
 		fuse_set_nowrite(inode);
 	}
 
 	err = fuse_do_open(fc, get_node_id(inode), file, isdir);
-
-#ifdef CONFIG_FUSE_BPF
-	if (!err && !isdir) {
-		struct fuse_file *ff = file->private_data;
-		struct path backing_path;
-		get_fuse_backing_path(file->f_path.dentry, &backing_path);
-		if (backing_path.dentry) {
-			struct file *backing_file = dentry_open(&backing_path,
-				file->f_flags, current_cred());
-			if (!IS_ERR(backing_file)) {
-				get_file(backing_file);
-				ff->backing_file = backing_file;
-				ff->backing_cred = get_current_cred();
-			}
-			path_put(&backing_path);
-		}
-	}
-#endif
 
 	if (!err)
 		fuse_finish_open(inode, file);

@@ -462,6 +462,7 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
 							entry->d_fsdata = fd;
 					}
 					if (fd) {
+						path_put(&fd->backing_path);
 						fd->backing_path = backing_file->f_path;
 						path_get(&fd->backing_path);
 					}
