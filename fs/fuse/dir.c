@@ -191,6 +191,13 @@ u64 fuse_get_attr_version(struct fuse_conn *fc)
 }
 
 #ifdef CONFIG_FUSE_BPF
+static int fuse_dentry_init(struct dentry *dentry)
+{
+	dentry->d_fsdata = kzalloc(sizeof(struct fuse_dentry), GFP_KERNEL);
+
+	return dentry->d_fsdata ? 0 : -ENOMEM;
+}
+
 static void fuse_dentry_release(struct dentry *entry)
 {
 	struct fuse_dentry *fd = entry->d_fsdata;
@@ -394,6 +401,7 @@ static int invalid_nodeid(u64 nodeid)
 const struct dentry_operations fuse_dentry_operations = {
 	.d_revalidate	= fuse_dentry_revalidate,
 #ifdef CONFIG_FUSE_BPF
+	.d_init		= fuse_dentry_init,
 	.d_release	= fuse_dentry_release,
 #endif
 	.d_canonical_path = fuse_dentry_canonical_path,
