@@ -1171,6 +1171,25 @@ struct dentry *fuse_lookup_finalize(struct fuse_bpf_args *fa,
 		}
 	}
 
+	/*
+	 * BPF-only lookup path: feo->nodeid is always 0 because it was
+	 * never filled by a userspace LOOKUP reply.  Create the FUSE inode
+	 * from the backing dentry directly, matching 5.10 behaviour.
+	 */
+	if (!inode) {
+		struct fuse_dentry *fd = get_fuse_dentry(entry);
+		if (fd && fd->backing_path.dentry &&
+		    fd->backing_path.dentry->d_inode) {
+			struct inode *backing_inode =
+				fd->backing_path.dentry->d_inode;
+			inode = fuse_iget_backing(dir->i_sb, backing_inode);
+			if (inode) {
+				struct fuse_inode *fi = get_fuse_inode(inode);
+				fi->nodeid = (unsigned long)backing_inode;
+			}
+		}
+	}
+
 	if (!IS_ERR_OR_NULL(inode)) {
 		d = d_splice_alias(inode, entry);
 		if (IS_ERR(d))

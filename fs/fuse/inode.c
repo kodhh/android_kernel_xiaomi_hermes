@@ -352,6 +352,7 @@ struct inode *fuse_iget_backing(struct super_block *sb,
 	struct fuse_inode *fi;
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
 	struct fuse_inode_identifier fii = {
+		.nodeid = (unsigned long)backing_inode,
 		.backing_inode = backing_inode,
 	};
 	struct fuse_attr attr;
