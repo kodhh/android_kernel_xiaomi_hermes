@@ -686,6 +686,11 @@ struct fuse_conn {
 
 	/** Protects passthrough_req */
 	spinlock_t passthrough_req_lock;
+
+#ifdef CONFIG_FUSE_BPF
+	/** Global BPF program for this connection (from mount option) */
+	struct bpf_prog *root_bpf;
+#endif
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -1027,12 +1032,7 @@ static inline int call_mmap(struct file *file, struct vm_area_struct *vma)
 	return file->f_op->mmap(file, vma);
 }
 
-/*
- * Stub for bpf_prog_run; 3.10 does not have eBPF.
- */
-#ifndef BPF_PROG_RUN
-#define BPF_PROG_RUN(prog, ctx) ({ (void)(prog); (void)(ctx); FUSE_BPF_BACKING; })
-#endif
+/* BPF_PROG_RUN is defined in linux/filter.h */
 
 void fuse_unlock_inode(struct inode *inode, bool locked);
 bool fuse_lock_inode(struct inode *inode);

@@ -9,6 +9,10 @@
 
 #include "fuse_i.h"
 
+#ifndef FUSE_SUPER_MAGIC
+#define FUSE_SUPER_MAGIC 0x65735546
+#endif
+
 #include <linux/bpf.h>
 #include <linux/file.h>
 #include <linux/namei.h>
@@ -103,12 +107,14 @@ ssize_t fuse_bpf_simple_request(struct fuse_conn *fc, struct fuse_bpf_args *fa)
 	fuse_request_send(fc, req);
 	ret = req->out.h.error;
 	if (!ret) {
-		if (fa->out_numargs > 0 && fa->out_args[0].value && req->out.args[0].size)
-			memcpy(fa->out_args[0].value, req->out.args[0].value,
-			       min_t(size_t, fa->out_args[0].size, req->out.args[0].size));
-		if (fa->out_numargs > 1 && fa->out_args[1].value && req->out.args[1].size)
-			memcpy(fa->out_args[1].value, req->out.args[1].value,
-			       min_t(size_t, fa->out_args[1].size, req->out.args[1].size));
+		int i;
+		for (i = 0; i < fa->out_numargs && i < FUSE_MAX_OUT_ARGS; i++) {
+			if (fa->out_args[i].value && req->out.args[i].size)
+				memcpy(fa->out_args[i].value,
+				       req->out.args[i].value,
+				       min_t(size_t, fa->out_args[i].size,
+					     req->out.args[i].size));
+		}
 	}
 	fuse_put_request(fc, req);
 
@@ -210,16 +216,19 @@ int fuse_open_backing(struct fuse_bpf_args *fa,
 err_free:
 	file->private_data = NULL;
 	fuse_file_free(ff);
-	return -ENOENT;
+	return -EACCES;
 }
 
 void *fuse_open_finalize(struct fuse_bpf_args *fa,
 		       struct inode *inode, struct file *file, bool isdir)
 {
 	struct fuse_file *ff = file->private_data;
+	struct fuse_open_out *foo = fa->out_args[0].value;
 
-	if (ff)
-		ff->fh = ((struct fuse_open_out *)fa->out_args[0].value)->fh;
+	if (ff) {
+		ff->fh = foo->fh;
+		ff->nodeid = get_fuse_inode(inode)->nodeid;
+	}
 
 	return NULL;
 }
@@ -319,8 +328,10 @@ int fuse_create_open_backing(
 
 	backing_file = dentry_open(&fd->backing_path,
 				   fci->flags, current_cred());
-	if (IS_ERR(backing_file))
+	if (IS_ERR(backing_file)) {
+		dput(backing_dentry);
 		return PTR_ERR(backing_file);
+	}
 
 	get_file(backing_file);
 	((struct fuse_file *)file->private_data)->backing_file = backing_file;
@@ -367,15 +378,6 @@ int fuse_release_initialize(struct fuse_bpf_args *fa,
 	};
 	fa->out_numargs = 0;
 
-	if (ff->backing_file) {
-		fput(ff->backing_file);
-		ff->backing_file = NULL;
-	}
-	if (ff->backing_cred) {
-		put_cred(ff->backing_cred);
-		ff->backing_cred = NULL;
-	}
-
 	return 0;
 }
 
@@ -395,15 +397,6 @@ int fuse_releasedir_initialize(struct fuse_bpf_args *fa,
 		.flags = file->f_flags,
 	};
 	fa->out_numargs = 0;
-
-	if (ff->backing_file) {
-		fput(ff->backing_file);
-		ff->backing_file = NULL;
-	}
-	if (ff->backing_cred) {
-		put_cred(ff->backing_cred);
-		ff->backing_cred = NULL;
-	}
 
 	return 0;
 }
@@ -730,7 +723,13 @@ int fuse_setxattr_initialize(struct fuse_bpf_args *fa,
 	fa->in_args[0].value = fsxi;
 	fa->in_args[1].size = strlen(name) + 1;
 	fa->in_args[1].value = (void *)name;
-	fa->in_numargs = 2;
+	if (value && size > 0) {
+		fa->in_args[2].size = size;
+		fa->in_args[2].value = value;
+		fa->in_numargs = 3;
+	} else {
+		fa->in_numargs = 2;
+	}
 	*fsxi = (struct fuse_setxattr_in) {
 		.size = size,
 		.flags = flags,
@@ -1590,8 +1589,8 @@ static int fuse_rename_backing_common(struct fuse_bpf_args *fa,
 {
 	struct fuse_inode *olddir_fi = get_fuse_inode(olddir);
 	struct fuse_inode *newdir_fi = get_fuse_inode(newdir);
-	struct path *old_backing_path = fuse_get_backing_path(oldent);
-	struct path *new_backing_path = fuse_get_backing_path(newent);
+	struct path *old_backing_path;
+	struct path *new_backing_path;
 	struct dentry *old_backing_dir_dentry;
 	struct dentry *new_backing_dir_dentry;
 	struct dentry *old_backing_dentry;
@@ -2058,6 +2057,7 @@ int fuse_statfs_backing(struct fuse_bpf_args *fa,
 	if (ret)
 		return ret;
 
+	buf->f_type = FUSE_SUPER_MAGIC;
 	convert_statfs_to_fuse(&fkstat, buf);
 	return 0;
 }
@@ -2094,7 +2094,7 @@ int fuse_get_link_backing(struct fuse_bpf_args *fa,
 {
 	struct path *backing_path = fuse_get_backing_path(dentry);
 	struct page *page;
-	void *link;
+	char *link;
 
 	if (!backing_path)
 		return -ENOENT;
@@ -2104,7 +2104,11 @@ int fuse_get_link_backing(struct fuse_bpf_args *fa,
 	if (IS_ERR(page))
 		return PTR_ERR(page);
 
-	link = page_address(page);
+	link = kstrdup(page_address(page), GFP_KERNEL);
+	put_page(page);
+	if (!link)
+		return -ENOMEM;
+
 	*out = link;
 
 	return 0;

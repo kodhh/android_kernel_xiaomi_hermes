@@ -70,6 +70,10 @@ struct fuse_mount_data {
 	unsigned flags;
 	unsigned max_read;
 	unsigned blksize;
+#ifdef CONFIG_FUSE_BPF
+	int root_bpf_fd;
+	unsigned root_bpf_fd_present:1;
+#endif
 };
 
 struct fuse_forget_link *fuse_alloc_forget(void)
@@ -568,6 +572,9 @@ enum {
 	OPT_ALLOW_OTHER,
 	OPT_MAX_READ,
 	OPT_BLKSIZE,
+#ifdef CONFIG_FUSE_BPF
+	OPT_ROOT_BPF,
+#endif
 	OPT_ERR
 };
 
@@ -580,6 +587,9 @@ static const match_table_t tokens = {
 	{OPT_ALLOW_OTHER,		"allow_other"},
 	{OPT_MAX_READ,			"max_read=%u"},
 	{OPT_BLKSIZE,			"blksize=%u"},
+#ifdef CONFIG_FUSE_BPF
+	{OPT_ROOT_BPF,			"root_bpf=%u"},
+#endif
 	{OPT_ERR,			NULL}
 };
 
@@ -664,6 +674,15 @@ static int parse_fuse_opt(char *opt, struct fuse_mount_data *d, int is_bdev)
 				return 0;
 			d->blksize = value;
 			break;
+
+#ifdef CONFIG_FUSE_BPF
+		case OPT_ROOT_BPF:
+			if (match_int(&args[0], &value))
+				return 0;
+			d->root_bpf_fd = value;
+			d->root_bpf_fd_present = 1;
+			break;
+#endif
 
 		default:
 			return 0;
@@ -1082,6 +1101,10 @@ static void fuse_free_conn(struct fuse_conn *fc)
 	WARN_ON(!list_empty(&fc->devices));
 	idr_for_each(&fc->passthrough_req, free_fuse_passthrough, NULL);
 	idr_destroy(&fc->passthrough_req);
+#ifdef CONFIG_FUSE_BPF
+	if (fc->root_bpf)
+		bpf_prog_put(fc->root_bpf);
+#endif
 	kfree_rcu(fc, rcu);
 }
 
@@ -1243,6 +1266,23 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	root_dentry = d_make_root(root);
 	if (!root_dentry)
 		goto err_dev_free;
+
+#ifdef CONFIG_FUSE_BPF
+	if (d.root_bpf_fd_present) {
+		struct bpf_prog *prog;
+		struct file *bpf_file = fget(d.root_bpf_fd);
+		if (bpf_file && bpf_file->f_op == &bpf_prog_fops) {
+			prog = bpf_file->private_data;
+			if (prog->type == BPF_PROG_TYPE_FUSE) {
+				bpf_prog_inc(prog);
+				fc->root_bpf = prog;
+				get_fuse_inode(root)->bpf = prog;
+			}
+		}
+		if (bpf_file)
+			fput(bpf_file);
+	}
+#endif
 	/* only now - we want root dentry with NULL ->d_op */
 	sb->s_d_op = &fuse_dentry_operations;
 
