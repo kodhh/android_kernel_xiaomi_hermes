@@ -2008,9 +2008,13 @@ static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 
 #ifdef CONFIG_FUSE_BPF
 	{
-		struct fuse_file *ff = file->private_data;
-		if (ff->backing_file)
-			return flock_lock_file_wait(ff->backing_file, fl);
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
+			fuse_file_flock_initialize, fuse_file_flock_backing,
+			fuse_file_flock_finalize,
+			file, cmd, fl);
+		if (fer.ret)
+			return fer.result ? PTR_ERR(fer.result) : 0;
 	}
 #endif
 

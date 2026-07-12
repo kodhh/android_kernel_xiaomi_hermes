@@ -1887,6 +1887,23 @@ static void free_link(char *link)
 
 static void *fuse_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct inode *inode = dentry->d_inode;
+		const char *out = NULL;
+		struct fuse_err_ret fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
+			fuse_get_link_initialize, fuse_get_link_backing,
+			fuse_get_link_finalize,
+			inode, dentry, NULL, &out);
+		if (fer.ret) {
+			if (IS_ERR(fer.result))
+				nd_set_link(nd, ERR_CAST(fer.result));
+			else
+				nd_set_link(nd, (char *)out);
+			return NULL;
+		}
+	}
+#endif
 	nd_set_link(nd, read_link(dentry));
 	return NULL;
 }

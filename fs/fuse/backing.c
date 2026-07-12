@@ -2275,3 +2275,38 @@ void *fuse_access_finalize(struct fuse_bpf_args *fa,
 {
 	return NULL;
 }
+
+/*
+ * Flock
+ */
+int fuse_file_flock_initialize(struct fuse_bpf_args *fa,
+			       struct fuse_dummy_io *dummy,
+			       struct file *file, int cmd,
+			       struct file_lock *fl)
+{
+	/* No FUSE opcode for flock - handled entirely by backing fs */
+	fa->opcode = 0;
+	fa->in_numargs = 0;
+	fa->out_numargs = 0;
+
+	return 0;
+}
+
+int fuse_file_flock_backing(struct fuse_bpf_args *fa,
+			    struct file *file, int cmd,
+			    struct file_lock *fl)
+{
+	struct fuse_file *ff = file->private_data;
+
+	if (!ff->backing_file)
+		return -EBADF;
+
+	return flock_lock_file_wait(ff->backing_file, fl);
+}
+
+void *fuse_file_flock_finalize(struct fuse_bpf_args *fa,
+			       struct file *file, int cmd,
+			       struct file_lock *fl)
+{
+	return NULL;
+}

@@ -1612,6 +1612,17 @@ int fuse_access_initialize(struct fuse_bpf_args *fa, struct fuse_access_in *fai,
 			   struct inode *inode, int mask);
 int fuse_access_backing(struct fuse_bpf_args *fa, struct inode *inode, int mask);
 void *fuse_access_finalize(struct fuse_bpf_args *fa, struct inode *inode, int mask);
+
+int fuse_file_flock_initialize(struct fuse_bpf_args *fa,
+			       struct fuse_dummy_io *dummy,
+			       struct file *file, int cmd,
+			       struct file_lock *fl);
+int fuse_file_flock_backing(struct fuse_bpf_args *fa,
+			    struct file *file, int cmd,
+			    struct file_lock *fl);
+void *fuse_file_flock_finalize(struct fuse_bpf_args *fa,
+			       struct file *file, int cmd,
+			       struct file_lock *fl);
 #endif /* CONFIG_FUSE_BPF */
 
 struct posix_acl *fuse_get_acl(struct inode *inode, int type);

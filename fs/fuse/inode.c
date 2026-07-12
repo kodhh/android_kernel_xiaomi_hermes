@@ -1313,6 +1313,9 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	/* root dentry uses fuse_root_dentry_operations (no revalidate) */
 	sb->s_d_op = &fuse_dentry_operations;
 
+	if (!sb->s_xattr)
+		sb->s_xattr = fuse_acl_xattr_handlers;
+
 	init_req = fuse_request_alloc(0);
 	if (!init_req)
 		goto err_put_root;
