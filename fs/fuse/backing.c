@@ -381,26 +381,6 @@ int fuse_release_initialize(struct fuse_bpf_args *fa,
 	return 0;
 }
 
-int fuse_releasedir_initialize(struct fuse_bpf_args *fa,
-				struct fuse_release_in *fri,
-				struct inode *inode, struct file *file)
-{
-	struct fuse_file *ff = file->private_data;
-
-	fa->opcode = FUSE_RELEASEDIR;
-	fa->nodeid = ff->nodeid;
-	fa->in_args[0].size = sizeof(*fri);
-	fa->in_args[0].value = fri;
-	fa->in_numargs = 1;
-	*fri = (struct fuse_release_in) {
-		.fh = ff->fh,
-		.flags = file->f_flags,
-	};
-	fa->out_numargs = 0;
-
-	return 0;
-}
-
 int fuse_release_backing(struct fuse_bpf_args *fa,
 			 struct inode *inode, struct file *file)
 {
@@ -571,58 +551,6 @@ void *fuse_copy_file_range_finalize(struct fuse_bpf_args *fa,
 /*
  * Clone File Range
  */
-int fuse_clone_file_range_initialize(struct fuse_bpf_args *fa,
-				     struct fuse_clone_file_range_io *fcf,
-				     struct file *file_in, loff_t pos_in,
-				     struct file *file_out, loff_t pos_out,
-				     u64 len)
-{
-	struct fuse_file *ff_in = file_in->private_data;
-
-	fa->opcode = FUSE_COPY_FILE_RANGE;
-	fa->nodeid = ff_in->nodeid;
-	fa->in_args[0].size = sizeof(fcf->fci);
-	fa->in_args[0].value = &fcf->fci;
-	fa->in_numargs = 1;
-	fcf->fci = (struct fuse_copy_file_range_in) {
-		.fh_in = ff_in->fh,
-		.off_in = pos_in,
-		.nodeid_out = get_node_id(file_out->f_path.dentry->d_inode),
-		.fh_out = ((struct fuse_file *)file_out->private_data)->fh,
-		.off_out = pos_out,
-		.len = len,
-		.flags = 0,
-	};
-	fa->out_numargs = 0;
-
-	return 0;
-}
-
-int fuse_clone_file_range_backing(struct fuse_bpf_args *fa,
-				  struct file *file_in, loff_t pos_in,
-				  struct file *file_out, loff_t pos_out,
-				  u64 len)
-{
-	struct fuse_file *ff_in = file_in->private_data;
-	struct fuse_file *ff_out = file_out->private_data;
-	struct file *backing_in = ff_in->backing_file;
-	struct file *backing_out = ff_out->backing_file;
-
-	if (!backing_in || !backing_out)
-		return -ENOTCONN;
-
-	return do_clone_file_range(backing_in, pos_in, backing_out, pos_out,
-				   len);
-}
-
-void *fuse_clone_file_range_finalize(struct fuse_bpf_args *fa,
-				     struct file *file_in, loff_t pos_in,
-				     struct file *file_out, loff_t pos_out,
-				     u64 len)
-{
-	return NULL;
-}
-
 /*
  * Fsync
  */
@@ -2277,36 +2205,35 @@ void *fuse_access_finalize(struct fuse_bpf_args *fa,
 }
 
 /*
- * Flock
+ * Backing ioctl
  */
-int fuse_file_flock_initialize(struct fuse_bpf_args *fa,
-			       struct fuse_dummy_io *dummy,
-			       struct file *file, int cmd,
-			       struct file_lock *fl)
-{
-	/* No FUSE opcode for flock - handled entirely by backing fs */
-	fa->opcode = 0;
-	fa->in_numargs = 0;
-	fa->out_numargs = 0;
-
-	return 0;
-}
-
-int fuse_file_flock_backing(struct fuse_bpf_args *fa,
-			    struct file *file, int cmd,
-			    struct file_lock *fl)
+long fuse_backing_ioctl(struct file *file, unsigned int command,
+			unsigned long arg, int flags)
 {
 	struct fuse_file *ff = file->private_data;
+	long ret;
 
-	if (!ff->backing_file)
-		return -EBADF;
+	if (flags & FUSE_IOCTL_COMPAT)
+		ret = -ENOTTY;
+	else
+		ret = do_vfs_ioctl(ff->backing_file, -1, command, arg);
 
-	return flock_lock_file_wait(ff->backing_file, fl);
+	return ret;
 }
 
-void *fuse_file_flock_finalize(struct fuse_bpf_args *fa,
-			       struct file *file, int cmd,
-			       struct file_lock *fl)
+/*
+ * Flock
+ */
+int fuse_file_flock_backing(struct file *file, int cmd, struct file_lock *fl)
 {
-	return NULL;
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = ff->backing_file;
+	int error;
+
+	fl->fl_file = backing_file;
+	if (backing_file->f_op->flock)
+		error = backing_file->f_op->flock(backing_file, cmd, fl);
+	else
+		error = flock_lock_file_wait(backing_file, fl);
+	return error;
 }

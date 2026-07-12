@@ -418,23 +418,31 @@ u64 fuse_lock_owner_id(struct fuse_conn *fc, fl_owner_t id)
  */
 static bool fuse_page_is_writeback(struct inode *inode, pgoff_t index)
 {
-	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_req *req;
 	bool found = false;
 
-	spin_lock(&fc->lock);
-	list_for_each_entry(req, &fi->writepages, writepages_entry) {
-		pgoff_t curr_index;
+	spin_lock(&fi->lock);
+	if (fi->writepages.rb_node) {
+		struct rb_node *n = fi->writepages.rb_node;
 
-		BUG_ON(req->inode != inode);
-		curr_index = req->misc.write.in.offset >> PAGE_CACHE_SHIFT;
-		if (curr_index == index) {
-			found = true;
-			break;
+		while (n) {
+			pgoff_t curr_index;
+
+			req = rb_entry(n, struct fuse_req, writepages_entry);
+			BUG_ON(req->inode != inode);
+			curr_index = req->misc.write.in.offset >> PAGE_CACHE_SHIFT;
+			if (index < curr_index)
+				n = n->rb_left;
+			else if (index > curr_index)
+				n = n->rb_right;
+			else {
+				found = true;
+				break;
+			}
 		}
 	}
-	spin_unlock(&fc->lock);
+	spin_unlock(&fi->lock);
 
 	return found;
 }
@@ -1600,7 +1608,7 @@ static void fuse_writepage_finish(struct fuse_conn *fc, struct fuse_req *req)
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct backing_dev_info *bdi = inode->i_mapping->backing_dev_info;
 
-	list_del(&req->writepages_entry);
+	rb_erase(&req->writepages_entry, &fi->writepages);
 	dec_bdi_stat(bdi, BDI_WRITEBACK);
 	dec_zone_page_state(req->pages[0], NR_WRITEBACK_TEMP);
 	bdi_writeout_inc(bdi);
@@ -1749,7 +1757,26 @@ static int fuse_writepage_locked(struct page *page)
 	inc_zone_page_state(tmp_page, NR_WRITEBACK_TEMP);
 
 	spin_lock(&fc->lock);
-	list_add(&req->writepages_entry, &fi->writepages);
+	{
+		pgoff_t idx = req->misc.write.in.offset >> PAGE_CACHE_SHIFT;
+		struct rb_node **p = &fi->writepages.rb_node;
+		struct rb_node *parent = NULL;
+
+		while (*p) {
+			struct fuse_req *curr;
+
+			parent = *p;
+			curr = rb_entry(parent, struct fuse_req,
+					writepages_entry);
+			if (idx < (curr->misc.write.in.offset >>
+					PAGE_CACHE_SHIFT))
+				p = &(*p)->rb_left;
+			else
+				p = &(*p)->rb_right;
+		}
+		rb_link_node(&req->writepages_entry, parent, p);
+		rb_insert_color(&req->writepages_entry, &fi->writepages);
+	}
 	list_add_tail(&req->list, &fi->queued_writes);
 	fuse_flush_writepages(inode);
 	spin_unlock(&fc->lock);
@@ -2004,25 +2031,17 @@ static int fuse_file_flock(struct file *file, int cmd, struct file_lock *fl)
 {
 	struct inode *inode = file_inode(file);
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_file *ff = file->private_data;
 	int err;
 
 #ifdef CONFIG_FUSE_BPF
-	{
-		struct fuse_err_ret fer;
-		fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
-			fuse_file_flock_initialize, fuse_file_flock_backing,
-			fuse_file_flock_finalize,
-			file, cmd, fl);
-		if (fer.ret)
-			return fer.result ? PTR_ERR(fer.result) : 0;
-	}
+	if (ff->backing_file)
+		return fuse_file_flock_backing(file, cmd, fl);
 #endif
 
 	if (fc->no_flock) {
 		err = flock_lock_file_wait(file, fl);
 	} else {
-		struct fuse_file *ff = file->private_data;
-
 		/* emulate flock with POSIX locks */
 		fl->fl_owner = (fl_owner_t) file;
 		ff->flock = true;
@@ -2957,28 +2976,6 @@ out:
 	return err;
 }
 
-static int fuse_clone_file_range(struct file *file_in, loff_t pos_in,
-				 struct file *file_out, loff_t pos_out,
-				 u64 len)
-{
-	struct inode *inode_out = file_out->f_path.dentry->d_inode;
-
-#ifdef CONFIG_FUSE_BPF
-	{
-		struct fuse_err_ret fer;
-
-		fer = fuse_bpf_backing(inode_out, struct fuse_clone_file_range_io,
-				       fuse_clone_file_range_initialize,
-				       fuse_clone_file_range_backing,
-				       fuse_clone_file_range_finalize,
-				       file_in, pos_in, file_out, pos_out, len);
-		if (fer.ret)
-			return PTR_ERR(fer.result);
-	}
-#endif
-	return -EOPNOTSUPP;
-}
-
 static const struct file_operations fuse_file_operations = {
 	.llseek		= fuse_file_llseek,
 	.read		= do_sync_read,
@@ -2993,12 +2990,12 @@ static const struct file_operations fuse_file_operations = {
 	.lock		= fuse_file_lock,
 	.flock		= fuse_file_flock,
 	.splice_read	= generic_file_splice_read,
+	.splice_write	= generic_file_splice_write,
 	.unlocked_ioctl	= fuse_file_ioctl,
 	.compat_ioctl	= fuse_file_compat_ioctl,
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,
 	.copy_file_range	= fuse_copy_file_range,
-	.clone_file_range	= fuse_clone_file_range,
 };
 
 static const struct file_operations fuse_direct_io_file_operations = {
@@ -3017,15 +3014,363 @@ static const struct file_operations fuse_direct_io_file_operations = {
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,
 	.copy_file_range	= fuse_copy_file_range,
-	.clone_file_range	= fuse_clone_file_range,
 	/* no splice_read */
 };
+
+/*
+ * Write back dirty data from page cache to the filesystem.
+ */
+static int fuse_do_readpage(struct file *file, struct page *page)
+{
+	struct fuse_io_priv io = { .async = 0, .file = file };
+	struct inode *inode = page->mapping->host;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_req *req;
+	size_t num_read;
+	loff_t pos = page_offset(page);
+	size_t count = PAGE_CACHE_SIZE;
+	u64 attr_ver;
+	int err;
+
+	fuse_wait_on_page_writeback(inode, page->index);
+
+	req = fuse_get_req(fc, 1);
+	if (IS_ERR(req))
+		return PTR_ERR(req);
+
+	attr_ver = fuse_get_attr_version(fc);
+
+	req->out.page_zeroing = 1;
+	req->out.argpages = 1;
+	req->num_pages = 1;
+	req->pages[0] = page;
+	req->page_descs[0].length = count;
+	num_read = fuse_send_read(req, &io, pos, count, NULL);
+	err = req->out.h.error;
+	fuse_put_request(fc, req);
+
+	if (!err) {
+		if (num_read < count)
+			fuse_read_update_size(inode, pos + num_read, attr_ver);
+
+		SetPageUptodate(page);
+	}
+
+	return err;
+}
+
+static int fuse_write_begin(struct file *file, struct address_space *mapping,
+		loff_t pos, unsigned len, unsigned flags,
+		struct page **pagep, void **fsdata)
+{
+	pgoff_t index = pos >> PAGE_SHIFT;
+	struct fuse_conn *fc = get_fuse_conn(file->f_path.dentry->d_inode);
+	struct page *page;
+	loff_t fsize;
+	int err = -ENOMEM;
+
+	WARN_ON(!fc->writeback_cache);
+
+	page = grab_cache_page_write_begin(mapping, index, flags);
+	if (!page)
+		goto error;
+
+	fuse_wait_on_page_writeback(mapping->host, page->index);
+
+	if (PageUptodate(page) || len == PAGE_SIZE)
+		goto success;
+	/*
+	 * Check if the start this page comes after the end of file, in which
+	 * case the readpage can be optimized away.
+	 */
+	fsize = i_size_read(mapping->host);
+	if (fsize <= (pos & PAGE_MASK)) {
+		size_t off = pos & ~PAGE_MASK;
+		if (off)
+			zero_user_segment(page, 0, off);
+		goto success;
+	}
+	err = fuse_do_readpage(file, page);
+	if (err)
+		goto cleanup;
+success:
+	*pagep = page;
+	return 0;
+
+cleanup:
+	unlock_page(page);
+	put_page(page);
+error:
+	return err;
+}
+
+static int fuse_write_end(struct file *file, struct address_space *mapping,
+		loff_t pos, unsigned len, unsigned copied,
+		struct page *page, void *fsdata)
+{
+	struct inode *inode = page->mapping->host;
+
+	if (!copied)
+		goto unlock;
+
+	if (!PageUptodate(page)) {
+		size_t endoff = (pos + copied) & ~PAGE_MASK;
+		if (endoff)
+			zero_user_segment(page, endoff, PAGE_SIZE);
+		SetPageUptodate(page);
+	}
+
+	fuse_write_update_size(inode, pos + copied);
+	set_page_dirty(page);
+
+unlock:
+	unlock_page(page);
+	put_page(page);
+
+	return copied;
+}
+
+struct fuse_fill_wb_data {
+	struct fuse_req *req;
+	struct fuse_file *ff;
+	struct inode *inode;
+	struct page **orig_pages;
+};
+
+static void fuse_writepages_send(struct fuse_fill_wb_data *data)
+{
+	struct fuse_req *req = data->req;
+	struct inode *inode = data->inode;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
+	int num_pages = req->num_pages;
+	int i;
+
+	req->ff = fuse_file_get(data->ff);
+	spin_lock(&fc->lock);
+	list_add_tail(&req->list, &fi->queued_writes);
+	fuse_flush_writepages(inode);
+	spin_unlock(&fc->lock);
+
+	for (i = 0; i < num_pages; i++)
+		end_page_writeback(data->orig_pages[i]);
+}
+
+static bool fuse_writepage_in_flight(struct fuse_req *new_req, struct page *page)
+{
+	struct backing_dev_info *bdi = new_req->inode->i_mapping->backing_dev_info;
+	struct fuse_conn *fc = get_fuse_conn(new_req->inode);
+	struct fuse_inode *fi = get_fuse_inode(new_req->inode);
+	struct fuse_req *tmp;
+	struct fuse_req *old_req;
+	pgoff_t curr_index;
+	struct rb_node **p;
+	struct rb_node *parent = NULL;
+	bool found = false;
+
+	curr_index = page->index;
+
+	spin_lock(&fc->lock);
+	p = &fi->writepages.rb_node;
+	while (*p) {
+		parent = *p;
+		old_req = rb_entry(parent, struct fuse_req,
+				   writepages_entry);
+		if (old_req->misc.write.in.offset >> PAGE_CACHE_SHIFT
+		    <= curr_index &&
+		    curr_index < (old_req->misc.write.in.offset >>
+				  PAGE_CACHE_SHIFT) + old_req->num_pages) {
+			found = true;
+			break;
+		}
+		if (curr_index <
+		    (old_req->misc.write.in.offset >> PAGE_CACHE_SHIFT))
+			p = &(*p)->rb_left;
+		else
+			p = &(*p)->rb_right;
+	}
+	if (!found) {
+		rb_link_node(&new_req->writepages_entry, parent, p);
+		rb_insert_color(&new_req->writepages_entry, &fi->writepages);
+		goto out_unlock;
+	}
+
+	new_req->num_pages = 1;
+	for (tmp = old_req; tmp != NULL; tmp = tmp->misc.write.next) {
+		curr_index = tmp->misc.write.in.offset >> PAGE_CACHE_SHIFT;
+		if (tmp->num_pages == 1 && curr_index == page->index)
+			old_req = tmp;
+	}
+
+	if (old_req->num_pages == 1 && old_req->state == FUSE_REQ_PENDING) {
+		copy_highpage(old_req->pages[0], page);
+		spin_unlock(&fc->lock);
+
+		dec_bdi_stat(bdi, BDI_WRITEBACK);
+		dec_zone_page_state(new_req->pages[0], NR_WRITEBACK_TEMP);
+		bdi_writeout_inc(bdi);
+		fuse_writepage_free(fc, new_req);
+		fuse_request_free(new_req);
+		goto out;
+	} else {
+		new_req->misc.write.next = old_req->misc.write.next;
+		old_req->misc.write.next = new_req;
+	}
+out_unlock:
+	spin_unlock(&fc->lock);
+out:
+	return found;
+}
+
+static int fuse_writepages_fill(struct page *page,
+		struct writeback_control *wbc, void *_data)
+{
+	struct fuse_fill_wb_data *data = _data;
+	struct fuse_req *req = data->req;
+	struct inode *inode = data->inode;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct page *tmp_page;
+	bool is_writeback;
+	int err;
+
+	if (!data->ff) {
+		err = -EIO;
+		data->ff = __fuse_write_file_get(fc, get_fuse_inode(inode));
+		if (!data->ff)
+			goto out_unlock;
+	}
+
+	is_writeback = fuse_page_is_writeback(inode, page->index);
+
+	if (req && req->num_pages &&
+	    (is_writeback || req->num_pages == FUSE_MAX_PAGES_PER_REQ ||
+	     (req->num_pages + 1) * PAGE_SIZE > fc->max_write ||
+	     data->orig_pages[req->num_pages - 1]->index + 1 != page->index)) {
+		fuse_writepages_send(data);
+		data->req = NULL;
+	}
+	err = -ENOMEM;
+	tmp_page = alloc_page(GFP_NOFS | __GFP_HIGHMEM);
+	if (!tmp_page)
+		goto out_unlock;
+
+	if (data->req == NULL) {
+		struct fuse_inode *fi = get_fuse_inode(inode);
+
+		err = -ENOMEM;
+		req = fuse_request_alloc_nofs(FUSE_MAX_PAGES_PER_REQ);
+		if (!req) {
+			__free_page(tmp_page);
+			goto out_unlock;
+		}
+
+		fuse_write_fill(req, data->ff, page_offset(page), 0);
+		req->misc.write.in.write_flags |= FUSE_WRITE_CACHE;
+		req->misc.write.next = NULL;
+		req->in.argpages = 1;
+		req->background = 1;
+		req->num_pages = 0;
+		req->end = fuse_writepage_end;
+		req->inode = inode;
+
+		spin_lock(&fc->lock);
+		{
+			pgoff_t idx = page->index;
+			struct rb_node **p = &fi->writepages.rb_node;
+			struct rb_node *parent = NULL;
+
+			while (*p) {
+				struct fuse_req *curr;
+
+				parent = *p;
+				curr = rb_entry(parent, struct fuse_req,
+						writepages_entry);
+				if (idx < (curr->misc.write.in.offset >>
+						PAGE_CACHE_SHIFT))
+					p = &(*p)->rb_left;
+				else
+					p = &(*p)->rb_right;
+			}
+			rb_link_node(&req->writepages_entry, parent, p);
+			rb_insert_color(&req->writepages_entry,
+					&fi->writepages);
+		}
+		spin_unlock(&fc->lock);
+
+		data->req = req;
+	}
+	set_page_writeback(page);
+
+	copy_highpage(tmp_page, page);
+	req->pages[req->num_pages] = tmp_page;
+	req->page_descs[req->num_pages].offset = 0;
+	req->page_descs[req->num_pages].length = PAGE_SIZE;
+
+	inc_bdi_stat(inode->i_mapping->backing_dev_info, BDI_WRITEBACK);
+	inc_zone_page_state(tmp_page, NR_WRITEBACK_TEMP);
+
+	err = 0;
+	if (is_writeback && fuse_writepage_in_flight(req, page)) {
+		end_page_writeback(page);
+		data->req = NULL;
+		goto out_unlock;
+	}
+	data->orig_pages[req->num_pages] = page;
+
+	spin_lock(&fc->lock);
+	req->num_pages++;
+	spin_unlock(&fc->lock);
+
+out_unlock:
+	unlock_page(page);
+
+	return err;
+}
+
+static int fuse_writepages(struct address_space *mapping,
+			   struct writeback_control *wbc)
+{
+	struct inode *inode = mapping->host;
+	struct fuse_fill_wb_data data;
+	int err;
+
+	err = -EIO;
+	if (is_bad_inode(inode))
+		goto out;
+
+	data.inode = inode;
+	data.req = NULL;
+	data.ff = NULL;
+
+	err = -ENOMEM;
+	data.orig_pages = kcalloc(FUSE_MAX_PAGES_PER_REQ,
+				  sizeof(struct page *),
+				  GFP_NOFS);
+	if (!data.orig_pages)
+		goto out;
+
+	err = write_cache_pages(mapping, wbc, fuse_writepages_fill, &data);
+	if (data.req) {
+		WARN_ON(!data.req->num_pages);
+		fuse_writepages_send(&data);
+		err = 0;
+	}
+	if (data.ff)
+		fuse_file_put(data.ff, false);
+
+	kfree(data.orig_pages);
+out:
+	return err;
+}
 
 static const struct address_space_operations fuse_file_aops  = {
 	.readpage	= fuse_readpage,
 	.writepage	= fuse_writepage,
+	.writepages	= fuse_writepages,
 	.launder_page	= fuse_launder_page,
 	.readpages	= fuse_readpages,
+	.write_begin	= fuse_write_begin,
+	.write_end	= fuse_write_end,
 	.set_page_dirty	= __set_page_dirty_nobuffers,
 	.bmap		= fuse_bmap,
 	.direct_IO	= fuse_direct_IO,
