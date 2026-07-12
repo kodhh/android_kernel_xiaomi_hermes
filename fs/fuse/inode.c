@@ -1278,6 +1278,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_fs_info = fc;
 
 	err = -ENOMEM;
+	sb->s_d_op = &fuse_root_dentry_operations;
 	root = fuse_get_root_inode(sb, d.rootmode);
 	root_dentry = d_make_root(root);
 	if (!root_dentry)
@@ -1299,7 +1300,7 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 			fput(bpf_file);
 	}
 #endif
-	/* only now - we want root dentry with NULL ->d_op */
+	/* root dentry uses fuse_root_dentry_operations (no revalidate) */
 	sb->s_d_op = &fuse_dentry_operations;
 
 	init_req = fuse_request_alloc(0);
