@@ -14,6 +14,7 @@
 #include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/slab.h>
+#include <linux/posix_acl.h>
 
 static bool fuse_use_readdirplus(struct inode *dir, struct dir_context *ctx)
 {
@@ -311,6 +312,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 		    (outarg.attr.mode ^ inode->i_mode) & S_IFMT)
 			goto invalid;
 
+		forget_all_cached_acls(inode);
 		fuse_change_attributes(inode, &outarg.attr,
 				       entry_attr_timeout(&outarg),
 				       attr_version);
@@ -1323,6 +1325,7 @@ int fuse_update_attributes(struct inode *inode, struct kstat *stat,
 
 	if (time_before64(fi->i_time, get_jiffies_64())) {
 		r = true;
+		forget_all_cached_acls(inode);
 		err = fuse_do_getattr(inode, stat, file);
 	} else {
 		r = false;
@@ -1485,6 +1488,7 @@ static int fuse_perm_getattr(struct inode *inode, int mask)
 	if (mask & MAY_NOT_BLOCK)
 		return -ECHILD;
 
+	forget_all_cached_acls(inode);
 	return fuse_do_getattr(inode, NULL, NULL);
 }
 
@@ -1656,6 +1660,7 @@ static int fuse_direntplus_link(struct file *file,
 			fi->nlookup++;
 			spin_unlock(&fc->lock);
 
+			forget_all_cached_acls(inode);
 			fuse_change_attributes(inode, &o->attr,
 					       entry_attr_timeout(o),
 					       attr_version);
@@ -2241,6 +2246,7 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 {
 	struct inode *inode;
 	struct file *file;
+	struct fuse_conn *fc;
 	int ret;
 #ifdef CONFIG_FUSE_BPF
 	{
@@ -2253,6 +2259,7 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 	}
 #endif
 	inode = entry->d_inode;
+	fc = get_fuse_conn(inode);
 	file = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
 
 	if (!fuse_allow_current_process(get_fuse_conn(inode)))
@@ -2272,14 +2279,16 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 			return ret;
 
 		attr->ia_mode = inode->i_mode;
-		kill = should_remove_suid(entry);
-		if (kill & ATTR_KILL_SUID) {
-			attr->ia_valid |= ATTR_MODE;
-			attr->ia_mode &= ~S_ISUID;
-		}
-		if (kill & ATTR_KILL_SGID) {
-			attr->ia_valid |= ATTR_MODE;
-			attr->ia_mode &= ~S_ISGID;
+		if (!fc->handle_killpriv) {
+			kill = should_remove_suid(entry);
+			if (kill & ATTR_KILL_SUID) {
+				attr->ia_valid |= ATTR_MODE;
+				attr->ia_mode &= ~S_ISUID;
+			}
+			if (kill & ATTR_KILL_SGID) {
+				attr->ia_valid |= ATTR_MODE;
+				attr->ia_mode &= ~S_ISGID;
+			}
 		}
 	}
 	if (!attr->ia_valid)
@@ -2287,8 +2296,13 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 
 	ret = fuse_do_setattr(entry->d_inode, attr, file);
 	if (!ret) {
-		/* Directory mode changed, may need to revalidate access */
-		if (entry->d_inode && S_ISDIR(entry->d_inode->i_mode) && (attr->ia_valid & ATTR_MODE))
+		struct inode *inode = entry->d_inode;
+		struct fuse_conn *fc = get_fuse_conn(inode);
+
+		if (fc->posix_acl)
+			forget_all_cached_acls(inode);
+
+		if (S_ISDIR(inode->i_mode) && (attr->ia_valid & ATTR_MODE))
 			fuse_invalidate_entry_cache(entry);
 	}
 	return ret;
@@ -2549,6 +2563,7 @@ static const struct inode_operations fuse_dir_inode_operations = {
 	.getxattr	= fuse_getxattr,
 	.listxattr	= fuse_listxattr,
 	.removexattr	= fuse_removexattr,
+	.get_acl	= fuse_get_acl,
 };
 
 static const struct file_operations fuse_dir_operations = {
@@ -2570,6 +2585,7 @@ static const struct inode_operations fuse_common_inode_operations = {
 	.getxattr	= fuse_getxattr,
 	.listxattr	= fuse_listxattr,
 	.removexattr	= fuse_removexattr,
+	.get_acl	= fuse_get_acl,
 };
 
 static const struct inode_operations fuse_symlink_inode_operations = {

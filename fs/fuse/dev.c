@@ -1225,8 +1225,10 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 
 	request_wait(fc);
 	err = -ENODEV;
-	if (!fc->connected)
+	if (!fc->connected) {
+		err = fc->abort_err ? -ECONNABORTED : -ENODEV;
 		goto err_unlock;
+	}
 	err = -ERESTARTSYS;
 	if (!request_pending(fc))
 		goto err_unlock;
@@ -1271,7 +1273,7 @@ static ssize_t fuse_dev_do_read(struct fuse_conn *fc, struct file *file,
 	req->locked = 0;
 	if (req->aborted) {
 		request_end(fc, req);
-		return -ENODEV;
+		return fc->abort_err ? -ECONNABORTED : -ENODEV;
 	}
 	if (err) {
 		req->out.h.error = -EIO;

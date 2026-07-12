@@ -17,6 +17,7 @@
 #include <linux/mount.h>
 #include <linux/cred.h>
 #include <linux/fs_stack.h>
+#include <linux/xattr.h>
 #include <linux/wait.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -614,6 +615,18 @@ struct fuse_conn {
 
 	/** Is fallocate not implemented by fs? */
 	unsigned no_fallocate:1;
+
+	/** Does the filesystem support copy_file_range? */
+	unsigned no_copy_file_range:1;
+
+	/** fs handles killing suid/sgid/cap on write/chown/trunc */
+	unsigned handle_killpriv:1;
+
+	/** filesystem supports posix acls */
+	unsigned posix_acl:1;
+
+	/** reading the device after abort returns ECONNABORTED */
+	unsigned abort_err:1;
 
 	/** Is rename with flags implemented by fs? */
 	unsigned no_rename2:1;
@@ -1347,6 +1360,24 @@ void *fuse_copy_file_range_finalize(struct fuse_bpf_args *fa,
 				    struct file *file_out, loff_t pos_out,
 				    size_t len, unsigned int flags);
 
+struct fuse_clone_file_range_io {
+	struct fuse_copy_file_range_in fci;
+};
+
+int fuse_clone_file_range_initialize(struct fuse_bpf_args *fa,
+				     struct fuse_clone_file_range_io *fcf,
+				     struct file *file_in, loff_t pos_in,
+				     struct file *file_out, loff_t pos_out,
+				     u64 len);
+int fuse_clone_file_range_backing(struct fuse_bpf_args *fa,
+				  struct file *file_in, loff_t pos_in,
+				  struct file *file_out, loff_t pos_out,
+				  u64 len);
+void *fuse_clone_file_range_finalize(struct fuse_bpf_args *fa,
+				     struct file *file_in, loff_t pos_in,
+				     struct file *file_out, loff_t pos_out,
+				     u64 len);
+
 int fuse_fsync_initialize(struct fuse_bpf_args *fa, struct fuse_fsync_in *ffi,
 		   struct file *file, loff_t start, loff_t end, int datasync);
 int fuse_fsync_backing(struct fuse_bpf_args *fa,
@@ -1554,5 +1585,9 @@ int fuse_access_initialize(struct fuse_bpf_args *fa, struct fuse_access_in *fai,
 int fuse_access_backing(struct fuse_bpf_args *fa, struct inode *inode, int mask);
 void *fuse_access_finalize(struct fuse_bpf_args *fa, struct inode *inode, int mask);
 #endif /* CONFIG_FUSE_BPF */
+
+struct posix_acl *fuse_get_acl(struct inode *inode, int type);
+int fuse_set_acl(struct inode *inode, struct posix_acl *acl, int type);
+extern const struct xattr_handler *fuse_acl_xattr_handlers[];
 
 #endif /* _FS_FUSE_I_H */

@@ -546,13 +546,79 @@ int fuse_copy_file_range_backing(struct fuse_bpf_args *fa,
 				 struct file *file_out, loff_t pos_out,
 				 size_t len, unsigned int flags)
 {
-	return -EOPNOTSUPP;
+	struct fuse_file *ff_in = file_in->private_data;
+	struct fuse_file *ff_out = file_out->private_data;
+	struct file *backing_in = ff_in->backing_file;
+	struct file *backing_out = ff_out->backing_file;
+	ssize_t ret;
+
+	if (!backing_in || !backing_out)
+		return -ENOTCONN;
+
+	ret = generic_copy_file_range(backing_in, pos_in, backing_out, pos_out,
+				      len, flags);
+	return ret;
 }
 
 void *fuse_copy_file_range_finalize(struct fuse_bpf_args *fa,
 				    struct file *file_in, loff_t pos_in,
 				    struct file *file_out, loff_t pos_out,
 				    size_t len, unsigned int flags)
+{
+	return NULL;
+}
+
+/*
+ * Clone File Range
+ */
+int fuse_clone_file_range_initialize(struct fuse_bpf_args *fa,
+				     struct fuse_clone_file_range_io *fcf,
+				     struct file *file_in, loff_t pos_in,
+				     struct file *file_out, loff_t pos_out,
+				     u64 len)
+{
+	struct fuse_file *ff_in = file_in->private_data;
+
+	fa->opcode = FUSE_COPY_FILE_RANGE;
+	fa->nodeid = ff_in->nodeid;
+	fa->in_args[0].size = sizeof(fcf->fci);
+	fa->in_args[0].value = &fcf->fci;
+	fa->in_numargs = 1;
+	fcf->fci = (struct fuse_copy_file_range_in) {
+		.fh_in = ff_in->fh,
+		.off_in = pos_in,
+		.nodeid_out = get_node_id(file_out->f_path.dentry->d_inode),
+		.fh_out = ((struct fuse_file *)file_out->private_data)->fh,
+		.off_out = pos_out,
+		.len = len,
+		.flags = 0,
+	};
+	fa->out_numargs = 0;
+
+	return 0;
+}
+
+int fuse_clone_file_range_backing(struct fuse_bpf_args *fa,
+				  struct file *file_in, loff_t pos_in,
+				  struct file *file_out, loff_t pos_out,
+				  u64 len)
+{
+	struct fuse_file *ff_in = file_in->private_data;
+	struct fuse_file *ff_out = file_out->private_data;
+	struct file *backing_in = ff_in->backing_file;
+	struct file *backing_out = ff_out->backing_file;
+
+	if (!backing_in || !backing_out)
+		return -ENOTCONN;
+
+	return do_clone_file_range(backing_in, pos_in, backing_out, pos_out,
+				   len);
+}
+
+void *fuse_clone_file_range_finalize(struct fuse_bpf_args *fa,
+				     struct file *file_in, loff_t pos_in,
+				     struct file *file_out, loff_t pos_out,
+				     u64 len)
 {
 	return NULL;
 }

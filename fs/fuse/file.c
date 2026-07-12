@@ -2081,6 +2081,52 @@ static loff_t fuse_file_llseek(struct file *file, loff_t offset, int whence)
 	if (whence == SEEK_CUR || whence == SEEK_SET)
 		return generic_file_llseek(file, offset, whence);
 
+	/* SEEK_HOLE and SEEK_DATA need FUSE_LSEEK passthrough to daemon */
+	if (whence == SEEK_HOLE || whence == SEEK_DATA) {
+		struct fuse_file *ff = file->private_data;
+		struct fuse_conn *fc = ff->fc;
+		struct fuse_req *req;
+		struct fuse_lseek_in inarg = {
+			.fh = ff->fh,
+			.offset = offset,
+			.whence = whence,
+		};
+		struct fuse_lseek_out outarg;
+
+		if (fc->conn_error)
+			return -ECONNABORTED;
+
+		mutex_lock(&inode->i_mutex);
+		retval = fuse_update_attributes(inode, NULL, file, NULL);
+		if (retval) {
+			mutex_unlock(&inode->i_mutex);
+			return retval;
+		}
+
+		req = fuse_get_req_nopages(fc);
+		if (IS_ERR(req)) {
+			mutex_unlock(&inode->i_mutex);
+			return PTR_ERR(req);
+		}
+
+		req->in.h.opcode = FUSE_LSEEK;
+		req->in.h.nodeid = ff->nodeid;
+		req->in.numargs = 1;
+		req->in.args[0].size = sizeof(inarg);
+		req->in.args[0].value = &inarg;
+		req->out.numargs = 1;
+		req->out.args[0].size = sizeof(outarg);
+		req->out.args[0].value = &outarg;
+		fuse_request_send(fc, req);
+		retval = req->out.h.error;
+		if (!retval)
+			retval = outarg.offset;
+		fuse_put_request(fc, req);
+		mutex_unlock(&inode->i_mutex);
+
+		return retval;
+	}
+
 	mutex_lock(&inode->i_mutex);
 	retval = fuse_update_attributes(inode, NULL, file, NULL);
 	if (!retval)
@@ -2806,6 +2852,124 @@ out:
 	return err;
 }
 
+static ssize_t fuse_copy_file_range(struct file *file_in, loff_t pos_in,
+				    struct file *file_out, loff_t pos_out,
+				    size_t len, unsigned int flags)
+{
+	struct fuse_file *ff_in = file_in->private_data;
+	struct fuse_file *ff_out = file_out->private_data;
+	struct inode *inode_out = file_out->f_path.dentry->d_inode;
+	struct fuse_inode *fi_out = get_fuse_inode(inode_out);
+	struct fuse_conn *fc = ff_in->fc;
+	struct fuse_req *req;
+	struct fuse_copy_file_range_in inarg = {
+		.fh_in = ff_in->fh,
+		.off_in = pos_in,
+		.nodeid_out = ff_out->nodeid,
+		.fh_out = ff_out->fh,
+		.off_out = pos_out,
+		.len = len,
+		.flags = flags
+	};
+	struct fuse_write_out outarg;
+	ssize_t err;
+	bool is_unstable = (!fc->writeback_cache) &&
+		((pos_out + len) > inode_out->i_size);
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode_out, struct fuse_copy_file_range_io,
+				       fuse_copy_file_range_initialize,
+				       fuse_copy_file_range_backing,
+				       fuse_copy_file_range_finalize,
+				       file_in, pos_in, file_out, pos_out,
+				       len, flags);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+	if (fc->no_copy_file_range)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&inode_out->i_mutex);
+
+	if (fc->writeback_cache) {
+		err = filemap_write_and_wait_range(inode_out->i_mapping,
+						   pos_out, pos_out + len);
+		if (err)
+			goto out;
+
+		fuse_sync_writes(inode_out);
+	}
+
+	if (is_unstable)
+		set_bit(FUSE_I_SIZE_UNSTABLE, &fi_out->state);
+
+	req = fuse_get_req_nopages(fc);
+	if (IS_ERR(req)) {
+		err = PTR_ERR(req);
+		goto out;
+	}
+
+	req->in.h.opcode = FUSE_COPY_FILE_RANGE;
+	req->in.h.nodeid = ff_in->nodeid;
+	req->in.numargs = 1;
+	req->in.args[0].size = sizeof(inarg);
+	req->in.args[0].value = &inarg;
+	req->out.numargs = 1;
+	req->out.args[0].size = sizeof(outarg);
+	req->out.args[0].value = &outarg;
+	fuse_request_send(fc, req);
+	err = req->out.h.error;
+	if (err == -ENOSYS) {
+		fc->no_copy_file_range = 1;
+		err = -EOPNOTSUPP;
+	}
+	fuse_put_request(fc, req);
+	if (err)
+		goto out;
+
+	if (fc->writeback_cache) {
+		fuse_write_update_size(inode_out, pos_out + outarg.size);
+		file_update_time(file_out);
+	}
+
+	fuse_invalidate_attr(inode_out);
+
+	err = outarg.size;
+out:
+	if (is_unstable)
+		clear_bit(FUSE_I_SIZE_UNSTABLE, &fi_out->state);
+
+	mutex_unlock(&inode_out->i_mutex);
+
+	return err;
+}
+
+static int fuse_clone_file_range(struct file *file_in, loff_t pos_in,
+				 struct file *file_out, loff_t pos_out,
+				 u64 len)
+{
+	struct inode *inode_out = file_out->f_path.dentry->d_inode;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+
+		fer = fuse_bpf_backing(inode_out, struct fuse_clone_file_range_io,
+				       fuse_clone_file_range_initialize,
+				       fuse_clone_file_range_backing,
+				       fuse_clone_file_range_finalize,
+				       file_in, pos_in, file_out, pos_out, len);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
+	return -EOPNOTSUPP;
+}
+
 static const struct file_operations fuse_file_operations = {
 	.llseek		= fuse_file_llseek,
 	.read		= do_sync_read,
@@ -2824,6 +2988,8 @@ static const struct file_operations fuse_file_operations = {
 	.compat_ioctl	= fuse_file_compat_ioctl,
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,
+	.copy_file_range	= fuse_copy_file_range,
+	.clone_file_range	= fuse_clone_file_range,
 };
 
 static const struct file_operations fuse_direct_io_file_operations = {
@@ -2841,6 +3007,8 @@ static const struct file_operations fuse_direct_io_file_operations = {
 	.compat_ioctl	= fuse_file_compat_ioctl,
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,
+	.copy_file_range	= fuse_copy_file_range,
+	.clone_file_range	= fuse_clone_file_range,
 	/* no splice_read */
 };
 
