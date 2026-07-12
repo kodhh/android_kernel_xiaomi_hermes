@@ -406,6 +406,7 @@ int fuse_flush_initialize(struct fuse_bpf_args *fa, struct fuse_flush_in *ffi,
 	fa->in_args[0].size = sizeof(*ffi);
 	fa->in_args[0].value = ffi;
 	fa->in_numargs = 1;
+	fa->flags |= FUSE_BPF_FORCE;
 	*ffi = (struct fuse_flush_in) {
 		.fh = ff->fh,
 	};
@@ -579,6 +580,7 @@ int fuse_fsync_initialize(struct fuse_bpf_args *fa, struct fuse_fsync_in *ffi,
 	fa->in_args[0].size = sizeof(*ffi);
 	fa->in_args[0].value = ffi;
 	fa->in_numargs = 1;
+	fa->flags |= FUSE_BPF_FORCE;
 	*ffi = (struct fuse_fsync_in) {
 		.fh = ff->fh,
 		.fsync_flags = datasync ? FUSE_FSYNC_FDATASYNC : 0,
@@ -617,9 +619,10 @@ int fuse_dir_fsync_initialize(struct fuse_bpf_args *fa,
 	fa->in_args[0].size = sizeof(*ffi);
 	fa->in_args[0].value = ffi;
 	fa->in_numargs = 1;
+	fa->flags |= FUSE_BPF_FORCE;
 	*ffi = (struct fuse_fsync_in) {
 		.fh = ff->fh,
-		.fsync_flags = datasync ? 1 : 0,
+		.fsync_flags = datasync ? FUSE_FSYNC_FDATASYNC : 0,
 	};
 	fa->out_numargs = 0;
 
@@ -1633,9 +1636,10 @@ static int fuse_rename_backing_common(struct fuse_bpf_args *fa,
 
 	if (!ret) {
 		if (target_inode)
-			fsstack_copy_attr_all(target_inode, target_inode);
-		fsstack_copy_attr_all(old_backing_dir_dentry->d_inode,
-				     old_backing_dir_dentry->d_inode);
+			fsstack_copy_attr_all(target_inode,
+				get_fuse_inode(target_inode)->backing_inode);
+		fsstack_copy_attr_all(d_inode(oldent),
+				     d_inode(old_backing_dentry));
 	}
 
 	unlock_rename(old_backing_dir_dentry, new_backing_dir_dentry);
@@ -1905,12 +1909,21 @@ int fuse_getattr_initialize(struct fuse_bpf_args *fa,
 	return 0;
 }
 
-static void fuse_stat_to_attr(struct kstat *stat, struct fuse_attr *attr)
+static void fuse_stat_to_attr(struct fuse_conn *fc, struct inode *inode,
+			      struct kstat *stat, struct fuse_attr *attr)
 {
 	unsigned int blkbits;
 
+	if (fc->writeback_cache && S_ISREG(inode->i_mode)) {
+		stat->size = i_size_read(inode);
+		stat->mtime.tv_sec = inode->i_mtime.tv_sec;
+		stat->mtime.tv_nsec = inode->i_mtime.tv_nsec;
+		stat->ctime.tv_sec = inode->i_ctime.tv_sec;
+		stat->ctime.tv_nsec = inode->i_ctime.tv_nsec;
+	}
+
 	attr->ino = stat->ino;
-	attr->mode = stat->mode;
+	attr->mode = (inode->i_mode & S_IFMT) | (stat->mode & 07777);
 	attr->nlink = stat->nlink;
 	attr->uid = from_kuid_munged(&init_user_ns, stat->uid);
 	attr->gid = from_kgid_munged(&init_user_ns, stat->gid);
@@ -1922,21 +1935,35 @@ static void fuse_stat_to_attr(struct kstat *stat, struct fuse_attr *attr)
 	attr->mtimensec = stat->mtime.tv_nsec;
 	attr->ctime = stat->ctime.tv_sec;
 	attr->ctimensec = stat->ctime.tv_nsec;
-	blkbits = 10;
-	attr->blksize = 1 << blkbits;
 	attr->blocks = stat->blocks;
+
+	if (stat->blksize != 0)
+		blkbits = ilog2(stat->blksize);
+	else
+		blkbits = inode->i_sb->s_blocksize_bits;
+	attr->blksize = 1 << blkbits;
 }
 
 int fuse_getattr_backing(struct fuse_bpf_args *fa,
 			const struct dentry *entry, struct kstat *stat,
 			u32 request_mask, unsigned int flags)
 {
+	struct fuse_attr_out *fao = fa->out_args[0].value;
+	struct fuse_conn *fc = get_fuse_conn(d_inode(entry));
 	struct path *backing_path = fuse_get_backing_path((struct dentry *)entry);
+	struct kstat tmp;
+	int err;
 
 	if (!backing_path)
 		return -ENOENT;
+	if (!stat)
+		stat = &tmp;
 
-	return vfs_getattr(backing_path, stat);
+	err = vfs_getattr(backing_path, stat);
+	if (!err)
+		fuse_stat_to_attr(fc, d_inode(entry), stat, &fao->attr);
+
+	return err;
 }
 
 void *fuse_getattr_finalize(struct fuse_bpf_args *fa,
@@ -1945,9 +1972,10 @@ void *fuse_getattr_finalize(struct fuse_bpf_args *fa,
 {
 	struct fuse_attr_out *outarg =
 		(struct fuse_attr_out *)fa->out_args[0].value;
+	struct fuse_conn *fc = get_fuse_conn(d_inode(entry));
 
 	if (!IS_ERR(stat))
-		fuse_stat_to_attr(stat, &outarg->attr);
+		fuse_stat_to_attr(fc, d_inode(entry), stat, &outarg->attr);
 
 	return NULL;
 }
@@ -1973,7 +2001,7 @@ int fuse_setattr_initialize(struct fuse_bpf_args *fa,
 	return 0;
 }
 
-static void fattr_to_iattr(struct fuse_setattr_in *fsi, struct iattr *iattr)
+static void fattr_to_iattr(const struct fuse_setattr_in *fsi, struct iattr *iattr)
 {
 	memset(iattr, 0, sizeof(*iattr));
 
@@ -1995,15 +2023,22 @@ static void fattr_to_iattr(struct fuse_setattr_in *fsi, struct iattr *iattr)
 	}
 	if (fsi->valid & FATTR_ATIME) {
 		iattr->ia_valid |= ATTR_ATIME;
-		iattr->ia_atime = (struct timespec) {
-			fsi->atime, fsi->atimensec
-		};
+		iattr->ia_atime.tv_sec = fsi->atime;
+		iattr->ia_atime.tv_nsec = fsi->atimensec;
+		if (!(fsi->valid & FATTR_ATIME_NOW))
+			iattr->ia_valid |= ATTR_ATIME_SET;
 	}
 	if (fsi->valid & FATTR_MTIME) {
 		iattr->ia_valid |= ATTR_MTIME;
-		iattr->ia_mtime = (struct timespec) {
-			fsi->mtime, fsi->mtimensec
-		};
+		iattr->ia_mtime.tv_sec = fsi->mtime;
+		iattr->ia_mtime.tv_nsec = fsi->mtimensec;
+		if (!(fsi->valid & FATTR_MTIME_NOW))
+			iattr->ia_valid |= ATTR_MTIME_SET;
+	}
+	if (fsi->valid & FATTR_CTIME) {
+		iattr->ia_valid |= ATTR_CTIME;
+		iattr->ia_ctime.tv_sec = fsi->ctime;
+		iattr->ia_ctime.tv_nsec = fsi->ctimensec;
 	}
 }
 
@@ -2011,8 +2046,7 @@ int fuse_setattr_backing(struct fuse_bpf_args *fa,
 			 struct dentry *dentry, struct iattr *attr,
 			 struct file *file)
 {
-	struct fuse_setattr_in *fsi =
-		(struct fuse_setattr_in *)fa->in_args[0].value;
+	const struct fuse_setattr_in *fsi = fa->in_args[0].value;
 	struct path *backing_path = fuse_get_backing_path(dentry);
 	struct iattr new_attr;
 	int ret;
@@ -2021,6 +2055,7 @@ int fuse_setattr_backing(struct fuse_bpf_args *fa,
 		return -ENOENT;
 
 	fattr_to_iattr(fsi, &new_attr);
+	new_attr.ia_valid = attr->ia_valid & ~ATTR_FILE;
 
 	mutex_lock(&backing_path->dentry->d_inode->i_mutex);
 	ret = notify_change(backing_path->dentry, &new_attr, NULL);

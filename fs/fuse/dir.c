@@ -45,7 +45,7 @@ static inline void fuse_dentry_settime(struct dentry *entry, u64 time)
 	entry->d_time = time;
 }
 
-static inline u64 fuse_dentry_time(struct dentry *entry)
+static inline u64 fuse_dentry_time(const struct dentry *entry)
 {
 	return entry->d_time;
 }
@@ -59,7 +59,7 @@ static void fuse_dentry_settime(struct dentry *entry, u64 time)
 	entry->d_fsdata = (void *) (unsigned long) (time >> 32);
 }
 
-static u64 fuse_dentry_time(struct dentry *entry)
+static u64 fuse_dentry_time(const struct dentry *entry)
 {
 	return (u64) entry->d_time +
 		((u64) (unsigned long) entry->d_fsdata << 32);
