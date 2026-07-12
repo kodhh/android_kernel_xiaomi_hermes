@@ -254,4 +254,36 @@ struct fscrypt_key {
 #define SYNC_FILE_RANGE_WRITE		2
 #define SYNC_FILE_RANGE_WAIT_AFTER	4
 
+/*
+ * File clone/dedupe ioctls
+ */
+#define FICLONE		_IOW(0x94, 9, int)
+#define FICLONERANGE	_IOW(0x94, 13, struct file_clone_range)
+#define FIDEDUPERANGE	_IOW(0x94, 54, struct file_dedupe_range)
+
+struct file_clone_range {
+	__s64	src_fd;
+	__u64	src_offset;
+	__u64	src_length;
+	__u64	dest_offset;
+};
+
+struct file_dedupe_range {
+	__u64	src_offset;
+	__u64	src_length;
+	__u64	dest_count;
+	__u64	reserved1;
+	__u64	reserved2;
+	struct file_dedupe_range_info {
+		__u64	dest_fd;
+		__u64	dest_offset;
+		__u64	bytes_deduped;
+		__u32	status;
+		__u32	reserved;
+	} info[0];
+};
+
+#define FILE_DEDUPE_RANGE_SAME		0
+#define FILE_DEDUPE_RANGE_DIFFERS	1
+
 #endif /* _UAPI_LINUX_FS_H */

@@ -1580,6 +1580,11 @@ asmlinkage long compat_sys_ioctl(unsigned int fd, unsigned int cmd,
 		goto out_fput;
 #endif
 
+	case FICLONE:
+	case FICLONERANGE:
+	case FIDEDUPERANGE:
+		goto found_handler;
+
 	case FIBMAP:
 	case FIGETBSZ:
 	case FIONREAD:

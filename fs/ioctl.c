@@ -536,6 +536,63 @@ static int ioctl_fsthaw(struct file *filp)
 	return thaw_super(sb);
 }
 
+static long ioctl_file_clone(struct file *dst_file, unsigned long srcfd,
+			     loff_t off, loff_t olen, loff_t destoff)
+{
+	struct fd src_file;
+	int ret;
+
+	src_file = fdget(srcfd);
+	if (!src_file.file)
+		return -EBADF;
+	ret = -EXDEV;
+	if (src_file.file->f_path.mnt != dst_file->f_path.mnt)
+		goto fdput;
+	ret = vfs_clone_file_range(src_file.file, off, dst_file, destoff, olen);
+fdput:
+	fdput(src_file);
+	return ret;
+}
+
+static long ioctl_file_dedupe_range(struct file *file, void __user *arg)
+{
+	struct file_dedupe_range __user *argp = arg;
+	struct file_dedupe_range *same = NULL;
+	int ret;
+	unsigned long size;
+	u16 count;
+
+	if (get_user(count, &argp->dest_count)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	size = offsetof(struct file_dedupe_range, info[count]);
+	if (size > PAGE_SIZE) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	same = memdup_user(argp, size);
+	if (IS_ERR(same)) {
+		ret = PTR_ERR(same);
+		same = NULL;
+		goto out;
+	}
+
+	ret = vfs_dedupe_file_range(file, same);
+	if (ret)
+		goto out;
+
+	ret = copy_to_user(argp, same, size);
+	if (ret)
+		ret = -EFAULT;
+
+out:
+	kfree(same);
+	return ret;
+}
+
 /*
  * When you add any new common ioctls to the switches above and below
  * please update compat_sys_ioctl() too.
@@ -590,6 +647,24 @@ int do_vfs_ioctl(struct file *filp, unsigned int fd, unsigned int cmd,
 
 	case FIGETBSZ:
 		return put_user(inode->i_sb->s_blocksize, argp);
+
+	case FICLONE: {
+		int srcfd = arg;
+		return ioctl_file_clone(filp, srcfd, 0, 0, 0);
+	}
+
+	case FICLONERANGE: {
+		struct file_clone_range __user *argp = (void __user *)arg;
+		struct file_clone_range cr;
+
+		if (copy_from_user(&cr, argp, sizeof(cr)))
+			return -EFAULT;
+		return ioctl_file_clone(filp, cr.src_fd, cr.src_offset,
+					cr.src_length, cr.dest_offset);
+	}
+
+	case FIDEDUPERANGE:
+		return ioctl_file_dedupe_range(filp, (void __user *)arg);
 
 	default:
 		if (S_ISREG(inode->i_mode))
