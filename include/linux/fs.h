@@ -2457,6 +2457,7 @@ extern ino_t find_inode_number(struct dentry *, struct qstr *);
 extern loff_t default_llseek(struct file *file, loff_t offset, int whence);
 
 extern loff_t vfs_llseek(struct file *file, loff_t offset, int whence);
+extern loff_t vfs_setpos(struct file *file, loff_t offset, loff_t maxsize);
 
 extern int inode_init_always(struct super_block *, struct inode *);
 extern void inode_init_once(struct inode *);

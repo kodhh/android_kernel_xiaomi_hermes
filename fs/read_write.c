@@ -57,6 +57,21 @@ static loff_t lseek_execute(struct file *file, struct inode *inode,
 	return offset;
 }
 
+loff_t vfs_setpos(struct file *file, loff_t offset, loff_t maxsize)
+{
+	if (offset < 0 && !unsigned_offsets(file))
+		return -EINVAL;
+	if (offset > maxsize)
+		return -EINVAL;
+
+	if (offset != file->f_pos) {
+		file->f_pos = offset;
+		file->f_version = 0;
+	}
+	return offset;
+}
+EXPORT_SYMBOL(vfs_setpos);
+
 /**
  * generic_file_llseek_size - generic llseek implementation for regular files
  * @file:	file structure to seek on

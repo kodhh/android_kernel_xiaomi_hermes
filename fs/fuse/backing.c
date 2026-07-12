@@ -472,7 +472,7 @@ int fuse_lseek_backing(struct fuse_bpf_args *fa,
 			return 0;
 		}
 		if (whence == SEEK_SET) {
-			flo->offset = 0;
+			flo->offset = vfs_setpos(file, 0, 0);
 			return 0;
 		}
 	}
