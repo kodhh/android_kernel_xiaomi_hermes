@@ -628,6 +628,7 @@ const struct inode_operations ntfs_dir_inode_operations = {
 	.getattr = ntfs_getattr,
 	.setxattr = generic_setxattr,
 	.getxattr = generic_getxattr,
+	.removexattr = generic_removexattr,
 	.listxattr = ntfs_listxattr,
 	.atomic_open = ntfs_atomic_open,
 	.fiemap = ntfs_fiemap,

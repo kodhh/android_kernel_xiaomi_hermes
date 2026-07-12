@@ -560,8 +560,10 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 	}
 #endif
 
+	mutex_lock(&get_fuse_inode(dir)->mutex);
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
 			       &outarg, &inode, entry);
+	mutex_unlock(&get_fuse_inode(dir)->mutex);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;
@@ -1813,6 +1815,7 @@ again:
 		return -ENOMEM;
 	}
 
+	mutex_lock(&get_fuse_inode(inode)->mutex);
 	plus = fuse_use_readdirplus(inode, ctx);
 	req->out.argpages = 1;
 	req->num_pages = 1;
@@ -1830,6 +1833,7 @@ again:
 	nbytes = req->out.args[0].size;
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
+	mutex_unlock(&get_fuse_inode(inode)->mutex);
 	if (!err) {
 		if (plus) {
 			err = parse_dirplusfile(page_address(page), nbytes,

@@ -2205,6 +2205,7 @@ const struct inode_operations ntfs_link_inode_operations = {
 	.setattr = ntfs3_setattr,
 	.setxattr = generic_setxattr,
 	.getxattr = generic_getxattr,
+	.removexattr = generic_removexattr,
 	.listxattr = ntfs_listxattr,
 	.permission = ntfs_permission,
 	.get_acl = ntfs_get_acl,
