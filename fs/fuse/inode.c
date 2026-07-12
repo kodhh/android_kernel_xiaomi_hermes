@@ -99,6 +99,7 @@ static struct inode *fuse_alloc_inode(struct super_block *sb)
 	fi->writectr = 0;
 	fi->orig_ino = 0;
 	fi->state = 0;
+	mutex_init(&fi->mutex);
 #ifdef CONFIG_FUSE_BPF
 	fi->backing_inode = NULL;
 	fi->bpf = NULL;
@@ -1036,6 +1037,14 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_req *req)
 				fc->async_dio = 1;
 			if (arg->flags & FUSE_WRITEBACK_CACHE)
 				fc->writeback_cache = 1;
+			if (arg->flags & FUSE_PARALLEL_DIROPS)
+				fc->parallel_dirops = 1;
+			if (arg->flags & FUSE_CACHE_SYMLINKS)
+				fc->cache_symlinks = 1;
+			if (arg->flags & FUSE_EXPLICIT_INVAL_DATA)
+				fc->explicit_inval_data = 1;
+			if (arg->flags & FUSE_MAX_PAGES)
+				fc->max_pages = arg->max_pages;
 			if (arg->time_gran && arg->time_gran <= 1000000000)
 				fc->sb->s_time_gran = arg->time_gran;
 			if (arg->flags & FUSE_PASSTHROUGH) {
@@ -1086,7 +1095,8 @@ static void fuse_send_init(struct fuse_conn *fc, struct fuse_req *req)
 		FUSE_FLOCK_LOCKS | FUSE_HAS_IOCTL_DIR | FUSE_AUTO_INVAL_DATA |
 		FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO | FUSE_ASYNC_DIO |
 		FUSE_WRITEBACK_CACHE | FUSE_NO_OPEN_SUPPORT | FUSE_PASSTHROUGH |
-		FUSE_HANDLE_KILLPRIV | FUSE_POSIX_ACL | FUSE_ABORT_ERROR;
+		FUSE_HANDLE_KILLPRIV | FUSE_POSIX_ACL | FUSE_ABORT_ERROR |
+		FUSE_PARALLEL_DIROPS | FUSE_MAX_PAGES;
 	req->in.h.opcode = FUSE_INIT;
 	req->in.numargs = 1;
 	req->in.args[0].size = sizeof(*arg);

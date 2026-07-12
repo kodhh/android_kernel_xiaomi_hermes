@@ -108,6 +108,9 @@ struct fuse_inode {
 	struct bpf_prog *bpf;
 #endif
 
+	/** Serializes lookup/readdir operations on this inode */
+	struct mutex mutex;
+
 	/** Unique ID, which identifies the inode between userspace
 	 * and kernel */
 	u64 nodeid;
@@ -628,6 +631,30 @@ struct fuse_conn {
 	/** reading the device after abort returns ECONNABORTED */
 	unsigned abort_err:1;
 
+	/** Do permission checking based on file mode */
+	unsigned default_permissions:1;
+
+	/** Allow parallel lookups and readdir */
+	unsigned parallel_dirops:1;
+
+	/** lseek not implemented by fs */
+	unsigned no_lseek:1;
+
+	/** Allow non-mounter access */
+	unsigned allow_other:1;
+
+	/** Cache symlinks in dentry */
+	unsigned cache_symlinks:1;
+
+	/** Explicitly invalidate data pages (not automatic) */
+	unsigned explicit_inval_data:1;
+
+	/** Max number of pages per request */
+	unsigned max_pages;
+
+	/** Connection aborted via sysfs */
+	bool aborted;
+
 	/** Is rename with flags implemented by fs? */
 	unsigned no_rename2:1;
 
@@ -1010,7 +1037,7 @@ bool fuse_write_update_size(struct inode *inode, loff_t pos);
 int fuse_flush_times(struct inode *inode, struct fuse_file *ff);
 int fuse_write_inode(struct inode *inode, struct writeback_control *wbc);
 
-int fuse_do_setattr(struct inode *inode, struct iattr *attr,
+int fuse_do_setattr(struct dentry *entry, struct iattr *attr,
 		    struct file *file);
 
 /* passthrough.c */

@@ -1143,15 +1143,6 @@ static int fuse_rename2(struct inode *olddir, struct dentry *oldent,
 {
 	struct fuse_conn *fc = get_fuse_conn(olddir);
 	int err;
-#ifdef CONFIG_FUSE_BPF
-	{
-		struct fuse_err_ret fer = fuse_bpf_backing(olddir, struct fuse_rename2_in,
-			fuse_rename2_initialize, fuse_rename2_backing, fuse_rename2_finalize,
-			olddir, oldent, newdir, newent, flags);
-		if (fer.ret)
-			return fer.result ? PTR_ERR(fer.result) : 0;
-	}
-#endif
 
 	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE))
 		return -EINVAL;
@@ -1159,6 +1150,16 @@ static int fuse_rename2(struct inode *olddir, struct dentry *oldent,
 	if (flags) {
 		if (fc->no_rename2 || fc->minor < 23)
 			return -EINVAL;
+
+#ifdef CONFIG_FUSE_BPF
+		{
+			struct fuse_err_ret fer = fuse_bpf_backing(olddir, struct fuse_rename2_in,
+				fuse_rename2_initialize, fuse_rename2_backing, fuse_rename2_finalize,
+				olddir, oldent, newdir, newent, flags);
+			if (fer.ret)
+				return fer.result ? PTR_ERR(fer.result) : 0;
+		}
+#endif
 
 		err = fuse_rename_common(olddir, oldent, newdir, newent, flags,
 					 FUSE_RENAME2,
@@ -1168,6 +1169,16 @@ static int fuse_rename2(struct inode *olddir, struct dentry *oldent,
 			err = -EINVAL;
 		}
 	} else {
+#ifdef CONFIG_FUSE_BPF
+		{
+			struct fuse_err_ret fer = fuse_bpf_backing(olddir, struct fuse_rename_in,
+				fuse_rename_initialize, fuse_rename_backing, fuse_rename_finalize,
+				olddir, oldent, newdir, newent);
+			if (fer.ret)
+				return fer.result ? PTR_ERR(fer.result) : 0;
+		}
+#endif
+
 		err = fuse_rename_common(olddir, oldent, newdir, newent, 0,
 					 FUSE_RENAME,
 					 sizeof(struct fuse_rename_in));
@@ -2112,9 +2123,10 @@ int fuse_flush_times(struct inode *inode, struct fuse_file *ff)
  * vmtruncate() doesn't allow for this case, so do the rlimit checking
  * and the actual truncation by hand.
  */
-int fuse_do_setattr(struct inode *inode, struct iattr *attr,
+int fuse_do_setattr(struct dentry *entry, struct iattr *attr,
 		    struct file *file)
 {
+	struct inode *inode = entry->d_inode;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_req *req;
@@ -2125,6 +2137,17 @@ int fuse_do_setattr(struct inode *inode, struct iattr *attr,
 	loff_t oldsize;
 	int err;
 	bool trust_local_cmtime = is_wb && S_ISREG(inode->i_mode);
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct file *fp = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
+		struct fuse_err_ret fer = fuse_bpf_backing(inode, struct fuse_setattr_io,
+			fuse_setattr_initialize, fuse_setattr_backing, fuse_setattr_finalize,
+			entry, attr, fp);
+		if (fer.ret)
+			return fer.result ? PTR_ERR(fer.result) : 0;
+	}
+#endif
 
 	if (!(fc->flags & FUSE_DEFAULT_PERMISSIONS))
 		attr->ia_valid |= ATTR_FORCE;
@@ -2256,16 +2279,7 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 	struct file *file;
 	struct fuse_conn *fc;
 	int ret;
-#ifdef CONFIG_FUSE_BPF
-	{
-		struct file *fp = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
-		struct fuse_err_ret fer = fuse_bpf_backing(entry->d_inode, struct fuse_setattr_io,
-			fuse_setattr_initialize, fuse_setattr_backing, fuse_setattr_finalize,
-			entry, attr, fp);
-		if (fer.ret)
-			return fer.result ? PTR_ERR(fer.result) : 0;
-	}
-#endif
+
 	inode = entry->d_inode;
 	fc = get_fuse_conn(inode);
 	file = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
@@ -2302,7 +2316,7 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 	if (!attr->ia_valid)
 		return 0;
 
-	ret = fuse_do_setattr(entry->d_inode, attr, file);
+	ret = fuse_do_setattr(entry, attr, file);
 	if (!ret) {
 		struct inode *inode = entry->d_inode;
 		struct fuse_conn *fc = get_fuse_conn(inode);
@@ -2529,6 +2543,18 @@ static int fuse_removexattr(struct dentry *entry, const char *name)
 
 	if (fc->no_removexattr)
 		return -EOPNOTSUPP;
+
+#ifdef CONFIG_FUSE_BPF
+	{
+		struct fuse_err_ret fer;
+		fer = fuse_bpf_backing(inode, struct fuse_dummy_io,
+				fuse_removexattr_initialize, fuse_removexattr_backing,
+				fuse_removexattr_finalize,
+				entry, name);
+		if (fer.ret)
+			return PTR_ERR(fer.result);
+	}
+#endif
 
 	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))

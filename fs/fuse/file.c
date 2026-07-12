@@ -890,6 +890,11 @@ static int fuse_readpages_fill(void *_data, struct page *page)
 	struct inode *inode = data->inode;
 	struct fuse_conn *fc = get_fuse_conn(inode);
 
+#ifdef CONFIG_FUSE_BPF
+	if (!get_fuse_inode(inode)->nodeid)
+		return -EIO;
+#endif
+
 	fuse_wait_on_page_writeback(inode, page->index);
 
 	if (req->num_pages &&
@@ -2674,7 +2679,7 @@ static void fuse_do_truncate(struct file *file)
 	attr.ia_file = file;
 	attr.ia_valid |= ATTR_FILE;
 
-	fuse_do_setattr(inode, &attr, file);
+	fuse_do_setattr(file->f_path.dentry, &attr, file);
 }
 
 static inline loff_t fuse_round_up(loff_t off)
