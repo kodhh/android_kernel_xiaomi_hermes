@@ -526,18 +526,20 @@ int fuse_copy_file_range_backing(struct fuse_bpf_args *fa,
 				 struct file *file_out, loff_t pos_out,
 				 size_t len, unsigned int flags)
 {
-	struct fuse_file *ff_in = file_in->private_data;
-	struct fuse_file *ff_out = file_out->private_data;
-	struct file *backing_in = ff_in->backing_file;
-	struct file *backing_out = ff_out->backing_file;
-	ssize_t ret;
+	const struct fuse_copy_file_range_in *fci = fa->in_args[0].value;
+	struct fuse_file *fuse_file_in = file_in->private_data;
+	struct file *backing_file_in = fuse_file_in->backing_file;
+	struct fuse_file *fuse_file_out = file_out->private_data;
+	struct file *backing_file_out = fuse_file_out->backing_file;
 
-	if (!backing_in || !backing_out)
-		return -ENOTCONN;
-
-	ret = generic_copy_file_range(backing_in, pos_in, backing_out, pos_out,
-				      len, flags);
-	return ret;
+	/* TODO: Handle changing of in/out files */
+	if (backing_file_out)
+		return vfs_copy_file_range(backing_file_in, fci->off_in,
+					   backing_file_out, fci->off_out,
+					   fci->len, fci->flags);
+	else
+		return generic_copy_file_range(file_in, pos_in, file_out,
+					       pos_out, len, flags);
 }
 
 void *fuse_copy_file_range_finalize(struct fuse_bpf_args *fa,
