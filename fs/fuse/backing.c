@@ -459,23 +459,36 @@ int fuse_lseek_initialize(struct fuse_bpf_args *fa, struct fuse_lseek_io *fli,
 int fuse_lseek_backing(struct fuse_bpf_args *fa,
 		       struct file *file, loff_t offset, int whence)
 {
+	const struct fuse_lseek_in *fli = fa->in_args[0].value;
+	struct fuse_lseek_out *flo = fa->out_args[0].value;
 	struct fuse_file *ff = file->private_data;
 	struct file *backing_file = ff->backing_file;
 	struct inode *inode;
 	loff_t ret;
 
-	if (!backing_file)
-		return -ENOTCONN;
+	if (offset == 0) {
+		if (whence == SEEK_CUR) {
+			flo->offset = file->f_pos;
+			return 0;
+		}
+		if (whence == SEEK_SET) {
+			flo->offset = 0;
+			return 0;
+		}
+	}
 
 	inode = backing_file->f_path.dentry->d_inode;
 	mutex_lock(&inode->i_mutex);
-	ret = vfs_llseek(backing_file, offset, whence);
+	backing_file->f_pos = file->f_pos;
+	ret = vfs_llseek(backing_file, fli->offset, fli->whence);
+
+	if (ret >= 0) {
+		flo->offset = ret;
+		ret = 0;
+	}
 	mutex_unlock(&inode->i_mutex);
 
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return ret;
 }
 
 void *fuse_lseek_finalize(struct fuse_bpf_args *fa,
@@ -568,7 +581,7 @@ int fuse_fsync_initialize(struct fuse_bpf_args *fa, struct fuse_fsync_in *ffi,
 	fa->in_numargs = 1;
 	*ffi = (struct fuse_fsync_in) {
 		.fh = ff->fh,
-		.fsync_flags = datasync ? 1 : 0,
+		.fsync_flags = datasync ? FUSE_FSYNC_FDATASYNC : 0,
 	};
 	fa->out_numargs = 0;
 
@@ -580,11 +593,10 @@ int fuse_fsync_backing(struct fuse_bpf_args *fa,
 {
 	struct fuse_file *ff = file->private_data;
 	struct file *backing_file = ff->backing_file;
+	const struct fuse_fsync_in *ffi = fa->in_args[0].value;
 
-	if (!backing_file)
-		return -ENOTCONN;
-
-	return vfs_fsync(backing_file, datasync);
+	return vfs_fsync(backing_file,
+			 (ffi->fsync_flags & FUSE_FSYNC_FDATASYNC) ? 1 : 0);
 }
 
 void *fuse_fsync_finalize(struct fuse_bpf_args *fa,
@@ -818,6 +830,7 @@ int fuse_file_read_iter_initialize(
 int fuse_file_read_iter_backing(struct fuse_bpf_args *fa,
 		struct kiocb *iocb, struct iov_iter *to)
 {
+	struct fuse_read_iter_out *frio = fa->out_args[0].value;
 	struct file *file = iocb->ki_filp;
 	struct fuse_file *ff = file->private_data;
 	struct file *backing_file = ff->backing_file;
@@ -825,8 +838,8 @@ int fuse_file_read_iter_backing(struct fuse_bpf_args *fa,
 	struct kiocb local_iocb;
 	ssize_t ret;
 
-	if (!backing_file)
-		return -ENOTCONN;
+	if (!iov_iter_count(to))
+		return 0;
 
 	old_cred = override_creds(ff->backing_cred);
 	init_sync_kiocb(&local_iocb, backing_file);
@@ -839,6 +852,8 @@ int fuse_file_read_iter_backing(struct fuse_bpf_args *fa,
 
 	if (ret >= 0)
 		iocb->ki_pos = local_iocb.ki_pos;
+
+	frio->ret = ret;
 
 	return ret;
 }
@@ -879,6 +894,7 @@ int fuse_file_write_iter_initialize(
 int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 		struct kiocb *iocb, struct iov_iter *from)
 {
+	struct fuse_write_iter_out *fwio = fa->out_args[0].value;
 	struct file *file = iocb->ki_filp;
 	struct fuse_file *ff = file->private_data;
 	struct file *backing_file = ff->backing_file;
@@ -886,8 +902,8 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 	struct kiocb local_iocb;
 	ssize_t ret;
 
-	if (!backing_file)
-		return -ENOTCONN;
+	if (!iov_iter_count(from))
+		return 0;
 
 	mutex_lock(&backing_file->f_path.dentry->d_inode->i_mutex);
 
@@ -911,7 +927,10 @@ int fuse_file_write_iter_backing(struct fuse_bpf_args *fa,
 
 	mutex_unlock(&backing_file->f_path.dentry->d_inode->i_mutex);
 
-	return ret;
+	fwio->ret = ret;
+	if (ret < 0)
+		return ret;
+	return 0;
 }
 
 void *fuse_file_write_iter_finalize(struct fuse_bpf_args *fa,
@@ -985,13 +1004,11 @@ int fuse_file_fallocate_initialize(struct fuse_bpf_args *fa,
 int fuse_file_fallocate_backing(struct fuse_bpf_args *fa,
 		struct file *file, int mode, loff_t offset, loff_t length)
 {
+	const struct fuse_fallocate_in *ffi = fa->in_args[0].value;
 	struct fuse_file *ff = file->private_data;
-	struct file *backing_file = ff->backing_file;
 
-	if (!backing_file)
-		return -ENOTCONN;
-
-	return do_fallocate(backing_file, mode, offset, length);
+	return do_fallocate(ff->backing_file, ffi->mode, ffi->offset,
+			    ffi->length);
 }
 
 void *fuse_file_fallocate_finalize(struct fuse_bpf_args *fa,
@@ -2193,11 +2210,9 @@ int fuse_access_initialize(struct fuse_bpf_args *fa,
 int fuse_access_backing(struct fuse_bpf_args *fa, struct inode *inode, int mask)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
+	const struct fuse_access_in *fai = fa->in_args[0].value;
 
-	if (!fi->backing_inode)
-		return -ENOENT;
-
-	return inode_permission(fi->backing_inode, mask);
+	return inode_permission(fi->backing_inode, fai->mask);
 }
 
 void *fuse_access_finalize(struct fuse_bpf_args *fa,
