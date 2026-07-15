@@ -58,9 +58,22 @@ struct perf_callchain_entry {
 	__u64				ip[PERF_MAX_STACK_DEPTH];
 };
 
-struct perf_raw_record {
-	u32				size;
+typedef unsigned long (*perf_copy_f)(void *dst, const void *src,
+				     unsigned long off, unsigned long len);
+
+struct perf_raw_frag {
+	union {
+		struct perf_raw_frag	*next;
+		unsigned long		pad;
+	};
+	perf_copy_f			copy;
 	void				*data;
+	u32				size;
+} __packed;
+
+struct perf_raw_record {
+	struct perf_raw_frag		frag;
+	u32				size;
 };
 
 /*
@@ -565,6 +578,10 @@ static inline int perf_event_read_local(struct perf_event *event, u64 *value)
 	*value = perf_event_read_value(event, &enabled, &running);
 	return 0;
 }
+
+extern void perf_event_output(struct perf_event *event,
+			      struct perf_sample_data *data,
+			      struct pt_regs *regs);
 
 struct perf_sample_data {
 	u64				type;
