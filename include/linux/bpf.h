@@ -31,22 +31,41 @@ struct bpf_map_ops {
 	void (*map_release)(struct bpf_map *map, struct file *map_file);
 	void (*map_free)(struct bpf_map *map);
 	int (*map_get_next_key)(struct bpf_map *map, void *key, void *next_key);
+	void (*map_release_uref)(struct bpf_map *map);
+	void *(*map_lookup_elem_sys_only)(struct bpf_map *map, void *key);
+	int (*map_lookup_batch)(struct bpf_map *map, const union bpf_attr *attr,
+				union bpf_attr __user *uattr);
+	int (*map_lookup_and_delete_batch)(struct bpf_map *map,
+					   const union bpf_attr *attr,
+					   union bpf_attr __user *uattr);
+	int (*map_update_batch)(struct bpf_map *map, const union bpf_attr *attr,
+				union bpf_attr __user *uattr);
+	int (*map_delete_batch)(struct bpf_map *map, const union bpf_attr *attr,
+				union bpf_attr __user *uattr);
 
 	/* funcs callable from userspace and from eBPF programs */
 	void *(*map_lookup_elem)(struct bpf_map *map, void *key);
 	int (*map_update_elem)(struct bpf_map *map, void *key, void *value, u64 flags);
 	int (*map_delete_elem)(struct bpf_map *map, void *key);
+	int (*map_push_elem)(struct bpf_map *map, void *value, u64 flags);
+	int (*map_pop_elem)(struct bpf_map *map, void *value);
+	int (*map_peek_elem)(struct bpf_map *map, void *value);
 
 	/* funcs called by prog_array and perf_event_array map */
 	void *(*map_fd_get_ptr)(struct bpf_map *map, struct file *map_file,
 				int fd);
-	void (*map_fd_put_ptr)(void *ptr);
+	void (*map_fd_put_ptr)(struct bpf_map *map, void *ptr, bool need_defer);
+	u32 (*map_gen_lookup)(struct bpf_map *map, struct bpf_insn *insn_buf);
 	u32 (*map_fd_sys_lookup_elem)(void *ptr);
 	void (*map_seq_show_elem)(struct bpf_map *map, void *key,
 				  struct seq_file *m);
 	int (*map_check_btf)(const struct bpf_map *map, const struct btf *btf,
 			     u32 key_type_id, u32 value_type_id);
 	int (*map_mmap)(struct bpf_map *map, struct vm_area_struct *vma);
+	int (*map_direct_value_addr)(const struct bpf_map *map,
+				     u64 *imm, u32 off);
+	int (*map_direct_value_meta)(const struct bpf_map *map,
+				     u64 imm, u32 *off);
 	unsigned int (*map_poll)(struct bpf_map *map, struct file *filp,
 				 struct poll_table_struct *pts);
 };
@@ -58,15 +77,18 @@ struct bpf_map {
 	u32 value_size;
 	u32 max_entries;
 	u32 map_flags;
-	u32 pages;
+	int spin_lock_off; /* >=0 valid offset, <0 error */
 	u32 id;
+	int numa_node;
 	u32 btf_key_type_id;
 	u32 btf_value_type_id;
 	struct btf *btf;
 	char name[BPF_OBJ_NAME_LEN];
+	u32 pages;
 	bool unpriv_array;
+	bool frozen; /* write-once; write-protected by freeze_mutex */
 	struct user_struct *user;
-	const struct bpf_map_ops *ops;
+	const struct bpf_map_ops *ops ____cacheline_aligned;
 	struct work_struct work;
 	atomic_t usercnt;
 	struct mutex freeze_mutex;
@@ -100,6 +122,10 @@ enum bpf_arg_type {
 	ARG_PTR_TO_MAP_KEY,	/* pointer to stack used as map key */
 	ARG_PTR_TO_MAP_VALUE,	/* pointer to stack used as map value */
 	ARG_PTR_TO_MAP_VALUE_OR_NULL,	/* pointer to stack used as map value or NULL */
+	ARG_PTR_TO_UNINIT_MAP_VALUE,	/* pointer to stack used as map value,
+					 * helper function must fill all bytes
+					 * or clear them in error case.
+					 */
 
 	/* the following constraints used to prototype bpf_memcmp() and other
 	 * functions that access data on eBPF program stack
@@ -398,14 +424,27 @@ void bpf_map_put(struct bpf_map *map);
 int bpf_map_precharge_memlock(u32 pages);
 int bpf_map_charge_memlock(struct bpf_map *map, u32 pages);
 void bpf_map_uncharge_memlock(struct bpf_map *map, u32 pages);
-void *bpf_map_area_alloc(size_t size);
+void *bpf_map_area_alloc(size_t size, int numa_node);
 void *bpf_map_area_mmapable_alloc(size_t size, int numa_node);
 void bpf_map_area_free(void *base);
+
+void bpf_map_init_from_attr(struct bpf_map *map, union bpf_attr *attr);
+
+static inline int bpf_map_attr_numa_node(const union bpf_attr *attr)
+{
+	return (attr->map_flags & BPF_F_NUMA_NODE) ?
+		attr->numa_node : NUMA_NO_NODE;
+}
 
 extern int sysctl_unprivileged_bpf_disabled;
 
 int bpf_map_new_fd(struct bpf_map *map, int flags);
 int bpf_prog_new_fd(struct bpf_prog *prog);
+
+int map_check_no_btf(const struct bpf_map *map, const struct btf *btf,
+		     u32 key_type_id, u32 value_type_id);
+
+int array_map_alloc_check(union bpf_attr *attr);
 
 int bpf_obj_pin_user(u32 ufd, const char __user *pathname);
 int bpf_obj_get_user(const char __user *pathname, int flags);
@@ -499,6 +538,9 @@ static inline struct bpf_prog *bpf_prog_get_type_path(const char *name,
 extern const struct bpf_func_proto bpf_map_lookup_elem_proto;
 extern const struct bpf_func_proto bpf_map_update_elem_proto;
 extern const struct bpf_func_proto bpf_map_delete_elem_proto;
+extern const struct bpf_func_proto bpf_map_push_elem_proto;
+extern const struct bpf_func_proto bpf_map_pop_elem_proto;
+extern const struct bpf_func_proto bpf_map_peek_elem_proto;
 
 extern const struct bpf_func_proto bpf_get_prandom_u32_proto;
 extern const struct bpf_func_proto bpf_get_smp_processor_id_proto;

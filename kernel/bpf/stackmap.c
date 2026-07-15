@@ -35,7 +35,7 @@ static int prealloc_elems_and_freelist(struct bpf_stack_map *smap)
 			(u64)smap->map.value_size;
 	int err;
 
-	smap->elems = bpf_map_area_alloc(elem_size * smap->map.max_entries);
+	smap->elems = bpf_map_area_alloc(elem_size * smap->map.max_entries, NUMA_NO_NODE);
 	if (!smap->elems)
 		return -ENOMEM;
 
@@ -81,7 +81,7 @@ static struct bpf_map *stack_map_alloc(union bpf_attr *attr)
 	if (cost >= U32_MAX - PAGE_SIZE)
 		return ERR_PTR(-E2BIG);
 
-	smap = bpf_map_area_alloc(cost);
+	smap = bpf_map_area_alloc(cost, NUMA_NO_NODE);
 	if (!smap)
 		return ERR_PTR(-ENOMEM);
 

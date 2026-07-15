@@ -591,15 +591,6 @@ static int bpf_sk_storage_map_alloc_check(union bpf_attr *attr)
 	return 0;
 }
 
-void bpf_map_init_from_attr(struct bpf_map *map, union bpf_attr *attr)
-{
-	map->map_type = attr->map_type;
-	map->key_size = attr->key_size;
-	map->value_size = attr->value_size;
-	map->max_entries = attr->max_entries;
-	map->map_flags = attr->map_flags;
-}
-
 static struct bpf_map *bpf_sk_storage_map_alloc(union bpf_attr *attr)
 {
 	struct bpf_sk_storage_map *smap;

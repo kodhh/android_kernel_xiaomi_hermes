@@ -4587,7 +4587,7 @@ void perf_output_sample(struct perf_output_handle *handle,
 	if (sample_type & PERF_SAMPLE_RAW) {
 		if (data->raw) {
 			perf_output_put(handle, data->raw->size);
-			__output_copy(handle, data->raw->data,
+			__output_copy(handle, data->raw->frag.data,
 					   data->raw->size);
 		} else {
 			struct {
@@ -4756,7 +4756,7 @@ void perf_prepare_sample(struct perf_event_header *header,
 	}
 }
 
-static void perf_event_output(struct perf_event *event,
+void perf_event_output(struct perf_event *event,
 				struct perf_sample_data *data,
 				struct pt_regs *regs)
 {
@@ -5824,7 +5824,7 @@ static struct pmu perf_swevent = {
 static int perf_tp_filter_match(struct perf_event *event,
 				struct perf_sample_data *data)
 {
-	void *record = data->raw->data;
+	void *record = data->raw->frag.data;
 
 	/* only top level events have filters set */
 	if (event->parent)
@@ -5877,8 +5877,10 @@ void perf_tp_event(u64 addr, u64 count, void *record, int entry_size,
 	struct perf_event *event;
 
 	struct perf_raw_record raw = {
-		.size = entry_size,
-		.data = record,
+		.frag = {
+			.size = entry_size,
+			.data = record,
+		},
 	};
 
 	perf_sample_data_init(&data, addr, 0);
@@ -8004,7 +8006,6 @@ static void perf_pmu_rotate_stop(struct pmu *pmu)
 
 static void __perf_event_exit_context(void *__info)
 {
-	struct remove_event re = { .detach_group = false };
 	struct perf_event_context *ctx = __info;
 	struct perf_event *event;
 

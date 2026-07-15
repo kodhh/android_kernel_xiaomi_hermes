@@ -352,7 +352,7 @@ static inline int unsigned_offsets(struct file *file)
 	return file->f_mode & FMODE_UNSIGNED_OFFSET;
 }
 
-static loff_t vfs_setpos(struct file *file, loff_t offset, loff_t maxsize)
+static loff_t f2fs_setpos(struct file *file, loff_t offset, loff_t maxsize)
 {
 	if (offset < 0 && !unsigned_offsets(file))
 		return -EINVAL;
@@ -439,7 +439,7 @@ found:
 	if (whence == SEEK_HOLE && data_ofs > isize)
 		data_ofs = isize;
 	inode_unlock(inode);
-	return vfs_setpos(file, data_ofs, maxbytes);
+	return f2fs_setpos(file, data_ofs, maxbytes);
 fail:
 	inode_unlock(inode);
 	return -ENXIO;

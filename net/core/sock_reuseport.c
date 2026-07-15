@@ -8,10 +8,31 @@
 #include <net/sock_reuseport.h>
 #include <linux/bpf.h>
 #include <linux/rcupdate.h>
+#include <linux/idr.h>
 
 #define INIT_SOCKS 128
 
-static DEFINE_SPINLOCK(reuseport_lock);
+DEFINE_SPINLOCK(reuseport_lock);
+
+#define REUSEPORT_MIN_ID 1
+static DEFINE_IDA(reuseport_ida);
+
+int reuseport_get_id(struct sock_reuseport *reuse)
+{
+	int id;
+
+	if (reuse->reuseport_id)
+		return reuse->reuseport_id;
+
+	id = ida_simple_get(&reuseport_ida, REUSEPORT_MIN_ID, 0,
+			    GFP_ATOMIC);
+	if (id < 0)
+		return id;
+
+	reuse->reuseport_id = id;
+	return id;
+}
+EXPORT_SYMBOL(reuseport_get_id);
 
 static struct sock_reuseport *__reuseport_alloc(u16 max_socks)
 {

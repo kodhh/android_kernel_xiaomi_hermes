@@ -102,7 +102,7 @@ static void *__bpf_map_area_alloc(size_t size, bool mmapable)
 			 PAGE_KERNEL);
 }
 
-void *bpf_map_area_alloc(size_t size)
+void *bpf_map_area_alloc(size_t size, int numa_node)
 {
 	return __bpf_map_area_alloc(size, false);
 }
@@ -117,6 +117,16 @@ void bpf_map_area_free(void *area)
 	kvfree(area);
 }
 
+void bpf_map_init_from_attr(struct bpf_map *map, union bpf_attr *attr)
+{
+	map->map_type = attr->map_type;
+	map->key_size = attr->key_size;
+	map->value_size = attr->value_size;
+	map->max_entries = attr->max_entries;
+	map->map_flags = attr->map_flags;
+	map->numa_node = bpf_map_attr_numa_node(attr);
+}
+
 int bpf_map_precharge_memlock(u32 pages)
 {
 	struct user_struct *user = get_current_user();
@@ -125,9 +135,17 @@ int bpf_map_precharge_memlock(u32 pages)
 	memlock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 	cur = atomic_long_read(&user->locked_vm);
 	free_uid(user);
-	if (cur + pages > memlock_limit)
-		return -EPERM;
-	return 0;
+
+	if (memlock_limit > cur + pages)
+		return 0;
+
+	return -EPERM;
+}
+
+int map_check_no_btf(const struct bpf_map *map, const struct btf *btf,
+		     u32 key_type_id, u32 value_type_id)
+{
+	return -EINVAL;
 }
 
 static int bpf_charge_memlock(struct user_struct *user, u32 pages)
