@@ -12,13 +12,19 @@
 #include <linux/uaccess.h>
 #include <uapi/linux/fuse.h>
 
-/* CONFIG_BPF_EVENTS not enabled on this kernel, so provide our own. */
+#ifdef CONFIG_BPF_EVENTS
+/* Use standard bpf_trace_printk from kernel/trace/bpf_trace.c */
+extern const struct bpf_func_proto *bpf_get_trace_printk_proto(void);
+#else
+/* CONFIG_BPF_EVENTS not enabled, provide our own minimal trace_printk */
 extern void trace_printk_init_buffers(void);
 extern int __trace_printk(unsigned long ip, const char *fmt, ...);
+#endif
 
 #define FUSE_IN_ARG_VALUE(i)	offsetof(struct fuse_bpf_args, in_args[i].value)
 #define FUSE_OUT_ARG_VALUE(i)	offsetof(struct fuse_bpf_args, out_args[i].value)
 
+#ifndef CONFIG_BPF_EVENTS
 /*
  * Minimal bpf_trace_printk — no dependency on CONFIG_BPF_EVENTS.
  * Limited to 3 args; only %d %u %x %ld %lu %lx %lld %llu %llx %p %s.
@@ -127,6 +133,7 @@ static const struct bpf_func_proto fuse_bpf_trace_printk_proto = {
 	.arg1_type	= ARG_PTR_TO_MEM,
 	.arg2_type	= ARG_CONST_SIZE,
 };
+#endif /* !CONFIG_BPF_EVENTS */
 
 static bool fuse_prog_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
@@ -173,7 +180,11 @@ fuse_prog_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_trace_printk:
+#ifdef CONFIG_BPF_EVENTS
+		return bpf_get_trace_printk_proto();
+#else
 		return &fuse_bpf_trace_printk_proto;
+#endif
 
 	case BPF_FUNC_get_current_uid_gid:
 		return &bpf_get_current_uid_gid_proto;
