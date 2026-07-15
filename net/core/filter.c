@@ -2623,7 +2623,7 @@ static const struct bpf_func_proto bpf_get_socket_uid_proto = {
 };
 
 static const struct bpf_func_proto *
-sk_filter_func_proto(enum bpf_func_id func_id)
+sk_filter_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_skb_load_bytes_relative:
@@ -2673,7 +2673,7 @@ sk_filter_func_proto(enum bpf_func_id func_id)
 }
 
 static const struct bpf_func_proto *
-sock_filter_func_proto(enum bpf_func_id func_id)
+sock_filter_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
         switch (func_id) {
         /* inet and inet6 sockets are created in a process
@@ -2682,12 +2682,12 @@ sock_filter_func_proto(enum bpf_func_id func_id)
         case BPF_FUNC_get_current_uid_gid:
                 return &bpf_get_current_uid_gid_proto;
         default:
-                return sk_filter_func_proto(func_id);
+                return sk_filter_func_proto(func_id, prog);
         }
 }
 
 static const struct bpf_func_proto *
-tc_cls_act_func_proto(enum bpf_func_id func_id)
+tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_skb_store_bytes:
@@ -2755,12 +2755,12 @@ tc_cls_act_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_sk_storage_delete:
 		return &bpf_sk_storage_delete_proto;
 	default:
-		return sk_filter_func_proto(func_id);
+		return sk_filter_func_proto(func_id, prog);
 	}
 }
 
 static const struct bpf_func_proto *
-xdp_func_proto(enum bpf_func_id func_id)
+xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_perf_event_output:
@@ -2768,7 +2768,7 @@ xdp_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_get_smp_processor_id:
 		return &bpf_get_smp_processor_id_proto;
 	default:
-		return sk_filter_func_proto(func_id);
+		return sk_filter_func_proto(func_id, prog);
 	}
 }
 
@@ -2819,7 +2819,7 @@ static const struct bpf_func_proto bpf_bind_proto = {
 };
 
 static const struct bpf_func_proto *
-sock_addr_func_proto(enum bpf_func_id func_id)
+sock_addr_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
         switch (func_id) {
         /* inet and inet6 sockets are created in a process
@@ -2830,7 +2830,7 @@ sock_addr_func_proto(enum bpf_func_id func_id)
         case BPF_FUNC_bind:
                 return &bpf_bind_proto;
         default:
-                return sk_filter_func_proto(func_id);
+                return sk_filter_func_proto(func_id, prog);
         }
 }
 
@@ -2838,7 +2838,7 @@ const struct bpf_func_proto bpf_sk_storage_get_proto __weak;
 const struct bpf_func_proto bpf_sk_storage_delete_proto __weak;
 
 static const struct bpf_func_proto *
-cg_skb_func_proto(enum bpf_func_id func_id)
+cg_skb_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_sk_fullsock:
@@ -2854,7 +2854,7 @@ cg_skb_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_sk_storage_delete:
 		return &bpf_sk_storage_delete_proto;
 	default:
-		return sk_filter_func_proto(func_id);
+		return sk_filter_func_proto(func_id, prog);
 	}
 }
 
@@ -2873,7 +2873,8 @@ static bool __is_valid_access(int off, int size, enum bpf_access_type type)
 
 static bool sk_filter_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
-				      enum bpf_reg_type *reg_type)
+				      const struct bpf_prog *prog,
+				      struct bpf_insn_access_aux *info)
 {
 	switch (off) {
 	case offsetof(struct __sk_buff, tc_classid):
@@ -2883,7 +2884,7 @@ static bool sk_filter_is_valid_access(int off, int size,
 	case offsetof(struct __sk_buff, sk):
 		if (type == BPF_WRITE || size != sizeof(__u64))
 			return false;
-		*reg_type = PTR_TO_SOCK_COMMON_OR_NULL;
+		info->reg_type = PTR_TO_SOCK_COMMON_OR_NULL;
 		break;
 	}
 
@@ -2902,7 +2903,8 @@ static bool sk_filter_is_valid_access(int off, int size,
 
 static bool sock_filter_is_valid_access(int off, int size,
 					enum bpf_access_type type,
-					enum bpf_reg_type *reg_type)
+					const struct bpf_prog *prog,
+					struct bpf_insn_access_aux *info)
 {
 	if (type == BPF_WRITE) {
 		switch (off) {
@@ -2964,7 +2966,8 @@ static int tc_cls_act_prologue(struct bpf_insn *insn_buf, bool direct_write,
 
 static bool tc_cls_act_is_valid_access(int off, int size,
 				       enum bpf_access_type type,
-				       enum bpf_reg_type *reg_type)
+				       const struct bpf_prog *prog,
+				       struct bpf_insn_access_aux *info)
 {
 	if (type == BPF_WRITE) {
 		switch (off) {
@@ -2982,10 +2985,10 @@ static bool tc_cls_act_is_valid_access(int off, int size,
 
 	switch (off) {
 	case offsetof(struct __sk_buff, data):
-		*reg_type = PTR_TO_PACKET;
+		info->reg_type = PTR_TO_PACKET;
 		break;
 	case offsetof(struct __sk_buff, data_end):
-		*reg_type = PTR_TO_PACKET_END;
+		info->reg_type = PTR_TO_PACKET_END;
 		break;
 	}
 
@@ -3007,17 +3010,18 @@ static bool __is_valid_xdp_access(int off, int size,
 
 static bool xdp_is_valid_access(int off, int size,
 				enum bpf_access_type type,
-				enum bpf_reg_type *reg_type)
+				const struct bpf_prog *prog,
+				struct bpf_insn_access_aux *info)
 {
 	if (type == BPF_WRITE)
 		return false;
 
 	switch (off) {
 	case offsetof(struct xdp_md, data):
-		*reg_type = PTR_TO_PACKET;
+		info->reg_type = PTR_TO_PACKET;
 		break;
 	case offsetof(struct xdp_md, data_end):
-		*reg_type = PTR_TO_PACKET_END;
+		info->reg_type = PTR_TO_PACKET_END;
 		break;
 	}
 
@@ -3032,7 +3036,8 @@ EXPORT_SYMBOL_GPL(bpf_warn_invalid_xdp_action);
 
 static bool sock_addr_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
-				      enum bpf_reg_type *reg_type)
+				      const struct bpf_prog *prog,
+				      struct bpf_insn_access_aux *info)
 {
 	switch (off) {
 	case offsetof(struct bpf_sock_addr, sk):
@@ -3040,7 +3045,7 @@ static bool sock_addr_is_valid_access(int off, int size,
 			return false;
 		if (size != sizeof(__u64))
 			return false;
-		*reg_type = PTR_TO_SOCKET;
+		info->reg_type = PTR_TO_SOCKET;
 		return true;
 	default:
 		return true;
@@ -3648,7 +3653,7 @@ const struct bpf_func_proto bpf_tcp_sock_proto = {
 };
 
 static const struct bpf_func_proto *
-cg_sockopt_func_proto(enum bpf_func_id func_id)
+cg_sockopt_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_sk_storage_get:
@@ -3660,13 +3665,14 @@ cg_sockopt_func_proto(enum bpf_func_id func_id)
 		return &bpf_tcp_sock_proto;
 #endif
 	default:
-		return sk_filter_func_proto(func_id);
+		return sk_filter_func_proto(func_id, prog);
 	}
 }
 
 static bool cg_sockopt_is_valid_access(int off, int size,
-                                      enum bpf_access_type type,
-                                      enum bpf_reg_type *reg_type)
+                                       enum bpf_access_type type,
+                                       const struct bpf_prog *prog,
+                                       struct bpf_insn_access_aux *info)
 {
 	return true;
 }

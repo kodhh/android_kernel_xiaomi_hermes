@@ -162,7 +162,7 @@ enum bpf_access_type {
 /* types of values stored in eBPF registers */
 enum bpf_reg_type {
 	NOT_INIT = 0,		 /* nothing was written into register */
-	UNKNOWN_VALUE,		 /* reg doesn't contain a valid pointer */
+	SCALAR_VALUE,		 /* reg doesn't contain a valid pointer */
 	PTR_TO_CTX,		 /* reg points to bpf_context */
 	CONST_PTR_TO_MAP,	 /* reg points to struct bpf_map */
 	PTR_TO_MAP_VALUE,	 /* reg points to map element value */
@@ -190,27 +190,56 @@ enum bpf_reg_type {
 	 */
 	PTR_TO_MAP_VALUE_ADJ,
 
+	PTR_TO_FLOW_KEYS,	 /* reg points to bpf_flow_keys */
 	PTR_TO_SOCKET,		 /* reg points to struct bpf_sock */
 	PTR_TO_SOCKET_OR_NULL,	 /* reg points to struct bpf_sock or NULL */
 	PTR_TO_SOCK_COMMON,	 /* reg points to sock_common */
 	PTR_TO_SOCK_COMMON_OR_NULL, /* reg points to sock_common or NULL */
 	PTR_TO_TCP_SOCK,	 /* reg points to struct tcp_sock */
 	PTR_TO_TCP_SOCK_OR_NULL, /* reg points to struct tcp_sock or NULL */
+	PTR_TO_TP_BUFFER,	 /* reg points to a writable raw tp's buffer */
+	PTR_TO_BTF_ID,		 /* reg points to kernel struct */
 	PTR_TO_MEM,		 /* reg points to valid memory region */
 	PTR_TO_MEM_OR_NULL,	 /* reg points to valid memory region or NULL */
+	PTR_TO_RDONLY_BUF,	 /* reg points to a readonly buffer */
+	PTR_TO_RDONLY_BUF_OR_NULL, /* reg points to a readonly buffer or NULL */
+	PTR_TO_RDWR_BUF,	 /* reg points to a read/write buffer */
+	PTR_TO_RDWR_BUF_OR_NULL, /* reg points to a read/write buffer or NULL */
 };
+
+/* Backward compatibility alias - Hermes verifier uses UNKNOWN_VALUE extensively */
+#define UNKNOWN_VALUE SCALAR_VALUE
 
 struct bpf_prog;
 
+/* The information passed from prog-specific *_is_valid_access
+ * back to the verifier.
+ */
+struct bpf_insn_access_aux {
+	enum bpf_reg_type reg_type;
+	union {
+		int ctx_field_size;
+		u32 btf_id;
+	};
+};
+
+static inline void
+bpf_ctx_record_field_size(struct bpf_insn_access_aux *aux, u32 size)
+{
+	aux->ctx_field_size = size;
+}
+
 struct bpf_verifier_ops {
 	/* return eBPF function prototype for verification */
-	const struct bpf_func_proto *(*get_func_proto)(enum bpf_func_id func_id);
+	const struct bpf_func_proto *(*get_func_proto)(enum bpf_func_id func_id,
+						       const struct bpf_prog *prog);
 
 	/* return true if 'size' wide access at offset 'off' within bpf_context
 	 * with 'type' (read or write) is allowed
 	 */
 	bool (*is_valid_access)(int off, int size, enum bpf_access_type type,
-				enum bpf_reg_type *reg_type);
+				const struct bpf_prog *prog,
+				struct bpf_insn_access_aux *info);
 	int (*gen_prologue)(struct bpf_insn *insn, bool direct_write,
 			    const struct bpf_prog *prog);
 	u32 (*convert_ctx_access)(enum bpf_access_type type, int dst_reg,
@@ -228,6 +257,8 @@ struct bpf_prog_aux {
 	atomic_t refcnt;
 	u32 used_map_cnt;
 	u32 max_ctx_offset;
+	u32 max_rdonly_access;
+	u32 max_rdwr_access;
         u32 id;
 	struct latch_tree_node ksym_tnode;
 	struct list_head ksym_lnode;

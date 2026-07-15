@@ -130,7 +130,8 @@ static const struct bpf_func_proto fuse_bpf_trace_printk_proto = {
 
 static bool fuse_prog_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
-				      enum bpf_reg_type *reg_type)
+				      const struct bpf_prog *prog,
+				      struct bpf_insn_access_aux *info)
 {
 	if (off < 0 || off >= sizeof(struct fuse_bpf_args))
 		return false;
@@ -144,12 +145,12 @@ static bool fuse_prog_is_valid_access(int off, int size,
 	case FUSE_IN_ARG_VALUE(4):
 		if (type == BPF_WRITE)
 			return false;
-		*reg_type = PTR_TO_MEM;
+		info->reg_type = PTR_TO_RDONLY_BUF;
 		return true;
 	case FUSE_OUT_ARG_VALUE(0):
 	case FUSE_OUT_ARG_VALUE(1):
 	case FUSE_OUT_ARG_VALUE(2):
-		*reg_type = PTR_TO_MEM;
+		info->reg_type = PTR_TO_RDWR_BUF;
 		return true;
 	}
 
@@ -163,12 +164,12 @@ static bool fuse_prog_is_valid_access(int off, int size,
 		}
 	}
 
-	*reg_type = UNKNOWN_VALUE;
+	info->reg_type = UNKNOWN_VALUE;
 	return true;
 }
 
 static const struct bpf_func_proto *
-fuse_prog_func_proto(enum bpf_func_id func_id)
+fuse_prog_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_trace_printk:
