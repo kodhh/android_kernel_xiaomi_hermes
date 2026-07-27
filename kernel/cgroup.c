@@ -4430,6 +4430,8 @@ static int cgroup_destroy_locked(struct cgroup *cgrp)
 	}
 	spin_unlock(&cgrp->event_list_lock);
 
+	cgroup_bpf_offline(cgrp);
+
 	return 0;
 }
 
@@ -5536,25 +5538,81 @@ void cgroup_sk_free(struct cgroup *skcg)
 
 #ifdef CONFIG_CGROUP_BPF
 int cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
+		      struct bpf_prog *replace_prog,
+		      struct bpf_cgroup_link *link,
 		      enum bpf_attach_type type, u32 flags)
 {
 	int ret;
 
 	mutex_lock(&cgroup_mutex);
-	ret = __cgroup_bpf_attach(cgrp, prog, type, flags);
+	ret = __cgroup_bpf_attach(cgrp, prog, replace_prog, link, type, flags);
 	mutex_unlock(&cgroup_mutex);
 	return ret;
 }
 int cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
-		      enum bpf_attach_type type, u32 flags)
+		      enum bpf_attach_type type)
 {
 	int ret;
 
 	mutex_lock(&cgroup_mutex);
-	ret = __cgroup_bpf_detach(cgrp, prog, type, flags);
+	ret = __cgroup_bpf_detach(cgrp, prog, NULL, type);
 	mutex_unlock(&cgroup_mutex);
 	return ret;
 }
+
+u64 cgroup_bpf_link_get_cgroup_id(const struct bpf_cgroup_link *link)
+{
+	u64 cgroup_id = 0;
+
+	mutex_lock(&cgroup_mutex);
+	if (link->cgroup && link->cgroup->dentry)
+		cgroup_id = link->cgroup->dentry->d_inode->i_ino;
+	mutex_unlock(&cgroup_mutex);
+
+	return cgroup_id;
+}
+
+int cgroup_bpf_replace(struct bpf_link *link, struct bpf_prog *new_prog,
+		       struct bpf_prog *old_prog)
+{
+	struct bpf_cgroup_link *cg_link =
+		container_of(link, struct bpf_cgroup_link, link);
+	int ret;
+
+	mutex_lock(&cgroup_mutex);
+	if (!cg_link->cgroup) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+	if (old_prog && link->prog != old_prog) {
+		ret = -EPERM;
+		goto out_unlock;
+	}
+	ret = __cgroup_bpf_replace(cg_link->cgroup, cg_link, new_prog);
+out_unlock:
+	mutex_unlock(&cgroup_mutex);
+	return ret;
+}
+
+int cgroup_bpf_link_detach(struct bpf_cgroup_link *link)
+{
+	struct cgroup *cgrp;
+	int ret;
+
+	mutex_lock(&cgroup_mutex);
+	cgrp = link->cgroup;
+	if (!cgrp) {
+		ret = 0;
+		goto out_unlock;
+	}
+	ret = __cgroup_bpf_detach(cgrp, NULL, link, link->type);
+out_unlock:
+	mutex_unlock(&cgroup_mutex);
+	if (!ret && cgrp)
+		cgroup_put(cgrp);
+	return ret;
+}
+
 int cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 		     union bpf_attr __user *uattr)
 {

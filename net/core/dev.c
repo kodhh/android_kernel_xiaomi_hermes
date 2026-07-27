@@ -100,6 +100,7 @@
 #include <linux/stat.h>
 #include <net/dst.h>
 #include <net/pkt_sched.h>
+#include <net/pkt_cls.h>
 #include <net/checksum.h>
 #include <net/xfrm.h>
 #include <linux/highmem.h>
@@ -2852,6 +2853,31 @@ int dev_queue_xmit(struct sk_buff *skb)
 
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd, AT_EGRESS);
+#endif
+#ifdef CONFIG_NET_SCH_CLSACT
+	if (q->enqueue) {
+		struct netdev_queue *rxq = rcu_dereference_bh(dev->ingress_queue);
+		if (rxq) {
+			struct Qdisc *cl = rcu_dereference_bh(rxq->qdisc);
+			if (cl && (cl->flags & TCQ_F_EGRESS) && cl != &noop_qdisc && cl->ops->cl_ops) {
+				struct tcf_proto **fl = cl->ops->cl_ops->tcf_chain(cl, TC_H_MIN_EGRESS);
+				if (fl && *fl) {
+					struct tcf_result res;
+					int result = tc_classify(skb, *fl, &res);
+					switch (result) {
+					case TC_ACT_SHOT:
+						kfree_skb(skb);
+						rcu_read_unlock_bh();
+						return NET_XMIT_DROP;
+					case TC_ACT_STOLEN:
+					case TC_ACT_QUEUED:
+						rcu_read_unlock_bh();
+						return NET_XMIT_SUCCESS;
+					}
+				}
+			}
+		}
+	}
 #endif
 	trace_net_dev_queue(skb);
 	if (q->enqueue) {

@@ -124,9 +124,10 @@ enum {
 	INET_DIAG_PEERS,
 	INET_DIAG_PAD,
 	INET_DIAG_MARK,
+	INET_DIAG_BBRINFO,
 };
 
-#define INET_DIAG_MAX INET_DIAG_MARK
+#define INET_DIAG_MAX INET_DIAG_BBRINFO
 
 
 /* INET_DIAG_MEM */
@@ -147,5 +148,12 @@ struct tcpvegas_info {
 	__u32	tcpv_minrtt;
 };
 
+struct tcp_bbr_info {
+	__u32	bbr_bw_lo;
+	__u32	bbr_bw_hi;
+	__u32	bbr_min_rtt;
+	__u32	bbr_pacing_gain;
+	__u32	bbr_cwnd_gain;
+};
 
 #endif /* _UAPI_INET_DIAG_H_ */

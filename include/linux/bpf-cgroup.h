@@ -46,9 +46,19 @@ DECLARE_PER_CPU(void*, bpf_cgroup_storage[MAX_BPF_CGROUP_STORAGE_TYPE]);
 extern struct static_key_false cgroup_bpf_enabled_key;
 #define cgroup_bpf_enabled static_branch_unlikely(&cgroup_bpf_enabled_key)
 
+struct bpf_cgroup_link {
+	struct bpf_link link;
+	struct cgroup *cgroup;
+	enum bpf_attach_type type;
+};
+
+extern const struct bpf_link_ops bpf_cgroup_link_lops;
+
 struct bpf_prog_list {
 	struct list_head node;
 	struct bpf_prog *prog;
+	struct bpf_cgroup_link *link;
+	struct bpf_cgroup_storage *storage[MAX_BPF_CGROUP_STORAGE_TYPE];
 };
 
 struct bpf_prog_array;
@@ -70,20 +80,31 @@ struct cgroup_bpf {
 };
 
 void cgroup_bpf_put(struct cgroup *cgrp);
+void cgroup_bpf_offline(struct cgroup *cgrp);
 int cgroup_bpf_inherit(struct cgroup *cgrp);
 
 int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
+			struct bpf_prog *replace_prog,
+			struct bpf_cgroup_link *link,
 			enum bpf_attach_type type, u32 flags);
 int __cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
-			enum bpf_attach_type type, u32 flags);
+			struct bpf_cgroup_link *link,
+			enum bpf_attach_type type);
 int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 		       union bpf_attr __user *uattr);
 
 /* Wrapper for __cgroup_bpf_*() protected by cgroup_mutex */
 int cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
+		      struct bpf_prog *replace_prog,
+		      struct bpf_cgroup_link *link,
 		      enum bpf_attach_type type, u32 flags);
 int cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
-		      enum bpf_attach_type type, u32 flags);
+		      enum bpf_attach_type type);
+int cgroup_bpf_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
+int cgroup_bpf_replace(struct bpf_link *link, struct bpf_prog *new_prog,
+		       struct bpf_prog *old_prog);
+int cgroup_bpf_link_detach(struct bpf_cgroup_link *link);
+u64 cgroup_bpf_link_get_cgroup_id(const struct bpf_cgroup_link *link);
 int cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 		     union bpf_attr __user *uattr);
 
@@ -138,6 +159,9 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 	}								       \
 	__ret;								       \
 })
+
+#define BPF_CGROUP_RUN_PROG_INET_SOCK_RELEASE(sk)			       \
+	BPF_CGROUP_RUN_SK_PROG(sk, BPF_CGROUP_INET_SOCK_RELEASE)
 
 #define BPF_CGROUP_RUN_SA_PROG(sk, uaddr, type)				       \
 ({									       \
@@ -229,17 +253,23 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 
 struct cgroup_bpf {};
 static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
+static inline void cgroup_bpf_offline(struct cgroup *cgrp) {}
 static inline int cgroup_bpf_inherit(struct cgroup *cgrp) { return 0; }
 static inline int cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
+				    struct bpf_prog *replace_prog,
+				    struct bpf_cgroup_link *link,
 				    enum bpf_attach_type type, u32 flags) { return -EINVAL; }
 static inline int cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
-				    enum bpf_attach_type type, u32 flags) { return -EINVAL; }
+				    enum bpf_attach_type type) { return -EINVAL; }
 static inline int cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 				   union bpf_attr __user *uattr) { return -EINVAL; }
 static inline int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
+				      struct bpf_prog *replace_prog,
+				      struct bpf_cgroup_link *link,
 				      enum bpf_attach_type type, u32 flags) { return -EINVAL; }
 static inline int __cgroup_bpf_detach(struct cgroup *cgrp, struct bpf_prog *prog,
-				      enum bpf_attach_type type, u32 flags) { return -EINVAL; }
+				      struct bpf_cgroup_link *link,
+				      enum bpf_attach_type type) { return -EINVAL; }
 static inline int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 				     union bpf_attr __user *uattr) { return -EINVAL; }
 static inline int __cgroup_bpf_run_filter(struct sock *sk,
@@ -263,6 +293,7 @@ static inline int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 #define BPF_CGROUP_RUN_PROG_INET_INGRESS(sk,skb) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET_EGRESS(sk,skb) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET_SOCK(sk) ({ 0; })
+#define BPF_CGROUP_RUN_PROG_INET_SOCK_RELEASE(sk) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET4_BIND(sk, uaddr) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET6_BIND(sk, uaddr) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET4_CONNECT(sk, uaddr) ({ 0; })
@@ -280,5 +311,13 @@ static inline int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 				       kernel_optval) ({ 0; })
 
 #endif /* CONFIG_CGROUP_BPF */
+
+struct bpf_cgroup_storage *bpf_cgroup_storage_alloc(struct bpf_prog *prog,
+						    enum bpf_cgroup_storage_type stype);
+void bpf_cgroup_storage_free(struct bpf_cgroup_storage *storage);
+void bpf_cgroup_storage_link(struct bpf_cgroup_storage *storage,
+			     struct cgroup *cgroup,
+			     enum bpf_attach_type attach_type);
+void bpf_cgroup_storage_unlink(struct bpf_cgroup_storage *storage);
 
 #endif /* _BPF_CGROUP_H */

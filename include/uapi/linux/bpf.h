@@ -101,6 +101,15 @@ enum bpf_cmd {
 	BPF_PROG_QUERY,
 	BPF_BTF_LOAD = 18,
 	BPF_BTF_GET_FD_BY_ID,
+	BPF_BTF_GET_NEXT_ID = 23,
+	BPF_MAP_LOOKUP_BATCH = 24,
+	BPF_MAP_LOOKUP_AND_DELETE_BATCH = 25,
+	BPF_MAP_UPDATE_BATCH = 26,
+	BPF_MAP_DELETE_BATCH = 27,
+	BPF_LINK_CREATE = 28,
+	BPF_LINK_UPDATE = 29,
+	BPF_LINK_GET_FD_BY_ID = 30,
+	BPF_LINK_GET_NEXT_ID = 31,
 };
 
 enum bpf_map_type {
@@ -143,8 +152,14 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_PERF_EVENT,
 	BPF_PROG_TYPE_CGROUP_SKB,
 	BPF_PROG_TYPE_CGROUP_SOCK,
+	BPF_PROG_TYPE_SOCK_OPS,
+	BPF_PROG_TYPE_SK_SKB,
+	BPF_PROG_TYPE_CGROUP_DEVICE,
+	BPF_PROG_TYPE_SK_MSG = 16,
 	BPF_PROG_TYPE_CGROUP_SOCK_ADDR = BPF_PROG_TYPE_CGROUP_SOCK + 9,
 	BPF_PROG_TYPE_SK_REUSEPORT = 21,
+	BPF_PROG_TYPE_FLOW_DISSECTOR = 22,
+	BPF_PROG_TYPE_CGROUP_SYSCTL = 23,
 	BPF_PROG_TYPE_CGROUP_SOCKOPT = 25,
 	BPF_PROG_TYPE_FUSE = 31,
 };
@@ -153,20 +168,39 @@ enum bpf_attach_type {
 	BPF_CGROUP_INET_INGRESS,
 	BPF_CGROUP_INET_EGRESS,
 	BPF_CGROUP_INET_SOCK_CREATE,
-	BPF_CGROUP_INET4_BIND = BPF_CGROUP_INET_SOCK_CREATE + 6,
-	BPF_CGROUP_INET6_BIND,
+	BPF_CGROUP_SOCK_OPS,
+	BPF_SK_SKB_STREAM_PARSER,
+	BPF_SK_SKB_STREAM_VERDICT,
+	BPF_CGROUP_DEVICE,
+	BPF_SK_MSG_VERDICT = 7,
+	BPF_CGROUP_INET4_BIND = 8,
+	BPF_CGROUP_INET6_BIND = 9,
 	BPF_CGROUP_INET4_CONNECT,
 	BPF_CGROUP_INET6_CONNECT,
-	BPF_CGROUP_UDP4_SENDMSG = BPF_CGROUP_INET6_CONNECT + 3,
+	BPF_CGROUP_INET4_POST_BIND,
+	BPF_CGROUP_INET6_POST_BIND,
+	BPF_CGROUP_UDP4_SENDMSG,
 	BPF_CGROUP_UDP6_SENDMSG,
+	BPF_FLOW_DISSECTOR = 17,
+	BPF_CGROUP_SYSCTL = 18,
 	BPF_CGROUP_UDP4_RECVMSG = 19,
 	BPF_CGROUP_UDP6_RECVMSG,
 	BPF_CGROUP_GETSOCKOPT = 21,
 	BPF_CGROUP_SETSOCKOPT,
+	BPF_CGROUP_INET_SOCK_RELEASE = 34,
 	__MAX_BPF_ATTACH_TYPE,
 };
 
 #define MAX_BPF_ATTACH_TYPE __MAX_BPF_ATTACH_TYPE
+
+enum bpf_link_type {
+	BPF_LINK_TYPE_UNSPEC = 0,
+	BPF_LINK_TYPE_RAW_TRACEPOINT = 1,
+	BPF_LINK_TYPE_TRACING = 2,
+	BPF_LINK_TYPE_CGROUP = 3,
+
+	MAX_BPF_LINK_TYPE,
+};
 
 /* cgroup-bpf attach flags used in BPF_PROG_ATTACH command
  *
@@ -245,6 +279,9 @@ enum bpf_attach_type {
 
 /* Enable memory-mapping BPF map */
 #define BPF_F_MMAPABLE		(1U << 10)
+
+/* flags for BPF_MAP_LOOKUP_ELEM and BPF_MAP_UPDATE_ELEM */
+#define BPF_F_LOCK		(1U << 4)
 
 /* If BPF_F_NUMA_NODE is used in BPF_MAP_CREATE
  * command, the numa_node attribute will be used to
@@ -333,12 +370,24 @@ union bpf_attr {
 		__u32           duration;
 	} test;
 
+	struct { /* struct used by BPF_MAP_*_BATCH commands */
+		__aligned_u64	in_batch;
+		__aligned_u64	out_batch;
+		__aligned_u64	keys;
+		__aligned_u64	values;
+		__u32		count;
+		__u32		map_fd;
+		__u64		elem_flags;
+		__u64		flags;
+	} batch;
+
 	struct { /* anonymous struct used by BPF_*_GET_*_ID */
 		union {
 			__u32		start_id;
 			__u32		prog_id;
 			__u32		map_id;
 			__u32		btf_id;
+			__u32		link_id;
 		};
 		__u32		next_id;
 		__u32		open_flags;
@@ -371,6 +420,20 @@ union bpf_attr {
 		__u32		btf_log_size;
 		__u32		btf_log_level;
 	};
+
+	struct { /* anonymous struct used by BPF_LINK_CREATE command */
+		__u32		prog_fd;
+		__u32		target_fd;
+		__u32		attach_type;
+		__u32		flags;
+	} link_create;
+
+	struct { /* anonymous struct used by BPF_LINK_UPDATE command */
+		__u32		link_fd;
+		__u32		new_prog_fd;
+		__u32		flags;
+		__u32		old_prog_fd;
+	} link_update;
 } __attribute__((aligned(8)));
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
@@ -747,6 +810,25 @@ struct bpf_btf_info {
 	__u32 id;
 } __attribute__((aligned(8)));
 
+struct bpf_link_info {
+	__u32 type;
+	__u32 id;
+	__u32 prog_id;
+	union {
+		struct {
+			__aligned_u64 tp_name;
+			__u32 tp_name_len;
+		} raw_tracepoint;
+		struct {
+			__u32 attach_type;
+		} tracing;
+		struct {
+			__u64 cgroup_id;
+			__u32 attach_type;
+		} cgroup;
+	};
+} __attribute__((aligned(8)));
+
 /* User bpf_sock_addr struct to access socket fields and sockaddr struct passed
  * by user and intended to be used by socket (e.g. to bind to, depends on
  * attach attach type).
@@ -772,6 +854,10 @@ struct bpf_sock_addr {
 				 * Stored in network byte order.
 				 */
 	__bpf_md_ptr(struct bpf_sock *, sk);
+};
+
+struct bpf_spin_lock {
+	__u32	val;
 };
 
 struct bpf_sockopt {

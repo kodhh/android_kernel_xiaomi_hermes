@@ -852,6 +852,13 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	int err;
 
 	BUG_ON(!skb || !tcp_skb_pcount(skb));
+	tp = tcp_sk(sk);
+
+	skb_mstamp_get(&skb->skb_mstamp);
+	TCP_SKB_CB(skb)->tx.in_flight = TCP_SKB_CB(skb)->end_seq
+		- tp->snd_una;
+
+	tcp_rate_skb_sent(sk, skb);
 
 	/* If congestion control is doing timestamping, we must
 	 * take such a timestamp before we potentially clone/copy.
@@ -876,7 +883,6 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	}
 
 	inet = inet_sk(sk);
-	tp = tcp_sk(sk);
 	tcb = TCP_SKB_CB(skb);
 	memset(&opts, 0, sizeof(opts));
 
@@ -1675,6 +1681,20 @@ send_now:
 	tp->tso_deferred = 0;
 	return false;
 }
+
+u32 tcp_tso_autosize(const struct sock *sk, unsigned int mss_now,
+		     int min_tso_segs)
+{
+	u32 bytes, segs;
+
+	bytes = min(sk->sk_pacing_rate >> 10,
+		    sk->sk_gso_max_size - 1 - MAX_TCP_HEADER);
+
+	segs = max_t(u32, bytes / mss_now, min_tso_segs);
+
+	return segs;
+}
+EXPORT_SYMBOL(tcp_tso_autosize);
 
 /* Create a new MTU probe if we are ready.
  * MTU probe is regularly attempting to increase the path MTU by

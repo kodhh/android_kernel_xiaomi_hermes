@@ -59,6 +59,7 @@ struct Qdisc {
 	unsigned int		flags;
 #define TCQ_F_BUILTIN		1
 #define TCQ_F_INGRESS		2
+#define TCQ_F_EGRESS		4
 #define TCQ_F_CAN_BYPASS	4
 #define TCQ_F_MQROOT		8
 #define TCQ_F_ONETXQUEUE	0x10 /* dequeue_skb() can assume all skbs are for
