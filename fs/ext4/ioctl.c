@@ -634,6 +634,12 @@ resizefs_out:
 		return 0;
 	}
 
+	case EXT4_IOC_SET_ENCRYPTION_POLICY:
+		return fscrypt_ioctl_set_policy(filp, (const void __user *)arg);
+
+	case EXT4_IOC_GET_ENCRYPTION_POLICY:
+		return fscrypt_ioctl_get_policy(filp, (void __user *)arg);
+
 	default:
 		return -ENOTTY;
 	}

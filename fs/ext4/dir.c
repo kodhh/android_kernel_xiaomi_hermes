@@ -115,6 +115,9 @@ static int ext4_readdir(struct file *filp,
 	struct super_block *sb = inode->i_sb;
 	int ret = 0;
 	int dir_has_error = 0;
+#ifdef CONFIG_FS_ENCRYPTION
+	struct fscrypt_str fname_crypto_str = FSTR_INIT(NULL, 0);
+#endif
 
 	if (is_dx_dir(inode)) {
 		err = ext4_dx_readdir(filp, dirent, filldir);
@@ -136,6 +139,12 @@ static int ext4_readdir(struct file *filp,
 					   &has_inline_data);
 		if (has_inline_data)
 			return ret;
+	}
+
+	if (ext4_encrypted_inode(inode)) {
+		err = fscrypt_get_encryption_info(inode);
+		if (err && err != -ENOKEY)
+			return err;
 	}
 
 	stored = 0;
@@ -192,6 +201,15 @@ static int ext4_readdir(struct file *filp,
 		}
 		set_buffer_verified(bh);
 
+#ifdef CONFIG_FS_ENCRYPTION
+		if (ext4_encrypted_inode(inode)) {
+			err = fscrypt_fname_alloc_buffer(inode, EXT4_NAME_LEN,
+							 &fname_crypto_str);
+			if (err < 0)
+				return err;
+		}
+#endif
+
 revalidate:
 		/* If the dir block has changed since the last call to
 		 * readdir(2), then we might be pointing to an invalid
@@ -246,11 +264,30 @@ revalidate:
 				 */
 				u64 version = filp->f_version;
 
-				error = filldir(dirent, de->name,
-						de->name_len,
+				if (ext4_encrypted_inode(inode)) {
+					struct fscrypt_str de_name =
+						FSTR_INIT(de->name,
+							  de->name_len);
+					error = fscrypt_fname_disk_to_usr(
+						inode, 0, 0, &de_name,
+						&fname_crypto_str);
+					if (error)
+						break;
+					error = filldir(dirent,
+						fname_crypto_str.name,
+						fname_crypto_str.len,
 						filp->f_pos,
 						le32_to_cpu(de->inode),
-						get_dtype(sb, de->file_type));
+						get_dtype(sb,
+							  de->file_type));
+				} else {
+					error = filldir(dirent, de->name,
+							de->name_len,
+							filp->f_pos,
+							le32_to_cpu(de->inode),
+							get_dtype(sb,
+								de->file_type));
+				}
 				if (error)
 					break;
 				if (version != filp->f_version)
@@ -264,6 +301,9 @@ revalidate:
 		brelse(bh);
 	}
 out:
+#ifdef CONFIG_FS_ENCRYPTION
+	fscrypt_fname_free_buffer(&fname_crypto_str);
+#endif
 	return ret;
 }
 

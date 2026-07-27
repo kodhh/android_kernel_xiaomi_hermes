@@ -35,6 +35,8 @@
 #include <linux/compat.h>
 #endif
 
+#include <linux/fscrypt.h>
+
 /*
  * The fourth extended filesystem constants/structures
  */
@@ -387,7 +389,7 @@ struct flex_groups {
 #define EXT4_DIRTY_FL			0x00000100
 #define EXT4_COMPRBLK_FL		0x00000200 /* One or more compressed clusters */
 #define EXT4_NOCOMPR_FL			0x00000400 /* Don't compress */
-#define EXT4_ECOMPR_FL			0x00000800 /* Compression error */
+#define EXT4_ENCRYPT_FL			0x00000800 /* encrypted file */
 /* End compression flags --- maybe not all used */
 #define EXT4_INDEX_FL			0x00001000 /* hash-indexed directory */
 #define EXT4_IMAGIC_FL			0x00002000 /* AFS directory */
@@ -409,7 +411,8 @@ struct flex_groups {
 #define EXT4_FL_INHERITED (EXT4_SECRM_FL | EXT4_UNRM_FL | EXT4_COMPR_FL |\
 			   EXT4_SYNC_FL | EXT4_NODUMP_FL | EXT4_NOATIME_FL |\
 			   EXT4_NOCOMPR_FL | EXT4_JOURNAL_DATA_FL |\
-			   EXT4_NOTAIL_FL | EXT4_DIRSYNC_FL)
+			   EXT4_NOTAIL_FL | EXT4_DIRSYNC_FL |\
+			   EXT4_ENCRYPT_FL)
 
 /* Flags that are appropriate for regular files (all but dir-specific ones). */
 #define EXT4_REG_FLMASK (~(EXT4_DIRSYNC_FL | EXT4_TOPDIR_FL))
@@ -444,7 +447,7 @@ enum {
 	EXT4_INODE_DIRTY	= 8,
 	EXT4_INODE_COMPRBLK	= 9,	/* One or more compressed clusters */
 	EXT4_INODE_NOCOMPR	= 10,	/* Don't compress */
-	EXT4_INODE_ECOMPR	= 11,	/* Compression error */
+	EXT4_INODE_ENCRYPT	= 11,	/* Encrypted file */
 /* End compression flags --- maybe not all used */
 	EXT4_INODE_INDEX	= 12,	/* hash-indexed directory */
 	EXT4_INODE_IMAGIC	= 13,	/* AFS directory */
@@ -489,7 +492,7 @@ static inline void ext4_check_flag_values(void)
 	CHECK_FLAG_VALUE(DIRTY);
 	CHECK_FLAG_VALUE(COMPRBLK);
 	CHECK_FLAG_VALUE(NOCOMPR);
-	CHECK_FLAG_VALUE(ECOMPR);
+	CHECK_FLAG_VALUE(ENCRYPT);
 	CHECK_FLAG_VALUE(INDEX);
 	CHECK_FLAG_VALUE(IMAGIC);
 	CHECK_FLAG_VALUE(JOURNAL_DATA);
@@ -618,6 +621,9 @@ enum {
 #define EXT4_IOC_MOVE_EXT		_IOWR('f', 15, struct move_extent)
 #define EXT4_IOC_RESIZE_FS		_IOW('f', 16, __u64)
 #define EXT4_IOC_SWAP_BOOT		_IO('f', 17)
+#define EXT4_IOC_SET_ENCRYPTION_POLICY	FS_IOC_SET_ENCRYPTION_POLICY
+#define EXT4_IOC_GET_ENCRYPTION_PWSALT	FS_IOC_GET_ENCRYPTION_PWSALT
+#define EXT4_IOC_GET_ENCRYPTION_POLICY	FS_IOC_GET_ENCRYPTION_POLICY
 
 #if defined(__KERNEL__) && defined(CONFIG_COMPAT)
 /*
@@ -2158,6 +2164,12 @@ extern void ext4_truncate(struct inode *);
 extern int ext4_punch_hole(struct file *file, loff_t offset, loff_t length);
 extern int ext4_truncate_restart_trans(handle_t *, struct inode *, int nblocks);
 extern void ext4_set_inode_flags(struct inode *);
+extern bool ext4_empty_dir(struct inode *inode);
+
+static inline bool ext4_encrypted_inode(struct inode *inode)
+{
+	return ext4_test_inode_flag(inode, EXT4_INODE_ENCRYPT);
+}
 extern void ext4_get_inode_flags(struct ext4_inode_info *);
 extern int ext4_alloc_da_blocks(struct inode *inode);
 extern void ext4_set_aops(struct inode *inode);

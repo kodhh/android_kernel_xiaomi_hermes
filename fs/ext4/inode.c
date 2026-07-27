@@ -315,8 +315,11 @@ void ext4_evict_inode(struct inode *inode)
 	ext4_journal_stop(handle);
 	sb_end_intwrite(inode->i_sb);
 	return;
+	fscrypt_put_encryption_info(inode, NULL);
+	return;
 no_delete:
 	ext4_clear_inode(inode);	/* We must guarantee clearing of inode... */
+	fscrypt_put_encryption_info(inode, NULL);
 }
 
 #ifdef CONFIG_QUOTA

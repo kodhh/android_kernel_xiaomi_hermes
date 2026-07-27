@@ -208,6 +208,14 @@ static int ext4_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct address_space *mapping = file->f_mapping;
 
+	if (ext4_encrypted_inode(file_inode(file))) {
+		int err = fscrypt_get_encryption_info(file_inode(file));
+		if (err)
+			return 0;
+		if (!fscrypt_has_encryption_key(file_inode(file)))
+			return -ENOKEY;
+	}
+
 	if (!mapping->a_ops->readpage)
 		return -ENOEXEC;
 	file_accessed(file);
@@ -276,6 +284,14 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
 		if (unlikely(jinode != NULL))
 			jbd2_free_inode(jinode);
 	}
+	if (ext4_encrypted_inode(inode)) {
+		int ret = fscrypt_get_encryption_info(inode);
+		if (ret)
+			return -EACCES;
+		if (!fscrypt_has_encryption_key(inode))
+			return -ENOKEY;
+	}
+
 	return dquot_file_open(inode, filp);
 }
 
