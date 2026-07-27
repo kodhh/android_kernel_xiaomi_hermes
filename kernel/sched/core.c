@@ -306,25 +306,6 @@ int sysctl_sched_rt_runtime = 950000;
 
 
 /*
- * __task_rq_lock - lock the rq @p resides on.
- */
-static inline struct rq *__task_rq_lock(struct task_struct *p)
-	__acquires(rq->lock)
-{
-	struct rq *rq;
-
-	lockdep_assert_held(&p->pi_lock);
-
-	for (;;) {
-		rq = task_rq(p);
-		raw_spin_lock(&rq->lock);
-		if (likely(rq == task_rq(p)))
-			return rq;
-		raw_spin_unlock(&rq->lock);
-	}
-}
-
-/*
  * task_rq_lock - lock p->pi_lock and lock the rq @p resides on.
  */
 static struct rq *task_rq_lock(struct task_struct *p, unsigned long *flags)
@@ -344,12 +325,6 @@ static struct rq *task_rq_lock(struct task_struct *p, unsigned long *flags)
 	}
 }
 
-static void __task_rq_unlock(struct rq *rq)
-	__releases(rq->lock)
-{
-	raw_spin_unlock(&rq->lock);
-}
-
 static inline void
 task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
 	__releases(rq->lock)
@@ -362,7 +337,7 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
 /*
  * this_rq_lock - lock this runqueue and disable interrupts.
  */
-static struct rq *this_rq_lock(void)
+struct rq *this_rq_lock(void)
 	__acquires(rq->lock)
 {
 	struct rq *rq;
@@ -857,6 +832,7 @@ static void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
 	sched_info_queued(p);
+	psi_enqueue(p, flags & ENQUEUE_WAKEUP);
 	p->sched_class->enqueue_task(rq, p, flags);
 #ifdef CONFIG_MTK_SCHED_CMP_TGS
 	sched_tg_enqueue(rq, p);
@@ -868,6 +844,7 @@ static void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_rq_clock(rq);
 	sched_info_dequeued(p);
+	psi_dequeue(p, flags & DEQUEUE_SLEEP);
 	p->sched_class->dequeue_task(rq, p, flags);
 #ifdef CONFIG_MTK_SCHED_CMP_TGS
 	sched_tg_dequeue(rq, p);
@@ -1703,6 +1680,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		char strings[128] = "";
 #endif
 		wake_flags |= WF_MIGRATED;
+		psi_ttwu_dequeue(p);
 #ifdef CONFIG_MT_LOAD_BALANCE_PROFILER
 		snprintf(strings, 128, "%d:%d:%s:wakeup:%d:%d:%s", task_cpu(current), current->pid, current->comm, cpu, p->pid, p->comm);
 		trace_sched_lbprof_log(strings);
@@ -2988,6 +2966,7 @@ void scheduler_tick(void)
 	raw_spin_lock(&rq->lock);
 	update_rq_clock(rq);
 	curr->sched_class->task_tick(rq, curr, 0);
+	psi_task_tick(rq);
 	update_cpu_load_active(rq);
 #ifdef CONFIG_MT_RT_SCHED
 	mt_check_rt_policy(rq);

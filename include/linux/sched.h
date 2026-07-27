@@ -1237,6 +1237,9 @@ struct task_struct {
 	/* Revert to default priority/policy when forking */
 	unsigned sched_reset_on_fork:1;
 	unsigned sched_contributes_to_load:1;
+	unsigned sched_psi_wake_requeue:1;
+
+	unsigned int psi_flags;
 
 	unsigned long atomic_flags; /* Flags needing atomic access. */
 
@@ -1782,6 +1785,7 @@ extern int task_free_unregister(struct notifier_block *n);
 #define PF_MUTEX_TESTER	0x20000000	/* Thread belongs to the rt mutex tester */
 #define PF_FREEZER_SKIP	0x40000000	/* Freezer should not count it as freezable */
 #define PF_MTKPASR	0x80000000	/* I am in MTKPASR process */
+#define PF_MEMSTALL	0x100000000ULL	/* Stalled due to lack of memory */
 
 #define task_in_mtkpasr(task)	unlikely(task->flags & PF_MTKPASR)
 

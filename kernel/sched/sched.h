@@ -640,6 +640,34 @@ DECLARE_PER_CPU(struct hmp_domain *, hmp_cpu_domain);
 
 #endif /* CONFIG_SMP */
 
+static inline struct rq *__task_rq_lock(struct task_struct *p)
+	__acquires(rq->lock)
+{
+	struct rq *rq;
+
+	lockdep_assert_held(&p->pi_lock);
+
+	for (;;) {
+		rq = task_rq(p);
+		raw_spin_lock(&rq->lock);
+		if (likely(rq == task_rq(p)))
+			return rq;
+		raw_spin_unlock(&rq->lock);
+	}
+}
+
+static void __task_rq_unlock(struct rq *rq)
+	__releases(rq->lock)
+{
+	raw_spin_unlock(&rq->lock);
+}
+
+/*
+ * this_rq_lock - lock this runqueue and disable interrupts.
+ */
+struct rq *this_rq_lock(void);
+
+#include <linux/psi.h>
 #include "stats.h"
 #include "auto_group.h"
 

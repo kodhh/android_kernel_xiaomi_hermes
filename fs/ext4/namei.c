@@ -1411,6 +1411,12 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, unsi
 	struct ext4_dir_entry_2 *de;
 	struct buffer_head *bh;
 
+	if (ext4_encrypted_inode(dir)) {
+		int res = fscrypt_get_encryption_info(dir);
+		if (res && res != -ENOKEY)
+			return ERR_PTR(res);
+	}
+
 	if (dentry->d_name.len > EXT4_NAME_LEN)
 		return ERR_PTR(-ENAMETOOLONG);
 
@@ -1435,6 +1441,17 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry, unsi
 					 "deleted inode referenced: %u",
 					 ino);
 			return ERR_PTR(-EIO);
+		}
+		if (!IS_ERR(inode) && ext4_encrypted_inode(dir) &&
+		    (S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
+		     S_ISLNK(inode->i_mode)) &&
+		    !fscrypt_has_permitted_context(dir, inode)) {
+			iput(inode);
+			ext4_warning(inode->i_sb,
+				     "Inconsistent encryption contexts: %lu/%lu",
+				     (unsigned long) dir->i_ino,
+				     (unsigned long) inode->i_ino);
+			return ERR_PTR(-EPERM);
 		}
 	}
 	return d_splice_alias(inode, dentry);
@@ -2471,7 +2488,7 @@ out_stop:
 /*
  * routine to check that the specified directory is empty (for rmdir)
  */
-static int empty_dir(struct inode *inode)
+bool ext4_empty_dir(struct inode *inode)
 {
 	unsigned int offset;
 	struct buffer_head *bh;
@@ -2718,7 +2735,7 @@ static int ext4_rmdir(struct inode *dir, struct dentry *dentry)
 		goto end_rmdir;
 
 	retval = -ENOTEMPTY;
-	if (!empty_dir(inode))
+	if (!ext4_empty_dir(inode))
 		goto end_rmdir;
 
 	handle = ext4_journal_start(dir, EXT4_HT_DIR,
@@ -2939,6 +2956,10 @@ static int ext4_link(struct dentry *old_dentry,
 
 	dquot_initialize(dir);
 
+	if (ext4_encrypted_inode(dir) &&
+	    !fscrypt_has_permitted_context(dir, inode))
+		return -EPERM;
+
 retry:
 	handle = ext4_journal_start(dir, EXT4_HT_DIR,
 		(EXT4_DATA_TRANS_BLOCKS(dir->i_sb) +
@@ -3009,10 +3030,6 @@ static struct buffer_head *ext4_get_first_dir_block(handle_t *handle,
 /*
  * rename2 helpers ported from msm-3.18 kernel.lnx.3.18.r34-rel
  */
-
-/* No encryption support in this kernel */
-#define ext4_encrypted_inode(inode) 0
-#define ext4_is_child_context_consistent_with_parent(p, c) 1
 
 struct ext4_renament {
 	struct inode *dir;
@@ -3219,6 +3236,11 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 	if (new.inode)
 		dquot_initialize(new.inode);
 
+	retval = fscrypt_prepare_rename(old_dir, old_dentry, new_dir,
+					new_dentry, flags);
+	if (retval)
+		return retval;
+
 	old.bh = ext4_find_entry(old.dir, &old.dentry->d_name, &old.de, NULL);
 	if (IS_ERR(old.bh))
 		return PTR_ERR(old.bh);
@@ -3228,8 +3250,7 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	if ((old.dir != new.dir) &&
 	    ext4_encrypted_inode(new.dir) &&
-	    !ext4_is_child_context_consistent_with_parent(new.dir,
-							  old.inode)) {
+	    !fscrypt_has_permitted_context(new.dir, old.inode)) {
 		retval = -EPERM;
 		goto end_rename;
 	}
@@ -3274,7 +3295,7 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 	if (S_ISDIR(old.inode->i_mode)) {
 		if (new.inode) {
 			retval = -ENOTEMPTY;
-			if (!empty_dir(new.inode))
+			if (!ext4_empty_dir(new.inode))
 				goto end_rename;
 		} else {
 			retval = -EMLINK;
@@ -3377,13 +3398,16 @@ static int ext4_cross_rename(struct inode *old_dir, struct dentry *old_dentry,
 	u8 new_file_type;
 	int retval;
 
+	retval = fscrypt_prepare_rename(old_dir, old_dentry, new_dir,
+					new_dentry, RENAME_EXCHANGE);
+	if (retval)
+		return retval;
+
 	if ((ext4_encrypted_inode(old_dir) ||
 	     ext4_encrypted_inode(new_dir)) &&
 	    (old_dir != new_dir) &&
-	    (!ext4_is_child_context_consistent_with_parent(new_dir,
-							   old.inode) ||
-	     !ext4_is_child_context_consistent_with_parent(old_dir,
-							   new.inode)))
+	    (!fscrypt_has_permitted_context(new_dir, old.inode) ||
+	     !fscrypt_has_permitted_context(old_dir, new.inode)))
 		return -EPERM;
 
 	dquot_initialize(old.dir);

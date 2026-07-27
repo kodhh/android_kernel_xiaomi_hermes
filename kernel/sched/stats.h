@@ -148,11 +148,86 @@ sched_info_switch(struct task_struct *prev, struct task_struct *next)
 	if (unlikely(sched_info_on()))
 		__sched_info_switch(prev, next);
 }
+
+/*
+ * PSI hooks - track task state changes for pressure stall information.
+ */
+static inline void psi_enqueue(struct task_struct *p, bool wakeup)
+{
+	int clear = 0, set = TSK_RUNNING;
+
+	if (static_key_false(&psi_disabled))
+		return;
+
+	if (!wakeup || p->sched_psi_wake_requeue) {
+		if (p->flags & PF_MEMSTALL)
+			set |= TSK_MEMSTALL;
+		if (p->sched_psi_wake_requeue)
+			p->sched_psi_wake_requeue = 0;
+	} else {
+		if (p->in_iowait)
+			clear |= TSK_IOWAIT;
+	}
+
+	psi_task_change(p, clear, set);
+}
+
+static inline void psi_dequeue(struct task_struct *p, bool sleep)
+{
+	int clear = TSK_RUNNING, set = 0;
+
+	if (static_key_false(&psi_disabled))
+		return;
+
+	if (!sleep) {
+		if (p->flags & PF_MEMSTALL)
+			clear |= TSK_MEMSTALL;
+	} else {
+		if (p->in_iowait)
+			set |= TSK_IOWAIT;
+	}
+
+	psi_task_change(p, clear, set);
+}
+
+static inline void psi_ttwu_dequeue(struct task_struct *p)
+{
+	if (static_key_false(&psi_disabled))
+		return;
+	if (unlikely(p->in_iowait || (p->flags & PF_MEMSTALL))) {
+		struct rq *rq;
+		int clear = 0;
+
+		if (p->in_iowait)
+			clear |= TSK_IOWAIT;
+		if (p->flags & PF_MEMSTALL)
+			clear |= TSK_MEMSTALL;
+
+		rq = __task_rq_lock(p);
+		psi_task_change(p, clear, 0);
+		p->sched_psi_wake_requeue = 1;
+		__task_rq_unlock(rq);
+	}
+}
+
+static inline void psi_task_tick(struct rq *rq)
+{
+	if (static_key_false(&psi_disabled))
+		return;
+
+	if (unlikely(rq->curr->flags & PF_MEMSTALL))
+		psi_memstall_tick(rq->curr, cpu_of(rq));
+}
 #else
 #define sched_info_queued(t)			do { } while (0)
 #define sched_info_reset_dequeued(t)	do { } while (0)
 #define sched_info_dequeued(t)			do { } while (0)
 #define sched_info_switch(t, next)		do { } while (0)
+
+static inline void psi_enqueue(struct task_struct *p, bool wakeup) {}
+static inline void psi_dequeue(struct task_struct *p, bool sleep) {}
+static inline void psi_ttwu_dequeue(struct task_struct *p) {}
+static inline void psi_task_tick(struct rq *rq) {}
 #endif /* CONFIG_SCHEDSTATS || CONFIG_TASK_DELAY_ACCT */
 
 /*

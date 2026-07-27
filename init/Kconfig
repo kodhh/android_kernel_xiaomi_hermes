@@ -420,6 +420,29 @@ config TASK_IO_ACCOUNTING
 
 	  Say N if unsure.
 
+config PSI
+	bool "Pressure stall information tracking"
+	help
+	  Collect metrics that indicate how overcommitted the CPU, memory,
+	  and IO capacity are in the system.
+
+	  If you say Y here, the kernel will create /proc/pressure/ with the
+	  pressure statistics files cpu, memory, and io. These will indicate
+	  the share of walltime in which some or all tasks in the system are
+	  delayed due to contention of the respective resource.
+
+config PSI_DEFAULT_DISABLED
+	bool "Require boot parameter to enable pressure stall information tracking"
+	depends on PSI
+	default n
+	help
+	  If set, psi tracking and /proc/pressure/ files will be disabled
+	  by default and only enabled via the psi=1 boot command line parameter.
+
+	  For more details see Documentation/accounting/psi.txt.
+
+	  Say N if unsure.
+
 endmenu # "CPU/Task time and stats accounting"
 
 menu "RCU Subsystem"

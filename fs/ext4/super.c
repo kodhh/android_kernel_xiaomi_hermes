@@ -44,6 +44,8 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 
+#include <linux/fscrypt.h>
+
 #include "ext4.h"
 #include "ext4_extents.h"	/* Needed for trace points definition */
 #include "ext4_jbd2.h"
@@ -1075,6 +1077,86 @@ static const struct quotactl_ops ext4_qctl_sysfile_operations = {
 	.set_info	= dquot_set_dqinfo,
 	.get_dqblk	= dquot_get_dqblk,
 	.set_dqblk	= dquot_set_dqblk
+};
+#endif
+
+#ifdef CONFIG_FS_ENCRYPTION
+
+#define EXT4_XATTR_NAME_ENCRYPTION_CONTEXT "c"
+
+static int ext4_get_context(struct inode *inode, void *ctx, size_t len)
+{
+	return ext4_xattr_get(inode, EXT4_XATTR_INDEX_ENCRYPTION,
+			      EXT4_XATTR_NAME_ENCRYPTION_CONTEXT, ctx, len);
+}
+
+static int ext4_set_context(struct inode *inode, const void *ctx, size_t len,
+			    void *fs_data)
+{
+	handle_t *handle = fs_data;
+	int res, res2, retries = 0;
+
+	if (inode->i_ino == EXT4_ROOT_INO)
+		return -EPERM;
+
+	res = ext4_convert_inline_data(inode);
+	if (res)
+		return res;
+
+	if (handle) {
+		res = ext4_xattr_set_handle(handle, inode,
+					    EXT4_XATTR_INDEX_ENCRYPTION,
+					    EXT4_XATTR_NAME_ENCRYPTION_CONTEXT,
+					    ctx, len, 0);
+		if (!res) {
+			ext4_set_inode_flag(inode, EXT4_INODE_ENCRYPT);
+			ext4_clear_inode_state(inode,
+					       EXT4_STATE_MAY_INLINE_DATA);
+			ext4_set_inode_flags(inode);
+		}
+		return res;
+	}
+
+	dquot_initialize(inode);
+retry:
+	handle = ext4_journal_start(inode, EXT4_HT_MISC,
+				    EXT4_DATA_TRANS_BLOCKS(inode->i_sb) +
+				    EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+
+	res = ext4_xattr_set_handle(handle, inode,
+				    EXT4_XATTR_INDEX_ENCRYPTION,
+				    EXT4_XATTR_NAME_ENCRYPTION_CONTEXT,
+				    ctx, len, 0);
+	if (!res) {
+		ext4_set_inode_flag(inode, EXT4_INODE_ENCRYPT);
+		ext4_set_inode_flags(inode);
+		res = ext4_mark_inode_dirty(handle, inode);
+		if (res)
+			EXT4_ERROR_INODE(inode, "Failed to mark inode dirty");
+	}
+	res2 = ext4_journal_stop(handle);
+
+	if (res == -ENOSPC && ext4_should_retry_alloc(inode->i_sb, &retries))
+		goto retry;
+	if (!res)
+		res = res2;
+	return res;
+}
+
+static unsigned ext4_max_namelen(struct inode *inode)
+{
+	return S_ISLNK(inode->i_mode) ? inode->i_sb->s_blocksize : EXT4_NAME_LEN;
+}
+
+static const struct fscrypt_operations ext4_cryptops = {
+	.key_prefix	= "ext4:",
+	.get_context	= ext4_get_context,
+	.set_context	= ext4_set_context,
+	.is_encrypted	= ext4_encrypted_inode,
+	.empty_dir	= ext4_empty_dir,
+	.max_namelen	= ext4_max_namelen,
 };
 #endif
 
@@ -3884,6 +3966,9 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_op = &ext4_nojournal_sops;
 	sb->s_export_op = &ext4_export_ops;
 	sb->s_xattr = ext4_xattr_handlers;
+#ifdef CONFIG_FS_ENCRYPTION
+	sb->s_cop = &ext4_cryptops;
+#endif
 #ifdef CONFIG_QUOTA
 	sb->dq_op = &ext4_quota_operations;
 	if (EXT4_HAS_RO_COMPAT_FEATURE(sb, EXT4_FEATURE_RO_COMPAT_QUOTA))
