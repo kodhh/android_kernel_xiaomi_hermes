@@ -24,16 +24,20 @@
 
 #include "sched.h"
 
-/* PSI enabled at boot via psi=1 */
-static bool psi_enable __initdata;
+static int psi_bug __read_mostly;
 
+struct static_key psi_disabled = STATIC_KEY_INIT_TRUE;
+
+#ifdef CONFIG_PSI_DEFAULT_DISABLED
+static bool psi_enable;
+#else
+static bool psi_enable = true;
+#endif
 static int __init setup_psi(char *str)
 {
 	return strtobool(str, &psi_enable) == 0;
 }
 __setup("psi=", setup_psi);
-
-struct static_key psi_disabled = STATIC_KEY_INIT_TRUE;
 
 /* Running averages - we need to be higher-res than loadavg */
 #define PSI_FREQ	(2*HZ+1)	/* 2 sec intervals */
@@ -86,7 +90,7 @@ static u64 psi_period __read_mostly;
 
 /* System-level pressure and stall tracking */
 static DEFINE_PER_CPU(struct psi_group_cpu, system_group_pcpu);
-static struct psi_group psi_system = {
+struct psi_group psi_system = {
 	.pcpu = &system_group_pcpu,
 };
 
@@ -123,7 +127,6 @@ void __init psi_init(void)
 	psi_period = jiffies_to_nsecs(PSI_FREQ);
 	group_init(&psi_system);
 	static_key_slow_dec(&psi_disabled);
-	pr_info("psi: Pressure stall information tracking enabled\n");
 }
 
 static bool test_state(unsigned int *tasks, enum psi_states state)
@@ -875,12 +878,10 @@ static const struct file_operations psi_cpu_fops = {
 
 static int __init psi_proc_init(void)
 {
-	if (psi_enable) {
-		proc_mkdir("pressure", NULL);
-		proc_create("pressure/io", 0, NULL, &psi_io_fops);
-		proc_create("pressure/memory", 0, NULL, &psi_memory_fops);
-		proc_create("pressure/cpu", 0, NULL, &psi_cpu_fops);
-	}
+	proc_mkdir("pressure", NULL);
+	proc_create("pressure/io", 0, NULL, &psi_io_fops);
+	proc_create("pressure/memory", 0, NULL, &psi_memory_fops);
+	proc_create("pressure/cpu", 0, NULL, &psi_cpu_fops);
 	return 0;
 }
 module_init(psi_proc_init);
