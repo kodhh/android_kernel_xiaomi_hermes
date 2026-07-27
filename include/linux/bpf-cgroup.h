@@ -312,6 +312,10 @@ static inline int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 
 #endif /* CONFIG_CGROUP_BPF */
 
+struct bpf_cgroup_link;
+int __cgroup_bpf_replace(struct cgroup *cgrp, struct bpf_cgroup_link *link,
+			 struct bpf_prog *new_prog);
+
 struct bpf_cgroup_storage *bpf_cgroup_storage_alloc(struct bpf_prog *prog,
 						    enum bpf_cgroup_storage_type stype);
 void bpf_cgroup_storage_free(struct bpf_cgroup_storage *storage);
