@@ -160,8 +160,26 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 	__ret;								       \
 })
 
+#define BPF_CGROUP_RUN_SK_PROG(sk, type)				       \
+({									       \
+	int __ret = 0;							       \
+	if (cgroup_bpf_enabled && sk) {					       \
+		__ret = __cgroup_bpf_run_filter_sk(sk, type);		       \
+	}								       \
+	__ret;								       \
+})
+
+#define BPF_CGROUP_RUN_PROG_INET_SOCK(sk)				       \
+	BPF_CGROUP_RUN_SK_PROG(sk, BPF_CGROUP_INET_SOCK_CREATE)
+
 #define BPF_CGROUP_RUN_PROG_INET_SOCK_RELEASE(sk)			       \
 	BPF_CGROUP_RUN_SK_PROG(sk, BPF_CGROUP_INET_SOCK_RELEASE)
+
+#define BPF_CGROUP_RUN_PROG_INET4_POST_BIND(sk)				       \
+	BPF_CGROUP_RUN_SK_PROG(sk, BPF_CGROUP_INET4_POST_BIND)
+
+#define BPF_CGROUP_RUN_PROG_INET6_POST_BIND(sk)				       \
+	BPF_CGROUP_RUN_SK_PROG(sk, BPF_CGROUP_INET6_POST_BIND)
 
 #define BPF_CGROUP_RUN_SA_PROG(sk, uaddr, type)				       \
 ({									       \

@@ -26,26 +26,13 @@ EXPORT_SYMBOL(cgroup_bpf_enabled_key);
  */
 static void bpf_cgroup_storages_free(struct bpf_cgroup_storage *storages[])
 {
-	enum bpf_cgroup_storage_type stype;
-
-	for (stype = 0; stype < MAX_BPF_CGROUP_STORAGE_TYPE; stype++)
-		bpf_cgroup_storage_free(storages[stype]);
 }
 
 static int bpf_cgroup_storages_alloc(struct bpf_cgroup_storage *storages[],
 				     struct bpf_prog *prog)
 {
-	enum bpf_cgroup_storage_type stype;
-
-	for (stype = 0; stype < MAX_BPF_CGROUP_STORAGE_TYPE; stype++) {
-		storages[stype] = bpf_cgroup_storage_alloc(prog, stype);
-		if (IS_ERR(storages[stype])) {
-			storages[stype] = NULL;
-			bpf_cgroup_storages_free(storages);
-			return -ENOMEM;
-		}
-	}
-
+	memset(storages, 0, sizeof(struct bpf_cgroup_storage *) *
+	       MAX_BPF_CGROUP_STORAGE_TYPE);
 	return 0;
 }
 
@@ -62,18 +49,10 @@ static void bpf_cgroup_storages_link(struct bpf_cgroup_storage *storages[],
 				     struct cgroup *cgrp,
 				     enum bpf_attach_type attach_type)
 {
-	enum bpf_cgroup_storage_type stype;
-
-	for (stype = 0; stype < MAX_BPF_CGROUP_STORAGE_TYPE; stype++)
-		bpf_cgroup_storage_link(storages[stype], cgrp, attach_type);
 }
 
 static void bpf_cgroup_storages_unlink(struct bpf_cgroup_storage *storages[])
 {
-	enum bpf_cgroup_storage_type stype;
-
-	for (stype = 0; stype < MAX_BPF_CGROUP_STORAGE_TYPE; stype++)
-		bpf_cgroup_storage_unlink(storages[stype]);
 }
 
 static void bpf_cgroup_link_auto_detach(struct bpf_cgroup_link *link)

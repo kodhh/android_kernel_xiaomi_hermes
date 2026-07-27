@@ -2855,6 +2855,37 @@ sock_addr_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 const struct bpf_func_proto bpf_sk_storage_get_proto __weak;
 const struct bpf_func_proto bpf_sk_storage_delete_proto __weak;
 
+#ifdef CONFIG_INET
+static const struct bpf_func_proto bpf_sk_lookup_tcp_proto = {
+	.func		= NULL,
+	.gpl_only	= false,
+	.ret_type	= RET_PTR_TO_SOCKET_OR_NULL,
+	.arg1_type	= ARG_PTR_TO_CTX,
+	.arg2_type	= ARG_PTR_TO_MEM,
+	.arg3_type	= ARG_CONST_SIZE,
+	.arg4_type	= ARG_ANYTHING,
+	.arg5_type	= ARG_ANYTHING,
+};
+
+static const struct bpf_func_proto bpf_sk_lookup_udp_proto = {
+	.func		= NULL,
+	.gpl_only	= false,
+	.ret_type	= RET_PTR_TO_SOCKET_OR_NULL,
+	.arg1_type	= ARG_PTR_TO_CTX,
+	.arg2_type	= ARG_PTR_TO_MEM,
+	.arg3_type	= ARG_CONST_SIZE,
+	.arg4_type	= ARG_ANYTHING,
+	.arg5_type	= ARG_ANYTHING,
+};
+
+static const struct bpf_func_proto bpf_sk_release_proto = {
+	.func		= NULL,
+	.gpl_only	= false,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_SOCKET,
+};
+#endif /* CONFIG_INET */
+
 static const struct bpf_func_proto *
 cg_skb_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
