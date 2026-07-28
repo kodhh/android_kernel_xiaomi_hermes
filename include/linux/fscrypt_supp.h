@@ -141,8 +141,6 @@ extern void fscrypt_pullback_bio_page(struct page **, bool);
 extern int fscrypt_zeroout_range(const struct inode *, pgoff_t, sector_t,
 				 unsigned int);
 
-#endif	/* _LINUX_FSCRYPT_SUPP_H */
-
 /* hooks.c */
 extern int __fscrypt_prepare_rename(struct inode *old_dir,
 				    struct dentry *old_dentry,
@@ -196,3 +194,5 @@ static inline int fscrypt_prepare_rename(struct inode *old_dir,
 						new_dir, new_dentry, flags);
 	return 0;
 }
+
+#endif	/* _LINUX_FSCRYPT_SUPP_H */

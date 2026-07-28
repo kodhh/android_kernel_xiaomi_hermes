@@ -13,8 +13,6 @@ struct seq_file;
 
 extern struct static_key psi_disabled;
 
-void psi_init(void);
-
 void psi_task_change(struct task_struct *task, int clear, int set);
 
 void psi_memstall_tick(struct task_struct *task, int cpu);

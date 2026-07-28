@@ -118,16 +118,18 @@ static void group_init(struct psi_group *group)
 	group->polling_until = 0;
 }
 
-void __init psi_init(void)
+static int __init psi_init(void)
 {
 	if (!psi_enable) {
-		return;
+		return 0;
 	}
 
 	psi_period = jiffies_to_nsecs(PSI_FREQ);
 	group_init(&psi_system);
 	static_key_slow_dec(&psi_disabled);
+	return 0;
 }
+core_initcall(psi_init);
 
 static bool test_state(unsigned int *tasks, enum psi_states state)
 {
@@ -459,7 +461,6 @@ static u32 psi_group_change(struct psi_group *group, int cpu,
 	unsigned int t, m;
 	enum psi_states s;
 	u32 state_mask = 0;
-	static int psi_bug;
 
 	groupc = per_cpu_ptr(group->pcpu, cpu);
 
@@ -564,13 +565,13 @@ void psi_memstall_enter(unsigned long *flags)
 	if (static_key_false(&psi_disabled))
 		return;
 
-	*flags = current->flags & PF_MEMSTALL;
+	*flags = current->in_memstall;
 	if (*flags)
 		return;
 
 	rq = this_rq_lock();
 
-	current->flags |= PF_MEMSTALL;
+	current->in_memstall = 1;
 	psi_task_change(current, 0, TSK_MEMSTALL);
 
 	__task_rq_unlock(rq);
@@ -589,7 +590,7 @@ void psi_memstall_leave(unsigned long *flags)
 
 	rq = this_rq_lock();
 
-	current->flags &= ~PF_MEMSTALL;
+	current->in_memstall = 0;
 	psi_task_change(current, TSK_MEMSTALL, 0);
 
 	__task_rq_unlock(rq);

@@ -74,20 +74,26 @@ struct fscrypt_completion_result {
 	struct fscrypt_completion_result ecr = { \
 		COMPLETION_INITIALIZER_ONSTACK((ecr).completion), 0 }
 
+#ifndef inode_lock
 static inline void inode_lock(struct inode *inode)
 {
 	mutex_lock(&inode->i_mutex);
 }
+#endif
 
+#ifndef inode_unlock
 static inline void inode_unlock(struct inode *inode)
 {
 	mutex_unlock(&inode->i_mutex);
 }
+#endif
 
+#ifndef user_key_payload
 static inline const struct user_key_payload *user_key_payload(const struct key *key)
 {
 	return (struct user_key_payload *)rcu_dereference_key(key);
 }
+#endif
 
 /* bio stuffs */
 #define REQ_OP_READ	READ
