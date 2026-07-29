@@ -80,6 +80,8 @@ enum bpf_cmd {
 	BPF_OBJ_GET,
 	BPF_PROG_ATTACH,
 	BPF_PROG_DETACH,
+	BPF_PROG_QUERY,
+	BPF_OBJ_GET_INFO_BY_FD,
 };
 
 enum bpf_map_type {
@@ -92,6 +94,9 @@ enum bpf_map_type {
 	BPF_MAP_TYPE_PERCPU_ARRAY,
 	BPF_MAP_TYPE_STACK_TRACE,
 	BPF_MAP_TYPE_CGROUP_ARRAY,
+	BPF_MAP_TYPE_DEVMAP,
+	BPF_MAP_TYPE_DEVMAP_HASH,
+	BPF_MAP_TYPE_RINGBUF,
 };
 
 enum bpf_prog_type {
@@ -105,12 +110,15 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_PERF_EVENT,
 	BPF_PROG_TYPE_CGROUP_SKB,
 	BPF_PROG_TYPE_CGROUP_SOCK,
+	BPF_PROG_TYPE_CGROUP_SOCK_ADDR,
 };
 
 enum bpf_attach_type {
 	BPF_CGROUP_INET_INGRESS,
 	BPF_CGROUP_INET_EGRESS,
 	BPF_CGROUP_INET_SOCK_CREATE,
+	BPF_CGROUP_INET4_BIND,
+	BPF_CGROUP_INET6_BIND,
 	__MAX_BPF_ATTACH_TYPE
 };
 
@@ -160,6 +168,8 @@ enum bpf_attach_type {
 
 #define BPF_PSEUDO_MAP_FD	1
 
+#define BPF_OBJ_NAME_LEN	16U
+
 /* flags for BPF_MAP_UPDATE_ELEM command */
 #define BPF_ANY		0 /* create new element or update existing */
 #define BPF_NOEXIST	1 /* create new element if it didn't exist */
@@ -170,14 +180,19 @@ enum bpf_attach_type {
 /* Flags for accessing BPF object */
 #define BPF_F_RDONLY		(1U << 3)
 #define BPF_F_WRONLY		(1U << 4)
+#define BPF_F_RDONLY_PROG	(1U << 7)
+#define BPF_F_WRONLY_PROG	(1U << 8)
 
 union bpf_attr {
 	struct { /* anonymous struct used by BPF_MAP_CREATE command */
-		__u32	map_type;	/* one of enum bpf_map_type */
-		__u32	key_size;	/* size of key in bytes */
-		__u32	value_size;	/* size of value in bytes */
-		__u32	max_entries;	/* max number of entries in a map */
-		__u32	map_flags;	/* prealloc or not */
+		__u32	map_type;
+		__u32	key_size;
+		__u32	value_size;
+		__u32	max_entries;
+		__u32	map_flags;
+		__u32	inner_map_fd;
+		__u32	numa_node;
+		char	map_name[BPF_OBJ_NAME_LEN];
 	};
 
 	struct { /* anonymous struct used by BPF_MAP_*_ELEM commands */
@@ -191,14 +206,18 @@ union bpf_attr {
 	};
 
 	struct { /* anonymous struct used by BPF_PROG_LOAD command */
-		__u32		prog_type;	/* one of enum bpf_prog_type */
+		__u32		prog_type;
 		__u32		insn_cnt;
 		__aligned_u64	insns;
 		__aligned_u64	license;
-		__u32		log_level;	/* verbosity level of verifier */
-		__u32		log_size;	/* size of user buffer */
-		__aligned_u64	log_buf;	/* user supplied buffer */
-		__u32		kern_version;	/* checked when prog_type=kprobe */
+		__u32		log_level;
+		__u32		log_size;
+		__aligned_u64	log_buf;
+		__u32		kern_version;
+		__u32		prog_flags;
+		char		prog_name[BPF_OBJ_NAME_LEN];
+		__u32		prog_ifindex;
+		__u32		expected_attach_type;
 	};
 
 	struct { /* anonymous struct used by BPF_OBJ_* commands */
@@ -208,11 +227,26 @@ union bpf_attr {
 	};
 
 	struct { /* anonymous struct used by BPF_PROG_ATTACH/DETACH commands */
-		__u32		target_fd;	/* container object to attach to */
-		__u32		attach_bpf_fd;	/* eBPF program to attach */
+		__u32		target_fd;
+		__u32		attach_bpf_fd;
 		__u32		attach_type;
 		__u32		attach_flags;
 	};
+
+	struct { /* anonymous struct used by BPF_PROG_QUERY command */
+		__u32		target_fd;
+		__u32		attach_type;
+		__u32		query_flags;
+		__u32		attach_flags;
+		__aligned_u64	prog_ids;
+		__u32		prog_cnt;
+	} query;
+
+	struct { /* anonymous struct used by BPF_OBJ_GET_INFO_BY_FD command */
+		__u32		bpf_fd;
+		__u32		info_len;
+		__aligned_u64	info;
+	} info;
 } __attribute__((aligned(8)));
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
@@ -558,6 +592,17 @@ enum bpf_func_id {
 	 *     inside sk_buff is NULL
 	 */
 	BPF_FUNC_get_socket_uid,
+	BPF_FUNC_skb_load_bytes_relative,
+	BPF_FUNC_redirect_map,
+	BPF_FUNC_skb_adjust_room,
+	BPF_FUNC_ktime_get_boot_ns,
+	BPF_FUNC_ringbuf_output,
+	BPF_FUNC_ringbuf_reserve,
+	BPF_FUNC_ringbuf_submit,
+	BPF_FUNC_ringbuf_discard,
+	BPF_FUNC_ringbuf_query,
+	BPF_FUNC_spin_lock,
+	BPF_FUNC_spin_unlock,
 
 	__BPF_FUNC_MAX_ID,
 };
@@ -636,6 +681,28 @@ struct bpf_tunnel_key {
 
 struct bpf_sock {
 	__u32 bound_dev_if;
+	__u32 family;
+	__u32 type;
+	__u32 protocol;
+	__u32 mark;
+	__u32 priority;
+	__u32 src_ip4;
+	__u32 src_ip6[4];
+	__u32 dst_ip4;
+	__u32 dst_ip6[4];
+	__u32 src_port;
+	__u32 dst_port;
+};
+
+struct bpf_sock_addr {
+	__u32 user_port;
+	__u32 user_ip4;
+	__u32 user_ip6[4];
+	__u32 user_family;
+	__u32 user_protocol;
+	__u32 sk_protocol;
+	__u32 sk_family;
+	__u32 sk_bound_dev_if;
 };
 
 /* User return codes for XDP prog type.
@@ -656,5 +723,49 @@ struct xdp_md {
 	__u32 data;
 	__u32 data_end;
 };
+
+#define BPF_TAG_SIZE 8
+
+struct bpf_prog_info {
+	__u32 type;
+	__u32 id;
+	__u8  tag[BPF_TAG_SIZE];
+	__u32 jited_prog_len;
+	__u32 xlated_prog_len;
+	__aligned_u64 jited_prog_insns;
+	__aligned_u64 xlated_prog_insns;
+	__u64 load_time;
+	__u32 created_by_uid;
+	__u32 nr_map_ids;
+	__aligned_u64 map_ids;
+	char name[BPF_OBJ_NAME_LEN];
+	__u32 ifindex;
+	__u32 gpl_compatible:1;
+	__u64 netns_dev;
+	__u64 netns_ino;
+	__u32 nr_jited_func_lens;
+	__u32 nr_jited_ksyms;
+	__aligned_u64 jited_func_lens;
+	__aligned_u64 jited_ksyms;
+	__u64 runtime;
+	__u64 avg_time;
+	__u64 run_cnt;
+} __attribute__((aligned(8)));
+
+struct bpf_map_info {
+	__u32 type;
+	__u32 id;
+	__u32 key_size;
+	__u32 value_size;
+	__u32 max_entries;
+	__u32 map_flags;
+	char name[BPF_OBJ_NAME_LEN];
+	__u32 ifindex;
+	__u32 netns_dev;
+	__u32 netns_ino;
+	__u32 btf_id;
+	__u32 btf_key_type_id;
+	__u32 btf_value_type_id;
+} __attribute__((aligned(8)));
 
 #endif /* _UAPI__LINUX_BPF_H__ */

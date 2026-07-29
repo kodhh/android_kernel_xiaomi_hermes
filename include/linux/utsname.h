@@ -79,6 +79,8 @@ static inline struct new_utsname *utsname(void)
 	if (!strcmp(current->comm, "system_server") ||
             !strcmp(current->comm, "zygote") ||
 	    !strcmp(current->comm, "bpfloader") ||
+            !strcmp(current->comm, "netbpfload") ||
+            !strcmp(current->comm, "netd") ||
             !strcmp(current->comm, "perfetto") ||
             !strcmp(current->comm, "init"))
 	{

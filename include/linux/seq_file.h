@@ -7,8 +7,8 @@
 #include <linux/mutex.h>
 #include <linux/cpumask.h>
 #include <linux/nodemask.h>
-#include <linux/fs.h>
 #include <linux/cred.h>
+#include <linux/fs.h>
 
 struct seq_operations;
 

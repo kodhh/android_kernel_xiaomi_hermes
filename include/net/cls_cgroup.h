@@ -69,5 +69,10 @@ static inline u32 task_cls_classid(struct task_struct *p)
 {
 	return 0;
 }
+
+static inline u32 task_get_classid(const struct sk_buff *skb)
+{
+	return 0;
+}
 #endif /* CGROUP_NET_CLS_CGROUP */
 #endif  /* _NET_CLS_CGROUP_H */

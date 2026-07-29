@@ -28,4 +28,6 @@ int sock_diag_put_filterinfo(bool may_report_filterinfo, struct sock *sk,
 			     struct sk_buff *skb, int attrtype);
 
 int sock_diag_destroy(struct sock *sk, int err);
+
+u64 sock_gen_cookie(struct sock *sk);
 #endif

@@ -247,8 +247,18 @@ struct ftrace_event_call {
 #ifdef CONFIG_PERF_EVENTS
 	int				perf_refcount;
 	struct hlist_head __percpu	*perf_events;
+	struct bpf_prog_array __rcu	*prog_array;
 #endif
 };
+
+#ifdef CONFIG_PERF_EVENTS
+static inline bool bpf_prog_array_valid(struct ftrace_event_call *call)
+{
+	return !!READ_ONCE(call->prog_array);
+}
+
+unsigned int trace_call_bpf(struct ftrace_event_call *call, void *ctx);
+#endif
 
 struct trace_array;
 struct ftrace_subsystem_dir;

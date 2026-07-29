@@ -21,6 +21,34 @@
 /* Keep error state on tunnel for 30 sec */
 #define IPTUNNEL_ERR_TIMEO	(30*HZ)
 
+/* Used to memset ip_tunnel padding. */
+#define IP_TUNNEL_KEY_SIZE					\
+	(offsetof(struct ip_tunnel_key, tp_dst) +		\
+	 FIELD_SIZEOF(struct ip_tunnel_key, tp_dst))
+
+struct ip_tunnel_key {
+	__be64			tun_id;
+	__be32			ipv4_src;
+	__be32			ipv4_dst;
+	__be16			tun_flags;
+	__u8			ipv4_tos;
+	__u8			ipv4_ttl;
+	__be16			tp_src;
+	__be16			tp_dst;
+} __packed __aligned(4);
+
+enum {
+	IP_TUNNEL_INFO_RX,
+	IP_TUNNEL_INFO_TX,
+};
+
+struct ip_tunnel_info {
+	struct ip_tunnel_key	key;
+	const void		*options;
+	u8			options_len;
+	u8			mode;
+};
+
 /* 6rd prefix/relay information */
 #ifdef CONFIG_IPV6_SIT_6RD
 struct ip_tunnel_6rd_parm {

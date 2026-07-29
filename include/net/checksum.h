@@ -106,6 +106,11 @@ static inline void csum_replace2(__sum16 *sum, __be16 from, __be16 to)
 	csum_replace4(sum, (__force __be32)from, (__force __be32)to);
 }
 
+static inline void csum_replace_by_diff(__sum16 *sum, __wsum diff)
+{
+	*sum = csum_fold(csum_add(diff, ~csum_unfold(*sum)));
+}
+
 struct sk_buff;
 extern void inet_proto_csum_replace4(__sum16 *sum, struct sk_buff *skb,
 				     __be32 from, __be32 to, int pseudohdr);
@@ -120,5 +125,8 @@ static inline void inet_proto_csum_replace2(__sum16 *sum, struct sk_buff *skb,
 	inet_proto_csum_replace4(sum, skb, (__force __be32)from,
 				 (__force __be32)to, pseudohdr);
 }
+
+void inet_proto_csum_replace_by_diff(__sum16 *sum, struct sk_buff *skb,
+				     __wsum diff, bool pseudohdr);
 
 #endif

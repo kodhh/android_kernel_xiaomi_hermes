@@ -75,7 +75,7 @@ void *bpf_internal_load_pointer_neg_helper(const struct sk_buff *skb, int k, uns
 
 struct bpf_prog *bpf_prog_alloc(unsigned int size, gfp_t gfp_extra_flags)
 {
-	gfp_t gfp_flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO |
+	gfp_t gfp_flags = GFP_KERNEL | __GFP_ZERO |
 			  gfp_extra_flags;
 	struct bpf_prog_aux *aux;
 	struct bpf_prog *fp;
@@ -104,7 +104,7 @@ EXPORT_SYMBOL_GPL(bpf_prog_alloc);
 struct bpf_prog *bpf_prog_realloc(struct bpf_prog *fp_old, unsigned int size,
 				  gfp_t gfp_extra_flags)
 {
-	gfp_t gfp_flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO |
+	gfp_t gfp_flags = GFP_KERNEL | __GFP_ZERO |
 			  gfp_extra_flags;
 	struct bpf_prog *fp;
 	u32 pages, delta;
@@ -312,13 +312,23 @@ static void bpf_jit_uncharge_modmem(u32 pages)
 	atomic_long_sub(pages, &bpf_jit_current);
 }
 
-#if IS_ENABLED(CONFIG_BPF_JIT) && IS_ENABLED(CONFIG_CFI_CLANG)
-bool __weak arch_bpf_jit_check_func(const struct bpf_prog *prog)
+void *__weak bpf_jit_alloc_exec(unsigned long size)
 {
-	return true;
-}
-EXPORT_SYMBOL(arch_bpf_jit_check_func);
+#ifdef CONFIG_MODULES
+	return module_alloc(size);
+#else
+	return vmalloc_exec(size);
 #endif
+}
+
+void __weak bpf_jit_free_exec(void *addr)
+{
+#ifdef CONFIG_MODULES
+	module_memfree(addr);
+#else
+	vfree(addr);
+#endif
+}
 
 struct bpf_binary_header *
 bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
@@ -337,7 +347,7 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 
 	if (bpf_jit_charge_modmem(pages))
 		return NULL;
-	hdr = module_alloc(size);
+	hdr = bpf_jit_alloc_exec(size);
 	if (!hdr) {
 		bpf_jit_uncharge_modmem(pages);
 		return NULL;
@@ -346,7 +356,6 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 	/* Fill space with illegal/arch-dep instructions. */
 	bpf_fill_ill_insns(hdr, size);
 
-	bpf_jit_set_header_magic(hdr);
 	hdr->pages = pages;
 	hole = min_t(unsigned int, size - (proglen + sizeof(*hdr)),
 		     PAGE_SIZE - sizeof(*hdr));
@@ -362,7 +371,7 @@ void bpf_jit_binary_free(struct bpf_binary_header *hdr)
 {
 	u32 pages = hdr->pages;
 
-	module_memfree(hdr);
+	bpf_jit_free_exec(hdr);
 	bpf_jit_uncharge_modmem(pages);
 }
 
@@ -478,7 +487,7 @@ out:
 static struct bpf_prog *bpf_prog_clone_create(struct bpf_prog *fp_other,
 					      gfp_t gfp_extra_flags)
 {
-	gfp_t gfp_flags = GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO |
+	gfp_t gfp_flags = GFP_KERNEL | __GFP_ZERO |
 			  gfp_extra_flags;
 	struct bpf_prog *fp;
 
@@ -1386,10 +1395,7 @@ const struct bpf_func_proto bpf_tail_call_proto = {
 	.arg3_type	= ARG_ANYTHING,
 };
 
-/* Stub for JITs that only support cBPF. eBPF programs are interpreted.
- * It is encouraged to implement bpf_int_jit_compile() instead, so that
- * eBPF and implicitly also cBPF can get JITed!
- */
+/* For classic BPF JITs that don't implement bpf_int_jit_compile(). */
 struct bpf_prog * __weak bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	return prog;

@@ -119,6 +119,7 @@ struct net {
 	struct netns_ipvs	*ipvs;
 	struct sock		*diag_nlsk;
 	atomic_t		rt_genid;
+	atomic64_t		cookie_gen;
 };
 
 #include <linux/seq_file_net.h>

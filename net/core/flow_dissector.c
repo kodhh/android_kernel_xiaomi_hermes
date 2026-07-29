@@ -198,6 +198,12 @@ void __skb_get_rxhash(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(__skb_get_rxhash);
 
+void __skb_get_hash(struct sk_buff *skb)
+{
+	__skb_get_rxhash(skb);
+}
+EXPORT_SYMBOL(__skb_get_hash);
+
 /*
  * Returns a Tx hash based on the given packet descriptor a Tx queues' number
  * to be used as a distribution range.
