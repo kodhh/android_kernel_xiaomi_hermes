@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
+#include <linux/file.h>
 #include <linux/tty.h>
 #include <linux/binfmts.h>
 #include <linux/coredump.h>
@@ -3667,3 +3668,30 @@ kdb_send_sig_info(struct task_struct *t, struct siginfo *info)
 		kdb_printf("Signal %d is sent to process %d.\n", sig, t->pid);
 }
 #endif	/* CONFIG_KGDB_KDB */
+
+SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
+		siginfo_t __user *, info, unsigned int, flags)
+{
+	int ret;
+	struct fd f;
+	struct pid *pid;
+
+	if (flags)
+		return -EINVAL;
+
+	f = fdget(pidfd);
+	if (!f.file)
+		return -EBADF;
+
+	/* Is this a pidfd? */
+	pid = f.file->private_data;
+	if (f.file->f_op != &pidfd_fops) {
+		ret = -EBADF;
+		goto err;
+	}
+
+	ret = kill_pid_info(sig, info, pid);
+err:
+	fdput(f);
+	return ret;
+}

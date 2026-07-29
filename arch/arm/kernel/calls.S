@@ -393,6 +393,7 @@
 		CALL(sys_sched_getattr)
 		CALL(sys_renameat2)
 		CALL(sys_seccomp)
+/* 384 */	CALL(sys_bpf)
 
 #ifndef syscalls_counted
 .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls

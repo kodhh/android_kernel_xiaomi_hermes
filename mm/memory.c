@@ -54,6 +54,7 @@
 #include <linux/memcontrol.h>
 #include <linux/mmu_notifier.h>
 #include <linux/kallsyms.h>
+#include <linux/userfaultfd_k.h>
 #include <linux/swapops.h>
 #include <linux/elf.h>
 #include <linux/gfp.h>
@@ -3220,6 +3221,11 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	/* File mapping without ->vm_ops ? */
 	if (vma->vm_flags & VM_SHARED)
 		return VM_FAULT_SIGBUS;
+
+	if (userfaultfd_missing(vma)) {
+		return handle_userfault(vma, address, flags,
+				       VM_UFFD_MISSING);
+	}
 
 	/* Use the zero-page for reads */
 	if (!(flags & FAULT_FLAG_WRITE)) {

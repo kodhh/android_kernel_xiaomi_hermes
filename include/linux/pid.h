@@ -201,4 +201,6 @@ pid_t pid_vnr(struct pid *pid);
 		} while_each_thread(tg___, task);			\
 		task = tg___;						\
 	} while_each_pid_task(pid, type, task)
+extern const struct file_operations pidfd_fops;
+
 #endif /* _LINUX_PID_H */

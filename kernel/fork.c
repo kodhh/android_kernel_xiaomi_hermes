@@ -25,6 +25,7 @@
 #include <linux/iocontext.h>
 #include <linux/key.h>
 #include <linux/binfmts.h>
+#include <linux/userfaultfd_k.h>
 #include <linux/mman.h>
 #include <linux/mmu_notifier.h>
 #include <linux/fs.h>
@@ -39,6 +40,7 @@
 #include <linux/syscalls.h>
 #include <linux/jiffies.h>
 #include <linux/futex.h>
+#include <linux/poll.h>
 #include <linux/compat.h>
 #include <linux/kthread.h>
 #include <linux/task_io_accounting_ops.h>
@@ -384,6 +386,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	int retval;
 	unsigned long charge;
 	struct mempolicy *pol;
+	LIST_HEAD(uf);
 
 	uprobe_start_dup_mmap();
 	down_write(&oldmm->mmap_sem);
@@ -440,6 +443,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
 		tmp->vm_mm = mm;
+		retval = dup_userfaultfd(tmp, &uf);
+		if (retval)
+			goto fail_nomem_anon_vma_fork;
 		if (anon_vma_fork(tmp, mpnt))
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~VM_LOCKED;
@@ -503,6 +509,7 @@ out:
 	up_write(&mm->mmap_sem);
 	flush_tlb_mm(oldmm);
 	up_write(&oldmm->mmap_sem);
+	dup_userfaultfd_complete(&uf);
 	uprobe_end_dup_mmap();
 	return retval;
 fail_nomem_anon_vma_fork:
@@ -1642,7 +1649,7 @@ bad_fork_cleanup_cgroup:
 #endif
 	if (clone_flags & CLONE_THREAD)
 		threadgroup_change_end(current);
-	cgroup_exit(p, 0);
+	cgroup_exit(p);
 	delayacct_tsk_free(p);
 	module_put(task_thread_info(p)->exec_domain->module);
 bad_fork_cleanup_count:
@@ -1785,6 +1792,15 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	return do_fork(flags|CLONE_VM|CLONE_UNTRACED, (unsigned long)fn,
 		(unsigned long)arg, NULL, NULL);
 }
+
+static unsigned int pidfd_poll(struct file *file, struct poll_table_struct *pts)
+{
+	return 0;
+}
+
+const struct file_operations pidfd_fops = {
+	.poll = pidfd_poll,
+};
 
 #ifdef __ARCH_WANT_SYS_FORK
 SYSCALL_DEFINE0(fork)

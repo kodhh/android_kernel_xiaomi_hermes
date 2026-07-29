@@ -53,6 +53,7 @@ struct sched_param {
 #include <linux/llist.h>
 #include <linux/uidgid.h>
 #include <linux/gfp.h>
+#include <linux/cgroup-defs.h>
 
 #include <asm/processor.h>
 #include <linux/rtpm_prio.h>
@@ -1237,6 +1238,10 @@ struct task_struct {
 	/* Revert to default priority/policy when forking */
 	unsigned sched_reset_on_fork:1;
 	unsigned sched_contributes_to_load:1;
+#ifdef CONFIG_CGROUPS
+	/* disallow userland-initiated cgroup migration */
+	unsigned no_cgroup_migration:1;
+#endif
 	unsigned sched_psi_wake_requeue:1;
 
 #ifdef CONFIG_PSI

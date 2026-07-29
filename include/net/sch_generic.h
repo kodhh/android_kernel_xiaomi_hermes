@@ -9,6 +9,8 @@
 #include <net/gen_stats.h>
 #include <net/rtnetlink.h>
 
+#define QDISC_CB_PRIV_LEN 20
+
 struct Qdisc_ops;
 struct qdisc_walker;
 struct tcf_walker;

@@ -432,3 +432,15 @@ static int __init keepinitrd_setup(char *__unused)
 
 __setup("keepinitrd", keepinitrd_setup);
 #endif
+
+int set_memory_ro(unsigned long addr, int numpages)
+{
+	return 0;
+}
+EXPORT_SYMBOL(set_memory_ro);
+
+int set_memory_rw(unsigned long addr, int numpages)
+{
+	return 0;
+}
+EXPORT_SYMBOL(set_memory_rw);

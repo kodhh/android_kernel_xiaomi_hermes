@@ -42,21 +42,9 @@
 
 /* No hurry in this branch
  *
- * Exported for the bpf jit load helper.
+ * Exported for the bpf jit load helper. Defined in kernel/bpf/core.c
  */
-void *bpf_internal_load_pointer_neg_helper(const struct sk_buff *skb, int k, unsigned int size)
-{
-	u8 *ptr = NULL;
-
-	if (k >= SKF_NET_OFF)
-		ptr = skb_network_header(skb) + k - SKF_NET_OFF;
-	else if (k >= SKF_LL_OFF)
-		ptr = skb_mac_header(skb) + k - SKF_LL_OFF;
-
-	if (ptr >= skb->head && ptr + size <= skb_tail_pointer(skb))
-		return ptr;
-	return NULL;
-}
+extern void *bpf_internal_load_pointer_neg_helper(const struct sk_buff *skb, int k, unsigned int size);
 
 static inline void *load_pointer(const struct sk_buff *skb, int k,
 				 unsigned int size, void *buffer)
@@ -641,7 +629,8 @@ void sk_filter_release_rcu(struct rcu_head *rcu)
 {
 	struct sk_filter *fp = container_of(rcu, struct sk_filter, rcu);
 
-	bpf_jit_free(fp);
+	if (fp->prog)
+		bpf_jit_free(fp->prog);
 	kfree(fp);
 }
 EXPORT_SYMBOL(sk_filter_release_rcu);
@@ -656,7 +645,6 @@ static int __sk_prepare_filter(struct sk_filter *fp)
 	if (err)
 		return err;
 
-	bpf_jit_compile(fp);
 	return 0;
 }
 
@@ -701,11 +689,29 @@ free_mem:
 }
 EXPORT_SYMBOL_GPL(sk_unattached_filter_create);
 
+static void sk_filter_release(struct sk_filter *fp)
+{
+	if (atomic_dec_and_test(&fp->refcnt))
+		call_rcu(&fp->rcu, sk_filter_release_rcu);
+}
+
 void sk_unattached_filter_destroy(struct sk_filter *fp)
 {
 	sk_filter_release(fp);
 }
 EXPORT_SYMBOL_GPL(sk_unattached_filter_destroy);
+
+bool sk_filter_charge(struct sock *sk, struct sk_filter *fp)
+{
+	if (!atomic_inc_not_zero(&fp->refcnt))
+		return false;
+	return true;
+}
+
+void sk_filter_uncharge(struct sock *sk, struct sk_filter *fp)
+{
+	sk_filter_release(fp);
+}
 
 /**
  *	sk_attach_filter - attach a socket filter

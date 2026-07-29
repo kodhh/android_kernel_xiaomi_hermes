@@ -6636,7 +6636,7 @@ done:
 		if (event->attr.task)
 			atomic_inc(&nr_task_events);
 		if (event->attr.sample_type & PERF_SAMPLE_CALLCHAIN) {
-			err = get_callchain_buffers();
+			err = get_callchain_buffers(PERF_MAX_STACK_DEPTH);
 			if (err) {
 				free_event(event);
 				return ERR_PTR(err);
@@ -8030,3 +8030,29 @@ struct cgroup_subsys perf_subsys = {
 	.attach		= perf_cgroup_attach,
 };
 #endif /* CONFIG_CGROUP_PERF */
+
+const struct perf_event_attr *perf_event_attrs(struct perf_event *event)
+{
+	if (!event)
+		return ERR_PTR(-EINVAL);
+
+	return &event->attr;
+}
+EXPORT_SYMBOL_GPL(perf_event_attrs);
+
+struct file *perf_event_get(unsigned int fd)
+{
+	struct file *file;
+
+	file = fget_raw(fd);
+	if (!file)
+		return ERR_PTR(-EBADF);
+
+	if (file->f_op != &perf_fops) {
+		fput(file);
+		return ERR_PTR(-EBADF);
+	}
+
+	return file;
+}
+EXPORT_SYMBOL_GPL(perf_event_get);

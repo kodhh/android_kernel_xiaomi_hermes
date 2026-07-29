@@ -2,6 +2,7 @@
 #define _LINUX_MODULELOADER_H
 /* The stuff needed for archs to support modules. */
 
+struct module;
 #include <linux/module.h>
 #include <linux/elf.h>
 
@@ -45,7 +46,6 @@ static inline int apply_relocate(Elf_Shdr *sechdrs,
 				 unsigned int relsec,
 				 struct module *me)
 {
-	printk(KERN_ERR "module %s: REL relocation unsupported\n", me->name);
 	return -ENOEXEC;
 }
 #endif

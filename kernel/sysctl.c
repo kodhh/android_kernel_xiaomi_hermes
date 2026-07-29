@@ -1063,6 +1063,17 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one_hundred,
 	},
 #endif
+#ifdef CONFIG_BPF_SYSCALL
+	{
+		.procname	= "unprivileged_bpf_disabled",
+		.data		= &sysctl_unprivileged_bpf_disabled,
+		.maxlen		= sizeof(sysctl_unprivileged_bpf_disabled),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &two,
+	},
+#endif
 #ifdef CONFIG_KMEMCHECK
 	{
 		.procname	= "kmemcheck",

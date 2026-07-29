@@ -1693,6 +1693,15 @@ struct security_operations {
 				 struct audit_context *actx);
 	void (*audit_rule_free) (void *lsmrule);
 #endif /* CONFIG_AUDIT */
+#ifdef CONFIG_BPF_SYSCALL
+	int (*bpf) (int cmd, union bpf_attr *attr, unsigned int size);
+	int (*bpf_map) (struct bpf_map *map, fmode_t fmode);
+	int (*bpf_prog) (struct bpf_prog *prog);
+	int (*bpf_map_alloc_security) (struct bpf_map *map);
+	int (*bpf_prog_alloc_security) (struct bpf_prog_aux *aux);
+	void (*bpf_map_free_security) (struct bpf_map *map);
+	void (*bpf_prog_free_security) (struct bpf_prog_aux *aux);
+#endif /* CONFIG_BPF_SYSCALL */
 };
 
 /* prototypes */
@@ -1701,6 +1710,43 @@ extern int security_module_enable(struct security_operations *ops);
 extern int register_security(struct security_operations *ops);
 extern void __init security_fixup_ops(struct security_operations *ops);
 
+#ifdef CONFIG_BPF_SYSCALL
+int security_bpf(int cmd, union bpf_attr *attr, unsigned int size);
+int security_bpf_map(struct bpf_map *map, fmode_t fmode);
+int security_bpf_prog(struct bpf_prog *prog);
+int security_bpf_map_alloc(struct bpf_map *map);
+int security_bpf_prog_alloc(struct bpf_prog_aux *aux);
+void security_bpf_map_free(struct bpf_map *map);
+void security_bpf_prog_free(struct bpf_prog_aux *aux);
+#else
+static inline int security_bpf(int cmd, union bpf_attr *attr,
+			       unsigned int size)
+{
+	return 0;
+}
+static inline int security_bpf_map(struct bpf_map *map, fmode_t fmode)
+{
+	return 0;
+}
+static inline int security_bpf_prog(struct bpf_prog *prog)
+{
+	return 0;
+}
+static inline int security_bpf_map_alloc(struct bpf_map *map)
+{
+	return 0;
+}
+static inline int security_bpf_prog_alloc(struct bpf_prog_aux *aux)
+{
+	return 0;
+}
+static inline void security_bpf_map_free(struct bpf_map *map)
+{
+}
+static inline void security_bpf_prog_free(struct bpf_prog_aux *aux)
+{
+}
+#endif /* CONFIG_BPF_SYSCALL */
 
 /* Security operations */
 int security_binder_set_context_mgr(struct task_struct *mgr);

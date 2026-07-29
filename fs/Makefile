@@ -55,6 +55,7 @@ obj-y				+= quota/
 
 obj-$(CONFIG_PROC_FS)		+= proc/
 obj-$(CONFIG_SYSFS)		+= sysfs/
+obj-$(CONFIG_KERNFS)		+= kernfs/
 obj-$(CONFIG_CONFIGFS_FS)	+= configfs/
 obj-y				+= devpts/
 
@@ -134,4 +135,5 @@ obj-$(CONFIG_RAWFS_FS)		+= rawfs/
 # Patched by YAFFS
 obj-$(CONFIG_YAFFS_FS)          += yaffs2/
 obj-$(CONFIG_SMB_SERVER)	+= ksmbd/
+obj-$(CONFIG_USERFAULTFD)		+= userfaultfd.o
 

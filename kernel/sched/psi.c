@@ -21,6 +21,7 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/psi.h>
+#include <linux/cgroup.h>
 
 #include "sched.h"
 
@@ -876,6 +877,60 @@ static const struct file_operations psi_cpu_fops = {
 	.poll           = psi_fop_poll,
 	.release        = psi_fop_release,
 };
+
+#ifdef CONFIG_CGROUPS
+int psi_cgroup_alloc(struct cgroup *cgroup)
+{
+	if (static_key_false(&psi_disabled))
+		return 0;
+
+	cgroup->psi.pcpu = alloc_percpu(struct psi_group_cpu);
+	if (!cgroup->psi.pcpu)
+		return -ENOMEM;
+	group_init(&cgroup->psi);
+	return 0;
+}
+
+void psi_cgroup_free(struct cgroup *cgroup)
+{
+	if (static_key_false(&psi_disabled))
+		return;
+
+	cancel_delayed_work_sync(&cgroup->psi.avgs_work);
+	free_percpu(cgroup->psi.pcpu);
+}
+
+void cgroup_move_task(struct task_struct *task, struct css_set *to)
+{
+	unsigned int task_flags = 0;
+	struct rq *rq;
+
+	if (static_key_false(&psi_disabled)) {
+		rcu_assign_pointer(task->cgroups, to);
+		return;
+	}
+
+	rq = __task_rq_lock(task);
+
+	if (task->on_rq == 1)
+		task_flags = TSK_RUNNING;
+	else if (task->in_iowait)
+		task_flags = TSK_IOWAIT;
+
+	if (task->in_memstall)
+		task_flags |= TSK_MEMSTALL;
+
+	if (task_flags)
+		psi_task_change(task, task_flags, 0);
+
+	rcu_assign_pointer(task->cgroups, to);
+
+	if (task_flags)
+		psi_task_change(task, 0, task_flags);
+
+	__task_rq_unlock(rq);
+}
+#endif
 
 static int __init psi_proc_init(void)
 {

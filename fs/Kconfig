@@ -277,5 +277,6 @@ source "fs/nls/Kconfig"
 source "fs/dlm/Kconfig"
 source "fs/rawfs/Kconfig"
 source "fs/ksmbd/Kconfig"
+source "fs/kernfs/Kconfig"
 
 endmenu

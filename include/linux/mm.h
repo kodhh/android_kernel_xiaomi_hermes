@@ -17,6 +17,7 @@
 #include <linux/pfn.h>
 #include <linux/bit_spinlock.h>
 #include <linux/shrinker.h>
+#include <linux/sync_core.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -103,6 +104,9 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
 #define VM_PFNMAP	0x00000400	/* Page-ranges managed without "struct page", just pure PFN */
 #define VM_DENYWRITE	0x00000800	/* ETXTBSY on write attempts.. */
+
+#define VM_UFFD_MISSING	0x00000200	/* missing pages tracking */
+#define VM_UFFD_WP	0x00001000	/* write protection tracking */
 
 #define VM_LOCKED	0x00002000
 #define VM_IO           0x00004000	/* Memory mapped I/O or similar */
@@ -1508,7 +1512,8 @@ extern int vma_adjust(struct vm_area_struct *vma, unsigned long start,
 extern struct vm_area_struct *vma_merge(struct mm_struct *,
 	struct vm_area_struct *prev, unsigned long addr, unsigned long end,
 	unsigned long vm_flags, struct anon_vma *, struct file *, pgoff_t,
-	struct mempolicy *, const char __user *);
+	struct mempolicy *, struct vm_userfaultfd_ctx,
+	const char __user *);
 extern struct anon_vma *find_mergeable_anon_vma(struct vm_area_struct *);
 extern int split_vma(struct mm_struct *,
 	struct vm_area_struct *, unsigned long addr, int new_below);
@@ -1888,6 +1893,53 @@ void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
 #endif
+
+#ifdef CONFIG_MEMBARRIER
+enum {
+	MEMBARRIER_STATE_PRIVATE_EXPEDITED_READY	= (1U << 0),
+	MEMBARRIER_STATE_SWITCH_MM			= (1U << 1),
+	MEMBARRIER_STATE_GLOBAL_EXPEDITED_READY		= (1U << 2),
+	MEMBARRIER_STATE_GLOBAL_EXPEDITED		= (1U << 3),
+	MEMBARRIER_STATE_PRIVATE_EXPEDITED_SYNC_CORE_READY	= (1U << 4),
+	MEMBARRIER_STATE_PRIVATE_EXPEDITED_SYNC_CORE	= (1U << 5),
+};
+
+enum {
+	MEMBARRIER_FLAG_SYNC_CORE	= (1U << 0),
+};
+
+static inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
+{
+	if (likely(!(atomic_read(&mm->membarrier_state) &
+		     MEMBARRIER_STATE_PRIVATE_EXPEDITED_SYNC_CORE)))
+		return;
+
+	sync_core_before_usermode();
+}
+
+static inline void membarrier_execve(struct mm_struct *mm)
+{
+	atomic_set(&mm->membarrier_state, 0);
+}
+#else
+static inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
+{
+}
+
+static inline void membarrier_execve(struct mm_struct *mm)
+{
+}
+#endif /* CONFIG_MEMBARRIER */
+
+static inline bool vma_is_anonymous(struct vm_area_struct *vma)
+{
+	return !vma->vm_ops;
+}
+
+static inline bool mmget_not_zero(struct mm_struct *mm)
+{
+	return atomic_inc_not_zero(&mm->mm_users);
+}
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

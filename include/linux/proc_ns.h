@@ -4,9 +4,12 @@
 #ifndef _LINUX_PROC_NS_H
 #define _LINUX_PROC_NS_H
 
+#include <linux/ns_common.h>
+
 struct pid_namespace;
 struct nsproxy;
 
+struct user_namespace;
 struct proc_ns_operations {
 	const char *name;
 	int type;
@@ -14,6 +17,7 @@ struct proc_ns_operations {
 	void (*put)(void *ns);
 	int (*install)(struct nsproxy *nsproxy, void *ns);
 	unsigned int (*inum)(void *ns);
+	struct user_namespace *(*owner)(void *ns);
 };
 
 struct proc_ns {
@@ -27,6 +31,7 @@ extern const struct proc_ns_operations ipcns_operations;
 extern const struct proc_ns_operations pidns_operations;
 extern const struct proc_ns_operations userns_operations;
 extern const struct proc_ns_operations mntns_operations;
+extern const struct proc_ns_operations cgroupns_operations;
 
 /*
  * We always define these enumerators
@@ -37,6 +42,7 @@ enum {
 	PROC_UTS_INIT_INO	= 0xEFFFFFFEU,
 	PROC_USER_INIT_INO	= 0xEFFFFFFDU,
 	PROC_PID_INIT_INO	= 0xEFFFFFFCU,
+	PROC_CGROUP_INIT_INO	= 0xEFFFFFFBU,
 };
 
 #ifdef CONFIG_PROC_FS
@@ -48,6 +54,16 @@ extern struct proc_ns *get_proc_ns(struct inode *);
 extern int proc_alloc_inum(unsigned int *pino);
 extern void proc_free_inum(unsigned int inum);
 extern bool proc_ns_inode(struct inode *inode);
+
+static inline int ns_alloc_inum(struct ns_common *ns)
+{
+	return proc_alloc_inum(&ns->inum);
+}
+
+static inline void ns_free_inum(struct ns_common *ns)
+{
+	proc_free_inum(ns->inum);
+}
 
 #else /* CONFIG_PROC_FS */
 
@@ -68,6 +84,12 @@ static inline int proc_alloc_inum(unsigned int *inum)
 }
 static inline void proc_free_inum(unsigned int inum) {}
 static inline bool proc_ns_inode(struct inode *inode) { return false; }
+static inline int ns_alloc_inum(struct ns_common *ns)
+{
+	ns->inum = 1;
+	return 0;
+}
+static inline void ns_free_inum(struct ns_common *ns) {}
 
 #endif /* CONFIG_PROC_FS */
 

@@ -48,6 +48,7 @@ struct perf_guest_info_callbacks {
 #include <linux/cpu.h>
 #include <linux/irq_work.h>
 #include <linux/static_key.h>
+#include <linux/jump_label_ratelimit.h>
 #include <linux/atomic.h>
 #include <linux/sysfs.h>
 #include <linux/perf_regs.h>
@@ -525,12 +526,18 @@ extern void perf_event_exit_task(struct task_struct *child);
 extern void perf_event_free_task(struct task_struct *task);
 extern void perf_event_delayed_put(struct task_struct *task);
 extern void perf_event_print_debug(void);
+extern struct file *perf_event_get(unsigned int fd);
+extern const struct perf_event_attr *perf_event_attrs(struct perf_event *event);
 extern void perf_pmu_disable(struct pmu *pmu);
 extern void perf_pmu_enable(struct pmu *pmu);
 extern int perf_event_task_disable(void);
 extern int perf_event_task_enable(void);
 extern int perf_event_refresh(struct perf_event *event, int refresh);
 extern void perf_event_update_userpage(struct perf_event *event);
+extern struct perf_callchain_entry *get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user, u32 max_stack, bool crosstask, bool context);
+extern int get_callchain_buffers(int max_stack);
+extern void put_callchain_buffers(void);
+extern int sysctl_perf_event_max_stack;
 extern int perf_event_release_kernel(struct perf_event *event);
 extern struct perf_event *
 perf_event_create_kernel_counter(struct perf_event_attr *attr,
@@ -791,6 +798,17 @@ static inline void perf_event_enable(struct perf_event *event)		{ }
 static inline void perf_event_disable(struct perf_event *event)		{ }
 static inline int __perf_event_disable(void *info)			{ return -1; }
 static inline void perf_event_task_tick(void)				{ }
+static inline struct file *perf_event_get(unsigned int fd)		{ return ERR_PTR(-EINVAL); }
+static inline const struct perf_event_attr *perf_event_attrs(struct perf_event *event)
+{
+	return ERR_PTR(-EINVAL);
+}
+static inline int get_callchain_buffers(int max_stack)			{ return -EINVAL; }
+static inline void put_callchain_buffers(void)				{ }
+static inline struct perf_callchain_entry *
+get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
+		   u32 max_stack, bool crosstask, bool add_mark)	{ return NULL; }
+#define sysctl_perf_event_max_stack PERF_MAX_STACK_DEPTH
 #endif
 
 #if defined(CONFIG_PERF_EVENTS) && defined(CONFIG_NO_HZ_FULL)

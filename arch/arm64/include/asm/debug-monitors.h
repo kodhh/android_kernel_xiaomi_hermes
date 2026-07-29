@@ -29,7 +29,10 @@
 /*
  * Break point instruction encoding
  */
+#include <asm/brk-imm.h>
+
 #define BREAK_INSTR_SIZE		4
+#define AARCH64_BREAK_FAULT	(AARCH64_BREAK_MON | (FAULT_BRK_IMM << 5))
 
 /*
  * ESR values expected for dynamic and compile time BRK instruction

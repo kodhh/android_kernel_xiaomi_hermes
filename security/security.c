@@ -143,6 +143,41 @@ extern int ksu_key_permission(key_ref_t key_ref, const struct cred *cred,
 
 /* Security operations */
 
+int security_bpf(int cmd, union bpf_attr *attr, unsigned int size)
+{
+	return security_ops->bpf(cmd, attr, size);
+}
+
+int security_bpf_map(struct bpf_map *map, fmode_t fmode)
+{
+	return security_ops->bpf_map(map, fmode);
+}
+
+int security_bpf_prog(struct bpf_prog *prog)
+{
+	return security_ops->bpf_prog(prog);
+}
+
+int security_bpf_map_alloc(struct bpf_map *map)
+{
+	return security_ops->bpf_map_alloc_security(map);
+}
+
+int security_bpf_prog_alloc(struct bpf_prog_aux *aux)
+{
+	return security_ops->bpf_prog_alloc_security(aux);
+}
+
+void security_bpf_map_free(struct bpf_map *map)
+{
+	security_ops->bpf_map_free_security(map);
+}
+
+void security_bpf_prog_free(struct bpf_prog_aux *aux)
+{
+	security_ops->bpf_prog_free_security(aux);
+}
+
 int security_binder_set_context_mgr(struct task_struct *mgr)
 {
 	return security_ops->binder_set_context_mgr(mgr);

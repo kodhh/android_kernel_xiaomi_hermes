@@ -707,12 +707,20 @@ __SYSCALL(__NR_getrandom, sys_getrandom)
 #define __NR_memfd_create 279
 __SYSCALL(__NR_memfd_create, sys_memfd_create)
 #define __NR_bpf 280
-__SYSCALL(__NR_bpf, sys_ni_syscall)
+__SYSCALL(__NR_bpf, sys_bpf)
 #define __NR_execveat 281
 __SYSCALL(__NR_execveat, sys_execveat)
+#define __NR_userfaultfd 282
+__SYSCALL(__NR_userfaultfd, sys_userfaultfd)
+#define __NR_membarrier 283
+__SYSCALL(__NR_membarrier, sys_membarrier)
+#define __NR_pidfd_send_signal 284
+__SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+#define __NR_pidfd_open 285
+__SYSCALL(__NR_pidfd_open, sys_pidfd_open)
 
 #undef __NR_syscalls
-#define __NR_syscalls 282
+#define __NR_syscalls 286
 
 /*
  * All syscalls below here should go away really,

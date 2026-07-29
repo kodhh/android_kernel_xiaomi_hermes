@@ -358,6 +358,12 @@ endif   # if NET
 config HAVE_BPF_JIT
 	bool
 
+config HAVE_CBPF_JIT
+	bool
+
+config HAVE_EBPF_JIT
+	bool
+
 #ADD NetWorking Log 
 config MTK_NET_LOGGING
   bool "Networking log"

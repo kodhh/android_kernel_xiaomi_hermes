@@ -4,7 +4,7 @@
  *  Copyright (C) 2008 Thomas Gleixner <tglx@linutronix.de>
  *  Copyright (C) 2008-2011 Red Hat, Inc., Ingo Molnar
  *  Copyright (C) 2008-2011 Red Hat, Inc., Peter Zijlstra <pzijlstr@redhat.com>
- *  Copyright  ©  2009 Paul Mackerras, IBM Corp. <paulus@au1.ibm.com>
+ *  Copyright  ï¿½  2009 Paul Mackerras, IBM Corp. <paulus@au1.ibm.com>
  *
  * For licensing details see kernel-base/COPYING
  */
@@ -17,6 +17,8 @@ struct callchain_cpus_entries {
 	struct rcu_head			rcu_head;
 	struct perf_callchain_entry	*cpu_entries[0];
 };
+
+int sysctl_perf_event_max_stack __read_mostly = PERF_MAX_STACK_DEPTH;
 
 static DEFINE_PER_CPU(int, callchain_recursion[PERF_NR_CONTEXTS]);
 static atomic_t nr_callchain_events;
@@ -94,7 +96,7 @@ fail:
 	return -ENOMEM;
 }
 
-int get_callchain_buffers(void)
+int get_callchain_buffers(int max_stack)
 {
 	int err = 0;
 	int count;
@@ -195,6 +197,52 @@ perf_callchain(struct perf_event *event, struct pt_regs *regs)
 				goto exit_put;
 
 			perf_callchain_store(entry, PERF_CONTEXT_USER);
+			perf_callchain_user(entry, regs);
+		}
+	}
+
+exit_put:
+	put_callchain_entry(rctx);
+
+	return entry;
+}
+
+struct perf_callchain_entry *
+get_perf_callchain(struct pt_regs *regs, u32 init_nr, bool kernel, bool user,
+		   u32 max_stack, bool crosstask, bool add_mark)
+{
+	int rctx;
+	struct perf_callchain_entry *entry;
+
+	entry = get_callchain_entry(&rctx);
+	if (rctx == -1)
+		return NULL;
+
+	if (!entry)
+		goto exit_put;
+
+	entry->nr = init_nr;
+
+	if (kernel && !user_mode(regs)) {
+		if (add_mark)
+			perf_callchain_store(entry, PERF_CONTEXT_KERNEL);
+		perf_callchain_kernel(entry, regs);
+	}
+
+	if (user) {
+		if (!user_mode(regs)) {
+			if  (current->mm)
+				regs = task_pt_regs(current);
+			else
+				regs = NULL;
+		}
+
+		if (regs) {
+			if (crosstask)
+				goto exit_put;
+
+			if (add_mark)
+				perf_callchain_store(entry, PERF_CONTEXT_USER);
 			perf_callchain_user(entry, regs);
 		}
 	}
