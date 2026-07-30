@@ -63,6 +63,7 @@ struct pid
 	/* lists of tasks that use this pid */
 	struct hlist_head tasks[PIDTYPE_MAX];
 	struct rcu_head rcu;
+	wait_queue_head_t wait_pidfd;
 	struct upid numbers[1];
 };
 

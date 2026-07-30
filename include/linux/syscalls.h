@@ -881,6 +881,7 @@ asmlinkage long sys_seccomp(unsigned int op, unsigned int flags,
 			    const char __user *uargs);
 asmlinkage long sys_getrandom(char __user *buf, size_t count,
 			      unsigned int flags);
+asmlinkage long sys_memfd_create(const char __user *uname, unsigned int flags);
 asmlinkage long sys_membarrier(int cmd, int flags);
 asmlinkage long sys_userfaultfd(int flags);
 asmlinkage long sys_pidfd_send_signal(int pidfd, int sig, siginfo_t __user *info, unsigned int flags);

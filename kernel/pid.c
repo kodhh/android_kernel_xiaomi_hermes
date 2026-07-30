@@ -38,6 +38,9 @@
 #include <linux/syscalls.h>
 #include <linux/proc_ns.h>
 #include <linux/proc_fs.h>
+#include <linux/file.h>
+#include <linux/anon_inodes.h>
+#include <linux/poll.h>
 
 #define pid_hashfn(nr, ns)	\
 	hash_long((unsigned long)nr + (unsigned long)ns, pidhash_shift)
@@ -318,6 +321,7 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	atomic_set(&pid->count, 1);
 	for (type = 0; type < PIDTYPE_MAX; ++type)
 		INIT_HLIST_HEAD(&pid->tasks[type]);
+	init_waitqueue_head(&pid->wait_pidfd);
 
 	upid = pid->numbers + ns->level;
 	spin_lock_irq(&pidmap_lock);
@@ -599,4 +603,53 @@ void __init pidmap_init(void)
 
 	init_pid_ns.pid_cachep = KMEM_CACHE(pid,
 			SLAB_HWCACHE_ALIGN | SLAB_PANIC);
+}
+
+static unsigned int pidfd_poll(struct file *file, poll_table *wait)
+{
+	struct pid *pid = file->private_data;
+	struct task_struct *task;
+
+	poll_wait(file, &pid->wait_pidfd, wait);
+
+	task = pid_task(pid, PIDTYPE_PID);
+	if (!task)
+		return POLLIN | POLLRDNORM;
+
+	return 0;
+}
+
+
+
+static int pidfd_create(struct pid *pid)
+{
+	int fd;
+
+	fd = anon_inode_getfd("pidfd", &pidfd_fops, pid, O_RDWR | O_CLOEXEC);
+	if (fd < 0)
+		return fd;
+
+	return fd;
+}
+
+SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
+{
+	int fd;
+	struct pid *p;
+
+	if (flags)
+		return -EINVAL;
+
+	if (pid <= 0)
+		return -EINVAL;
+
+	p = find_get_pid(pid);
+	if (!p)
+		return -ESRCH;
+
+	fd = pidfd_create(p);
+	if (fd < 0)
+		put_pid(p);
+
+	return fd;
 }

@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/pipe_fs_i.h>
+#include <linux/shmem_fs.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
 #include <linux/signal.h>

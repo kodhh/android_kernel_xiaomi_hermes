@@ -1977,6 +1977,24 @@ config PADATA
 config BROKEN_RODATA
 	bool
 
+config MEMBARRIER
+	bool "Enable membarrier() system call"
+	default y
+	help
+	  Enable the membarrier() system call which allows issuing memory
+	  barriers across all running threads of a process.
+
+	  If unsure, say Y.
+
+config MEMFD_CREATE
+	bool "Enable memfd_create() system call"
+	default y
+	help
+	  Enable the memfd_create() system call which allows creating
+	  anonymous file handles in memory.
+
+	  If unsure, say Y.
+
 config ASN1
 	tristate
 	help

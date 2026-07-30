@@ -3,6 +3,8 @@
 
 #ifdef CONFIG_USERFAULTFD
 
+struct userfaultfd_ctx;
+
 #include <linux/userfaultfd.h>
 #include <linux/fcntl.h>
 
