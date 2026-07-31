@@ -100,6 +100,7 @@ struct bpf_verifier_env {
 	bool allow_ptr_leaks;
 	bool seen_direct_write;
 	bool varlen_map_value_access;
+	bool strict_alignment;		/* perform strict pointer alignment checks */
 	struct bpf_insn_aux_data *insn_aux_data; /* array of per-insn state */
 };
 

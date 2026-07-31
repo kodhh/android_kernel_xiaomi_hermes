@@ -1520,7 +1520,7 @@ config BPF_SYSCALL
 
 config BPF_JIT_ALWAYS_ON
 	bool "Permanently enable BPF JIT and remove BPF interpreter"
-	depends on BPF_SYSCALL && HAVE_BPF_JIT && BPF_JIT
+	depends on BPF_SYSCALL && HAVE_EBPF_JIT && BPF_JIT
 	help
 	  Enables BPF JIT and removes BPF interpreter to avoid
 	  speculative execution of BPF instructions by the interpreter
@@ -1756,9 +1756,14 @@ config ANDROID_TREBLE_BYPASS_KERNEL_VERSION_CHECKS
 	  Settings->About phone.
 
 config ANDROID_TREBLE_SPOOF_KERNEL_VERSION_PREFIX
-	string "Kernel version to prepend to real one"
-	depends on ANDROID_TREBLE_SPOOF_KERNEL_VERSION
-	default "4.19"
+ 	string "Kernel version to prepend to real one"
+ 	depends on ANDROID_TREBLE_SPOOF_KERNEL_VERSION
+ 	default "4.9.337"
+
+config ANDROID_TREBLE_SPOOF_BPF_KERNEL_VERSION_PREFIX
+ 	string "Kernel version to prepend to real one for bpfloader"
+ 	depends on ANDROID_TREBLE_SPOOF_KERNEL_VERSION
+ 	default "4.19.325"
 
 endmenu
 

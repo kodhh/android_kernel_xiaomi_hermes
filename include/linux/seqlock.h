@@ -141,6 +141,24 @@ static inline int read_seqcount_retry(const seqcount_t *s, unsigned start)
 	return __read_seqcount_retry(s, start);
 }
 
+/*
+ * raw_write_seqcount_latch - redirect readers to even/odd copy
+ * @s: pointer to seqcount_t
+ */
+static inline void raw_write_seqcount_latch(seqcount_t *s)
+{
+       smp_wmb();      /* prior stores before incrementing "sequence" */
+       s->sequence++;
+       smp_wmb();      /* increment "sequence" before following stores */
+}
+
+static inline int raw_read_seqcount_latch(seqcount_t *s)
+{
+	int seq = READ_ONCE(s->sequence);
+	/* Pairs with the first smp_wmb() in raw_write_seqcount_latch() */
+	smp_read_barrier_depends();
+	return seq;
+}
 
 /*
  * Sequence counter only version assumes that callers are using their

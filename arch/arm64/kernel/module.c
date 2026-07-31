@@ -37,6 +37,11 @@ void *module_alloc(unsigned long size)
 				    __builtin_return_address(0));
 }
 
+void module_memfree(void *module_region)
+{
+	vfree(module_region);
+}
+
 enum aarch64_reloc_op {
 	RELOC_OP_NONE,
 	RELOC_OP_ABS,

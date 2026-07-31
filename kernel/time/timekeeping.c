@@ -1517,6 +1517,12 @@ ktime_t ktime_get_boottime(void)
 }
 EXPORT_SYMBOL_GPL(ktime_get_boottime);
 
+u64 notrace ktime_get_boot_fast_ns(void)
+{
+	return (u64)ktime_to_ns(ktime_get_boottime());
+}
+EXPORT_SYMBOL_GPL(ktime_get_boot_fast_ns);
+
 /**
  * monotonic_to_bootbased - Convert the monotonic time to boot based.
  * @ts:		pointer to the timespec to be converted

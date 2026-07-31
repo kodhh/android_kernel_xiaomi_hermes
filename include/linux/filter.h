@@ -14,6 +14,7 @@
 #include <linux/workqueue.h>
 #include <linux/sched.h>
 #include <linux/capability.h>
+#include <linux/cryptohash.h>
 
 #include <net/sch_generic.h>
 
@@ -55,6 +56,12 @@ struct bpf_prog_aux;
 
 /* unused opcode to mark special call to bpf_tail_call() helper */
 #define BPF_TAIL_CALL	0xf0
+
+/* As per nm, we expose JITed images as text (code) section for
+ * kallsyms. That way, tools like perf can find it to match
+ * addresses.
+ */
+#define BPF_SYM_ELF_TYPE	't'
 
 /* BPF program can access up to 512 bytes of stack space. */
 #define MAX_BPF_STACK	512
@@ -394,7 +401,12 @@ struct sock_fprog_kern {
 	struct sock_filter	*filter;
 };
 
+#define BPF_BINARY_HEADER_MAGIC	0x05de0e82
+
 struct bpf_binary_header {
+#ifdef CONFIG_CFI_CLANG
+	u32 magic;
+#endif
 	unsigned int pages;
 	u8 image[];
 };
@@ -409,6 +421,8 @@ struct bpf_prog {
 	kmemcheck_bitfield_end(meta);
 	u32			len;		/* Number of filter blocks */
 	enum bpf_prog_type	type;		/* Type of BPF program */
+	enum bpf_attach_type	expected_attach_type; /* For some prog types */
+	u8			tag[BPF_TAG_SIZE];
 	struct bpf_prog_aux	*aux;		/* Auxiliary fields */
 	struct sock_fprog_kern	*orig_prog;	/* Original BPF program */
 	unsigned int		(*bpf_func)(const struct sk_buff *skb,
@@ -421,17 +435,65 @@ struct bpf_prog {
 };
 
 struct sk_filter {
-	atomic_t		refcnt;
-	struct rcu_head		rcu;
-	struct bpf_prog		*prog;
-	/* Legacy fields for classic BPF compatibility */
-	unsigned int		len;	/* Number of filter blocks */
-	unsigned int		(*bpf_func)(const struct sk_buff *skb,
-					    const struct sock_filter *filter);
-	struct sock_filter	insns[0];
+	atomic_t	refcnt;
+	struct rcu_head	rcu;
+	struct bpf_prog	*prog;
 };
 
-#define BPF_PROG_RUN(filter, ctx)  (*(filter)->bpf_func)(ctx, (filter)->insnsi)
+#if IS_ENABLED(CONFIG_BPF_JIT) && IS_ENABLED(CONFIG_CFI_CLANG)
+/*
+ * With JIT, the kernel makes an indirect call to dynamically generated
+ * code. Use bpf_call_func to perform additional validation of the call
+ * target to narrow down attack surface. Architectures implementing BPF
+ * JIT can override arch_bpf_jit_check_func for arch-specific checking.
+ */
+extern bool arch_bpf_jit_check_func(const struct bpf_prog *prog);
+
+static inline unsigned int __bpf_call_func(const struct bpf_prog *prog,
+					   const void *ctx)
+{
+	/* Call interpreter with CFI checking. */
+	return prog->bpf_func(ctx, prog->insnsi);
+}
+
+static inline unsigned int __nocfi bpf_call_func(const struct bpf_prog *prog,
+						 const void *ctx)
+{
+	unsigned long addr = (unsigned long)prog->bpf_func & PAGE_MASK;
+	const struct bpf_binary_header *hdr = (void *)addr;
+
+	if (!IS_ENABLED(CONFIG_BPF_JIT_ALWAYS_ON) && !prog->jited)
+		return __bpf_call_func(prog, ctx);
+
+	/*
+	 * We are about to call dynamically generated code. Check that the
+	 * page has bpf_binary_header with a valid magic to limit possible
+	 * call targets.
+	 */
+	BUG_ON(hdr->magic != BPF_BINARY_HEADER_MAGIC ||
+		!arch_bpf_jit_check_func(prog));
+
+	/* Call jited function without CFI checking. */
+	return prog->bpf_func(ctx, prog->insnsi);
+}
+
+static inline void bpf_jit_set_header_magic(struct bpf_binary_header *hdr)
+{
+	hdr->magic = BPF_BINARY_HEADER_MAGIC;
+}
+#else
+static inline unsigned int bpf_call_func(const struct bpf_prog *prog,
+					 const void *ctx)
+{
+	return prog->bpf_func(ctx, prog->insnsi);
+}
+
+static inline void bpf_jit_set_header_magic(struct bpf_binary_header *hdr)
+{
+}
+#endif
+
+#define BPF_PROG_RUN(filter, ctx)  bpf_call_func(filter, ctx)
 
 #define BPF_SKB_CB_LEN QDISC_CB_PRIV_LEN
 
@@ -524,6 +586,17 @@ static inline unsigned int bpf_prog_size(unsigned int proglen)
 		   offsetof(struct bpf_prog, insns[proglen]));
 }
 
+static inline u32 bpf_prog_insn_size(const struct bpf_prog *prog)
+{
+	return prog->len * sizeof(struct bpf_insn);
+}
+
+static inline u32 bpf_prog_tag_scratch_size(const struct bpf_prog *prog)
+{
+	return round_up(bpf_prog_insn_size(prog) +
+			sizeof(__be64) + 1, SHA_MESSAGE_BYTES);
+}
+
 static inline bool bpf_prog_was_classic(const struct bpf_prog *prog)
 {
 	/* When classic BPF programs have been loaded and the arch
@@ -546,6 +619,11 @@ static inline void bpf_prog_unlock_ro(struct bpf_prog *fp)
 {
 	set_memory_rw((unsigned long)fp, fp->pages);
 }
+
+static inline void bpf_jit_binary_unlock_ro(struct bpf_binary_header *hdr)
+{
+	set_memory_rw((unsigned long)hdr, hdr->pages);
+}
 #else
 static inline void bpf_prog_lock_ro(struct bpf_prog *fp)
 {
@@ -554,7 +632,20 @@ static inline void bpf_prog_lock_ro(struct bpf_prog *fp)
 static inline void bpf_prog_unlock_ro(struct bpf_prog *fp)
 {
 }
+
+static inline void bpf_jit_binary_unlock_ro(struct bpf_binary_header *hdr)
+{
+}
 #endif /* CONFIG_DEBUG_SET_MODULE_RONX */
+
+static inline struct bpf_binary_header *
+bpf_jit_binary_hdr(const struct bpf_prog *fp)
+{
+	unsigned long real_start = (unsigned long)fp->bpf_func;
+	unsigned long addr = real_start & PAGE_MASK;
+
+	return (void *)addr;
+}
 
 int sk_filter_trim_cap(struct sock *sk, struct sk_buff *skb, unsigned int cap);
 static inline int sk_filter(struct sock *sk, struct sk_buff *skb)
@@ -584,13 +675,6 @@ int bpf_prog_create_from_user(struct bpf_prog **pfp, struct sock_fprog *fprog,
 			      bpf_aux_classic_check_t trans, bool save_orig);
 void bpf_prog_destroy(struct bpf_prog *fp);
 
-unsigned int sk_run_filter(const struct sk_buff *skb,
-			   const struct sock_filter *filter);
-int sk_chk_filter(struct sock_filter *filter, unsigned int flen);
-void sk_decode_filter(struct sock_filter *filt, struct sock_filter *to);
-int sk_unattached_filter_create(struct sk_filter **pfp,
-				struct sock_fprog *fprog);
-void sk_unattached_filter_destroy(struct sk_filter *fp);
 int sk_attach_filter(struct sock_fprog *fprog, struct sock *sk);
 int sk_attach_bpf(u32 ufd, struct sock *sk);
 int sk_reuseport_attach_filter(struct sock_fprog *fprog, struct sock *sk);
@@ -605,19 +689,19 @@ void sk_filter_uncharge(struct sock *sk, struct sk_filter *fp);
 u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5);
 
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog);
+void bpf_jit_compile(struct bpf_prog *prog);
 bool bpf_helper_changes_skb_data(void *func);
 
 struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
 				       const struct bpf_insn *patch, u32 len);
 void bpf_warn_invalid_xdp_action(u32 act);
 
-void bpf_jit_compile(struct bpf_prog *prog);
-
 #ifdef CONFIG_BPF_JIT
 extern int bpf_jit_enable;
 extern int bpf_jit_harden;
 extern long bpf_jit_limit;
 extern long bpf_jit_limit_max;
+extern int bpf_jit_kallsyms;
 
 typedef void (*bpf_jit_fill_hole_t)(void *area, unsigned int size);
 
@@ -627,10 +711,10 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 		     bpf_jit_fill_hole_t bpf_fill_ill_insns);
 void bpf_jit_binary_free(struct bpf_binary_header *hdr);
 
+void bpf_jit_free(struct bpf_prog *fp);
+
 struct bpf_prog *bpf_jit_blind_constants(struct bpf_prog *fp);
 void bpf_jit_prog_release_other(struct bpf_prog *fp, struct bpf_prog *fp_other);
-
-void bpf_jit_free(struct bpf_prog *fp);
 
 static inline void bpf_jit_dump(unsigned int flen, unsigned int proglen,
 				u32 pass, void *image)
@@ -652,6 +736,11 @@ static inline bool bpf_jit_is_ebpf(void)
 # endif
 }
 
+static inline bool bpf_prog_ebpf_jited(const struct bpf_prog *fp)
+{
+	return fp->jited && bpf_jit_is_ebpf();
+}
+
 static inline bool bpf_jit_blinding_enabled(void)
 {
 	/* These are the prerequisites, should someone ever have the
@@ -669,14 +758,92 @@ static inline bool bpf_jit_blinding_enabled(void)
 
 	return true;
 }
-#else
+
+static inline bool bpf_jit_kallsyms_enabled(void)
+{
+	/* There are a couple of corner cases where kallsyms should
+	 * not be enabled f.e. on hardening.
+	 */
+	if (bpf_jit_harden)
+		return false;
+	if (!bpf_jit_kallsyms)
+		return false;
+	if (bpf_jit_kallsyms == 1)
+		return true;
+
+	return false;
+}
+
+const char *__bpf_address_lookup(unsigned long addr, unsigned long *size,
+				 unsigned long *off, char *sym);
+bool is_bpf_text_address(unsigned long addr);
+int bpf_get_kallsym(unsigned int symnum, unsigned long *value, char *type,
+		    char *sym);
+
+static inline const char *
+bpf_address_lookup(unsigned long addr, unsigned long *size,
+		   unsigned long *off, char **modname, char *sym)
+{
+	const char *ret = __bpf_address_lookup(addr, size, off, sym);
+
+	if (ret && modname)
+		*modname = NULL;
+	return ret;
+}
+
+void bpf_prog_kallsyms_add(struct bpf_prog *fp);
+void bpf_prog_kallsyms_del(struct bpf_prog *fp);
+
+#else /* CONFIG_BPF_JIT */
+
+static inline bool bpf_prog_ebpf_jited(const struct bpf_prog *fp)
+{
+	return false;
+}
+
 static inline void bpf_jit_free(struct bpf_prog *fp)
 {
 	bpf_prog_unlock_free(fp);
 }
-#endif /* CONFIG_BPF_JIT */
 
-#define SK_RUN_FILTER(FILTER, SKB) (*FILTER->bpf_func)(SKB, FILTER->insns)
+static inline bool bpf_jit_kallsyms_enabled(void)
+{
+	return false;
+}
+
+static inline const char *
+__bpf_address_lookup(unsigned long addr, unsigned long *size,
+		     unsigned long *off, char *sym)
+{
+	return NULL;
+}
+
+static inline bool is_bpf_text_address(unsigned long addr)
+{
+	return false;
+}
+
+static inline int bpf_get_kallsym(unsigned int symnum, unsigned long *value,
+				  char *type, char *sym)
+{
+	return -ERANGE;
+}
+
+static inline const char *
+bpf_address_lookup(unsigned long addr, unsigned long *size,
+		   unsigned long *off, char **modname, char *sym)
+{
+	return NULL;
+}
+
+static inline void bpf_prog_kallsyms_add(struct bpf_prog *fp)
+{
+}
+
+static inline void bpf_prog_kallsyms_del(struct bpf_prog *fp)
+{
+}
+#endif /* CONFIG_BPF_JIT */
 
 #define BPF_ANC		BIT(15)
 
@@ -750,73 +917,15 @@ static inline int bpf_tell_extensions(void)
 	return SKF_AD_MAX;
 }
 
-/* Legacy BPF instruction decoding table (used by classic BPF filter.c) */
-enum {
-	BPF_S_RET_K = 1,
-	BPF_S_RET_A,
-	BPF_S_ALU_ADD_K,
-	BPF_S_ALU_ADD_X,
-	BPF_S_ALU_SUB_K,
-	BPF_S_ALU_SUB_X,
-	BPF_S_ALU_MUL_K,
-	BPF_S_ALU_MUL_X,
-	BPF_S_ALU_DIV_X,
-	BPF_S_ALU_MOD_K,
-	BPF_S_ALU_MOD_X,
-	BPF_S_ALU_AND_K,
-	BPF_S_ALU_AND_X,
-	BPF_S_ALU_OR_K,
-	BPF_S_ALU_OR_X,
-	BPF_S_ALU_XOR_K,
-	BPF_S_ALU_XOR_X,
-	BPF_S_ALU_LSH_K,
-	BPF_S_ALU_LSH_X,
-	BPF_S_ALU_RSH_K,
-	BPF_S_ALU_RSH_X,
-	BPF_S_ALU_NEG,
-	BPF_S_LD_W_ABS,
-	BPF_S_LD_H_ABS,
-	BPF_S_LD_B_ABS,
-	BPF_S_LD_W_LEN,
-	BPF_S_LD_W_IND,
-	BPF_S_LD_H_IND,
-	BPF_S_LD_B_IND,
-	BPF_S_LD_IMM,
-	BPF_S_LDX_W_LEN,
-	BPF_S_LDX_B_MSH,
-	BPF_S_LDX_IMM,
-	BPF_S_MISC_TAX,
-	BPF_S_MISC_TXA,
-	BPF_S_ALU_DIV_K,
-	BPF_S_LD_MEM,
-	BPF_S_LDX_MEM,
-	BPF_S_ST,
-	BPF_S_STX,
-	BPF_S_JMP_JA,
-	BPF_S_JMP_JEQ_K,
-	BPF_S_JMP_JEQ_X,
-	BPF_S_JMP_JGE_K,
-	BPF_S_JMP_JGE_X,
-	BPF_S_JMP_JGT_K,
-	BPF_S_JMP_JGT_X,
-	BPF_S_JMP_JSET_K,
-	BPF_S_JMP_JSET_X,
-	/* Ancillary data */
-	BPF_S_ANC_PROTOCOL,
-	BPF_S_ANC_PKTTYPE,
-	BPF_S_ANC_IFINDEX,
-	BPF_S_ANC_NLATTR,
-	BPF_S_ANC_NLATTR_NEST,
-	BPF_S_ANC_MARK,
-	BPF_S_ANC_QUEUE,
-	BPF_S_ANC_HATYPE,
-	BPF_S_ANC_RXHASH,
-	BPF_S_ANC_CPU,
-	BPF_S_ANC_ALU_XOR_X,
-	BPF_S_ANC_SECCOMP_LD_W,
-	BPF_S_ANC_VLAN_TAG,
-	BPF_S_ANC_VLAN_TAG_PRESENT,
-	BPF_S_ANC_PAY_OFFSET,
+struct bpf_sock_addr_kern {
+	struct sock *sk;
+	struct sockaddr *uaddr;
+	/* Temporary "register" to make indirect stores to nested structures
+	 * defined above. We need three registers to make such a store, but
+	 * only two (src and dst) are available at convert_ctx_access time
+	 */
+	u64 tmp_reg;
+	void *t_ctx;	/* Attach type specific context. */
 };
 
 #endif /* __LINUX_FILTER_H__ */

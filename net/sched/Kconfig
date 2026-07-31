@@ -426,8 +426,18 @@ config NET_CLS_CGROUP
 	  Say Y here if you want to classify packets based on the control
 	  cgroup of their process.
 
-	  To compile this code as a module, choose M here: the
-	  module will be called cls_cgroup.
+ 	  To compile this code as a module, choose M here: the
+ 	  module will be called cls_cgroup.
+
+config NET_CLS_BPF
+	tristate "BPF-based classifier"
+	select NET_CLS
+	---help---
+	  If you say Y here, you will be able to classify packets based on
+	  programmable BPF (JIT'ed) filters as an alternative to ematches.
+
+	  To compile this code as a module, choose M here: the module will
+	  be called cls_bpf.
 
 config NET_EMATCH
 	bool "Extended Matches"
@@ -636,11 +646,23 @@ config NET_ACT_CSUM
 	  Say Y here to update some common checksum after some direct
 	  packet alterations.
 
+ 	  To compile this code as a module, choose M here: the
+ 	  module will be called act_csum.
+
+config NET_ACT_BPF
+	tristate "BPF based action"
+	depends on NET_CLS_ACT
+	---help---
+	  Say Y here to execute BPF code on packets. The BPF code will decide
+	  if the packet should be dropped or not.
+
+	  If unsure, say N.
+
 	  To compile this code as a module, choose M here: the
-	  module will be called act_csum.
+	  module will be called act_bpf.
 
 config NET_CLS_IND
-	bool "Incoming device classification"
+ 	bool "Incoming device classification"
 	depends on NET_CLS_U32 || NET_CLS_FW
 	---help---
 	  Say Y here to extend the u32 and fw classifier to support

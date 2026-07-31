@@ -78,20 +78,36 @@ static inline void emit(const u32 insn, struct jit_ctx *ctx)
 	ctx->idx++;
 }
 
+static int i64_i16_blocks(const u64 val, bool inverse)
+{
+	return (((val >>  0) & 0xffff) != (inverse ? 0xffff : 0x0000)) +
+	       (((val >> 16) & 0xffff) != (inverse ? 0xffff : 0x0000)) +
+	       (((val >> 32) & 0xffff) != (inverse ? 0xffff : 0x0000)) +
+	       (((val >> 48) & 0xffff) != (inverse ? 0xffff : 0x0000));
+}
+
 static inline void emit_a64_mov_i64(const int reg, const u64 val,
 				    struct jit_ctx *ctx)
 {
-	u64 tmp = val;
-	int shift = 0;
+	u64 nrm_tmp = val, rev_tmp = ~val;
+	bool inverse;
+	int shift;
 
-	emit(A64_MOVZ(1, reg, tmp & 0xffff, shift), ctx);
-	tmp >>= 16;
-	shift += 16;
-	while (tmp) {
-		if (tmp & 0xffff)
-			emit(A64_MOVK(1, reg, tmp & 0xffff, shift), ctx);
-		tmp >>= 16;
-		shift += 16;
+	if (!(nrm_tmp >> 32))
+		return emit_a64_mov_i(0, reg, (u32)val, ctx);
+
+	inverse = i64_i16_blocks(nrm_tmp, true) < i64_i16_blocks(nrm_tmp, false);
+	shift = max(round_down((inverse ? (fls64(rev_tmp) - 1) :
+					  (fls64(nrm_tmp) - 1)), 16), 0);
+	if (inverse)
+		emit(A64_MOVN(1, reg, (rev_tmp >> shift) & 0xffff, shift), ctx);
+	else
+		emit(A64_MOVZ(1, reg, (nrm_tmp >> shift) & 0xffff, shift), ctx);
+	shift -= 16;
+	while (shift >= 0) {
+		if (((nrm_tmp >> shift) & 0xffff) != (inverse ? 0xffff : 0x0000))
+			emit(A64_MOVK(1, reg, (nrm_tmp >> shift) & 0xffff, shift), ctx);
+		shift -= 16;
 	}
 }
 
@@ -106,7 +122,8 @@ static inline void emit_a64_mov_i(const int is64, const int reg,
 			emit(A64_MOVN(is64, reg, (u16)~lo, 0), ctx);
 		} else {
 			emit(A64_MOVN(is64, reg, (u16)~hi, 16), ctx);
-			emit(A64_MOVK(is64, reg, lo, 0), ctx);
+			if (lo != 0xffff)
+				emit(A64_MOVK(is64, reg, lo, 0), ctx);
 		}
 	} else {
 		emit(A64_MOVZ(is64, reg, lo, 0), ctx);
@@ -206,7 +223,7 @@ static int build_prologue(struct jit_ctx *ctx, bool ebpf_from_cbpf)
 		}
 	}
 
-	ctx->stack_size = STACK_ALIGN(prog->aux->stack_depth);
+	ctx->stack_size = STACK_ALIGN(MAX_BPF_STACK);
 
 	/* Set up function call stack */
 	emit(A64_SUB_I(1, A64_SP, A64_SP, ctx->stack_size), ctx);
@@ -920,19 +937,6 @@ out:
 		bpf_jit_prog_release_other(prog, prog == orig_prog ?
 					   tmp : orig_prog);
 	return prog;
-}
-
-void *bpf_jit_alloc_exec(unsigned long size)
-{
-	return __vmalloc_node_range(size, PAGE_SIZE, BPF_JIT_REGION_START,
-				    BPF_JIT_REGION_END, GFP_KERNEL,
-				    PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
-				    __builtin_return_address(0));
-}
-
-void bpf_jit_free_exec(void *addr)
-{
-	return vfree(addr);
 }
 
 void bpf_jit_free(struct bpf_prog *prog)

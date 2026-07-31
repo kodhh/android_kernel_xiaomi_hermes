@@ -295,6 +295,3 @@ core_initcall(boot_common_core);
 module_init(boot_common_init);
 MODULE_DESCRIPTION("MTK Boot Information Common Driver");
 MODULE_LICENSE("GPL");
-EXPORT_SYMBOL(is_meta_mode);
-EXPORT_SYMBOL(is_advanced_meta_mode);
-EXPORT_SYMBOL(get_boot_mode);
