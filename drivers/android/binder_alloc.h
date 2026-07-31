@@ -17,27 +17,50 @@
 
 #include <linux/rbtree.h>
 #include <linux/list.h>
+#include <linux/list_lru.h>
 #include <linux/mm.h>
 #include <linux/rtmutex.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
 struct binder_transaction;
+struct binder_alloc;
+
+/**
+ * struct binder_lru_page - page object used to represent a single page
+ * @lru:              page is on lru list if freeable
+ * @page_ptr:         pointer to physical page in mmap'd space
+ * @alloc:            binder_alloc for a proc
+ *
+ * Bookkeeping structure for binder pages. Pages are kept on a global
+ * LRU list once they are no longer referenced, and are actually
+ * released only when the kernel reclaims them under memory pressure.
+ */
+struct binder_lru_page {
+	struct list_head lru;
+	struct page *page_ptr;
+	struct binder_alloc *alloc;
+};
 
 /**
  * struct binder_buffer - buffer used for binder transactions
  * @entry:              entry alloc->buffers
  * @rb_node:            node for allocated_buffers/free_buffers rb trees
- * @free:               true if buffer is free
- * @allow_user_free:    describe the second member of struct blah,
- * @async_transaction:  describe the second member of struct blah,
- * @debug_id:           describe the second member of struct blah,
- * @transaction:        describe the second member of struct blah,
- * @target_node:        describe the second member of struct blah,
- * @data_size:          describe the second member of struct blah,
- * @offsets_size:       describe the second member of struct blah,
- * @extra_buffers_size: describe the second member of struct blah,
- * @data:i              describe the second member of struct blah,
+ * @free:               %true if buffer is free
+ * @allow_user_free:    %true if user is allowed to free buffer
+ * @async_transaction:  %true if buffer is in use for an async txn
+ * @oneway_spam_suspect: %true if total async allocate size just exceed
+ * spamming detect threshold
+ * @debug_id:           unique ID for debugging
+ * @transaction:        pointer to associated struct binder_transaction
+ * @target_node:        struct binder_node associated with this buffer
+ * @data_size:          size of @transaction data
+ * @offsets_size:       size of array of offsets
+ * @extra_buffers_size: size of space for other objects (like sg lists)
+ * @data:               pointer to base of buffer space
+ * @pid:                pid to attribute the buffer to (caller)
+ * @oneway_spam_detected: %true if oneway spam detection fired, clear that
+ * flag once the async buffer has returned to a healthy state
  *
  * Bookkeeping structure for binder transaction buffers
  */
@@ -48,7 +71,8 @@ struct binder_buffer {
 	unsigned free:1;
 	unsigned allow_user_free:1;
 	unsigned async_transaction:1;
-	unsigned debug_id:29;
+	unsigned oneway_spam_suspect:1;
+	unsigned debug_id:28;
 
 	struct binder_transaction *transaction;
 
@@ -56,7 +80,8 @@ struct binder_buffer {
 	size_t data_size;
 	size_t offsets_size;
 	size_t extra_buffers_size;
-	uint8_t data[0];
+	void *data;
+	int    pid;
 };
 
 /**
@@ -74,8 +99,8 @@ struct binder_buffer {
  * @allocated_buffers:  rb tree of allocated buffers sorted by address
  * @free_async_space:   VA space available for async buffers. This is
  *                      initialized at mmap time to 1/2 the full VA space
- * @pages:              array of physical page addresses for each
- *                      page of mmap'd space
+ * @pages:              array of page states for each page of
+ *                      mmap'd space
  * @buffer_size:        size of address space specified via mmap
  * @pid:                pid for associated binder_proc (invariant after init)
  *
@@ -95,10 +120,11 @@ struct binder_alloc {
 	struct rb_root free_buffers;
 	struct rb_root allocated_buffers;
 	size_t free_async_space;
-	struct page **pages;
+	struct binder_lru_page *pages;
 	size_t buffer_size;
 	uint32_t buffer_free;
 	int pid;
+	bool oneway_spam_detected;
 };
 
 #ifdef CONFIG_ANDROID_BINDER_IPC_SELFTEST
@@ -110,7 +136,8 @@ extern struct binder_buffer *binder_alloc_new_buf(struct binder_alloc *alloc,
 						  size_t data_size,
 						  size_t offsets_size,
 						  size_t extra_buffers_size,
-						  int is_async);
+						  int is_async,
+						  int pid);
 extern void binder_alloc_init(struct binder_alloc *alloc);
 extern void binder_alloc_vma_close(struct binder_alloc *alloc);
 extern struct binder_buffer *
@@ -124,6 +151,12 @@ extern void binder_alloc_deferred_release(struct binder_alloc *alloc);
 extern int binder_alloc_get_allocated_count(struct binder_alloc *alloc);
 extern void binder_alloc_print_allocated(struct seq_file *m,
 					 struct binder_alloc *alloc);
+extern int binder_buffer_pool_create(void);
+extern void binder_buffer_pool_destroy(void);
+extern int binder_alloc_shrinker_init(void);
+extern void binder_alloc_shrinker_exit(void);
+enum lru_status binder_alloc_free_page(struct list_head *item,
+				       spinlock_t *lock, void *cb_arg);
 
 /**
  * binder_alloc_get_free_async_space() - get free space available for async

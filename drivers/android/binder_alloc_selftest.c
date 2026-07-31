@@ -105,10 +105,11 @@ static bool check_buffer_pages_allocated(struct binder_alloc *alloc,
 	void *page_addr, *end;
 	int page_index;
 
-	end = (void *)PAGE_ALIGN((uintptr_t)buffer + size);
-	for (page_addr = buffer; page_addr < end; page_addr += PAGE_SIZE) {
+	end = (void *)PAGE_ALIGN((uintptr_t)buffer->data + size);
+	page_addr = buffer->data;
+	for (; page_addr < end; page_addr += PAGE_SIZE) {
 		page_index = (page_addr - alloc->buffer) / PAGE_SIZE;
-		if (!alloc->pages[page_index]) {
+		if (!alloc->pages[page_index].page_ptr) {
 			pr_err("incorrect alloc state at page index %d\n",
 			       page_index);
 			return false;
@@ -124,11 +125,31 @@ static void binder_selftest_alloc_buf(struct binder_alloc *alloc,
 	int i;
 
 	for (i = 0; i < BUFFER_NUM; i++) {
-		buffers[i] = binder_alloc_new_buf(alloc, sizes[i], 0, 0, 0);
+		buffers[i] = binder_alloc_new_buf(alloc, sizes[i], 0, 0, 0, 0);
 		if (IS_ERR(buffers[i]) ||
 		    !check_buffer_pages_allocated(alloc, buffers[i],
 						  sizes[i])) {
 			pr_err_size_seq(sizes, seq);
+			binder_selftest_failures++;
+		}
+	}
+}
+
+static void binder_selftest_free_page(struct binder_alloc *alloc)
+{
+	int i;
+	unsigned long count;
+
+	while ((count = list_lru_count(&binder_alloc_lru))) {
+		list_lru_walk(&binder_alloc_lru, binder_alloc_free_page,
+			      NULL, count);
+	}
+
+	for (i = 0; i < (alloc->buffer_size / PAGE_SIZE); i++) {
+		if (alloc->pages[i].page_ptr) {
+			pr_err("expect free but is %s at page index %d\n",
+			       list_empty(&alloc->pages[i].lru) ?
+			       "alloc" : "lru", i);
 			binder_selftest_failures++;
 		}
 	}
@@ -143,8 +164,10 @@ static void binder_selftest_free_buf(struct binder_alloc *alloc,
 	for (i = 0; i < BUFFER_NUM; i++)
 		binder_alloc_free_buf(alloc, buffers[seq[i]]);
 
+	binder_selftest_free_page(alloc);
+
 	for (i = 0; i < (alloc->buffer_size / PAGE_SIZE); i++) {
-		if ((!alloc->pages[i]) == (i == 0)) {
+		if (alloc->pages[i].page_ptr) {
 			pr_err("incorrect free state at page index %d\n", i);
 			binder_selftest_failures++;
 		}
@@ -209,8 +232,7 @@ static void binder_selftest_alloc_size(struct binder_alloc *alloc,
 	 * Only BUFFER_NUM - 1 buffer sizes are adjustable since
 	 * we need one giant buffer before getting to the last page.
 	 */
-	back_sizes[0] += alloc->buffer_size - end_offset[BUFFER_NUM - 1]
-		- sizeof(struct binder_buffer) * BUFFER_NUM;
+	back_sizes[0] += alloc->buffer_size - end_offset[BUFFER_NUM - 1];
 	binder_selftest_free_seq(alloc, front_sizes, seq, 0);
 	binder_selftest_free_seq(alloc, back_sizes, seq, 0);
 }
@@ -228,8 +250,7 @@ static void binder_selftest_alloc_offset(struct binder_alloc *alloc,
 	prev = index == 0 ? 0 : end_offset[index - 1];
 	end = prev;
 
-	BUILD_BUG_ON((BUFFER_MIN_SIZE + sizeof(struct binder_buffer))
-		     * BUFFER_NUM >= PAGE_SIZE);
+	BUILD_BUG_ON(BUFFER_MIN_SIZE * BUFFER_NUM >= PAGE_SIZE);
 
 	for (align = SAME_PAGE_UNALIGNED; align < LOOP_END; align++) {
 		if (align % 2)

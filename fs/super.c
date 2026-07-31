@@ -34,6 +34,7 @@
 #include <linux/cleancache.h>
 #include <linux/fsnotify.h>
 #include <linux/lockdep.h>
+#include <linux/user_namespace.h>
 #include "internal.h"
 
 
@@ -163,6 +164,7 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags)
 			goto err_out;
 		s->s_flags = flags;
 		s->s_bdi = &default_backing_dev_info;
+		s->s_user_ns = get_user_ns(current_user_ns());
 		INIT_HLIST_NODE(&s->s_instances);
 		INIT_HLIST_BL_HEAD(&s->s_anon);
 		INIT_LIST_HEAD(&s->s_inodes);
@@ -228,6 +230,7 @@ static inline void destroy_super(struct super_block *s)
 	WARN_ON(!list_empty(&s->s_mounts));
 	kfree(s->s_subtype);
 	kfree(s->s_options);
+	put_user_ns(s->s_user_ns);
 	kfree(s);
 }
 

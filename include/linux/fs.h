@@ -1331,6 +1331,7 @@ struct super_block {
 	u8 s_uuid[16];				/* UUID */
 
 	void 			*s_fs_info;	/* Filesystem private info */
+	struct user_namespace *s_user_ns;
 	unsigned int		s_max_links;
 	fmode_t			s_mode;
 
