@@ -382,10 +382,8 @@ BPF_CALL_5(bpf_perf_event_output, struct pt_regs *, regs, struct bpf_map *, map,
 	   u64, flags, void *, data, u64, size)
 {
 	struct perf_raw_record raw = {
-		.frag = {
-			.size = size,
-			.data = data,
-		},
+		.size = size,
+		.data = data,
 	};
 
 	if (unlikely(flags & ~(BPF_F_INDEX_MASK)))
@@ -406,25 +404,31 @@ static const struct bpf_func_proto bpf_perf_event_output_proto = {
 };
 
 static DEFINE_PER_CPU(struct pt_regs, bpf_pt_regs);
+static DEFINE_PER_CPU(char, bpf_trace_buf[PERF_MAX_TRACE_SIZE]);
 
 u64 bpf_event_output(struct bpf_map *map, u64 flags, void *meta, u64 meta_size,
 		     void *ctx, u64 ctx_size, bpf_ctx_copy_t ctx_copy)
 {
 	struct pt_regs *regs = this_cpu_ptr(&bpf_pt_regs);
-	struct perf_raw_frag frag = {
-		.copy		= ctx_copy,
-		.size		= ctx_size,
-		.data		= ctx,
-	};
-	struct perf_raw_record raw = {
-		.frag = {
-			{
-				.next	= ctx_size ? &frag : NULL,
-			},
-			.size	= meta_size,
-			.data	= meta,
-		},
-	};
+	struct perf_raw_record raw;
+	char *buf = this_cpu_ptr(&bpf_trace_buf[0]);
+	u64 size = meta_size;
+
+	if (unlikely(meta_size + ctx_size > PERF_MAX_TRACE_SIZE))
+		return -EINVAL;
+
+	memcpy(buf, meta, meta_size);
+	if (ctx_copy) {
+		if (ctx_copy(buf + meta_size, ctx, 0, ctx_size))
+			return -EINVAL;
+		size += ctx_size;
+	} else {
+		memcpy(buf + meta_size, ctx, ctx_size);
+		size += ctx_size;
+	}
+
+	raw.size = size;
+	raw.data = buf;
 
 	perf_fetch_caller_regs(regs);
 
