@@ -294,6 +294,16 @@ int handle_userfault(struct vm_area_struct *vma, unsigned long address,
 	VM_BUG_ON(!(reason & VM_UFFD_MISSING) ^ !!(reason & VM_UFFD_WP));
 
 	/*
+	 * If the userfaultfd ctx has the UFFD_FEATURE_SIGBUS feature
+	 * enabled, return VM_FAULT_SIGBUS to the faulting thread
+	 * immediately instead of blocking it in the waitqueue. The
+	 * userfaultfd user (e.g. the ART concurrent GC) handles the
+	 * fault synchronously in its SIGBUS handler.
+	 */
+	if (ctx->features & UFFD_FEATURE_SIGBUS)
+		goto out;
+
+	/*
 	 * If it's already released don't get it. This avoids to loop
 	 * in __get_user_pages if userfaultfd_release waits on the
 	 * caller of handle_userfault to release the mmap_sem.
