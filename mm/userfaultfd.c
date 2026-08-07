@@ -957,7 +957,7 @@ ssize_t move_pages(struct mm_struct *mm, unsigned long dst_start,
 	for (src_addr = src_start, dst_addr = dst_start, src_end = src_start + len;
 	     src_addr < src_end;) {
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-		spinlock_t *ptl;
+		int thp_ret;
 #endif
 		pmd_t dst_pmdval;
 		unsigned long step_size;
@@ -998,31 +998,34 @@ ssize_t move_pages(struct mm_struct *mm, unsigned long dst_start,
 		}
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-		ptl = pmd_trans_huge_lock(src_pmd, src_vma);
-		if (ptl) {
-			if (pmd_devmap(*src_pmd)) {
-				spin_unlock(ptl);
-				err = -ENOENT;
+		/*
+		 * pmd_trans_huge_lock() returns 1 holding mm->page_table_lock
+		 * if the pmd maps a stable THP, -1 if it was under splitting
+		 * (the split has completed), and 0 if it is not a THP.
+		 */
+		thp_ret = pmd_trans_huge_lock(src_pmd, src_vma);
+		if (thp_ret == 1) {
+			/* Avoid moving zeropages for now */
+			if (is_huge_zero_pmd(*src_pmd)) {
+				spin_unlock(&mm->page_table_lock);
+				err = -EBUSY;
 				break;
 			}
 
 			/* Check if we can move the pmd without splitting it. */
 			if (move_splits_huge_pmd(dst_addr, src_addr, src_start + len) ||
 			    !pmd_none(dst_pmdval)) {
-				/* Can be a migration entry */
-				if (pmd_present(*src_pmd)) {
-					struct page *page = pfn_to_page(pmd_pfn(*src_pmd));
+				struct page *page = pmd_page(*src_pmd);
 
-					if (!is_huge_zero_page(page) &&
-					    page_mapcount(page) != 1) {
-						spin_unlock(ptl);
-						err = -EBUSY;
-						break;
-					}
+				if (!is_huge_zero_page(page) &&
+				    page_mapcount(page) != 1) {
+					spin_unlock(&mm->page_table_lock);
+					err = -EBUSY;
+					break;
 				}
 
-				spin_unlock(ptl);
-				split_huge_pmd(src_vma, src_pmd, src_addr);
+				spin_unlock(&mm->page_table_lock);
+				split_huge_page_pmd(src_vma, src_addr, src_pmd);
 				/* The page will be split by move_pages_ptes() */
 				continue;
 			}
@@ -1031,7 +1034,11 @@ ssize_t move_pages(struct mm_struct *mm, unsigned long dst_start,
 						  dst_pmdval, dst_vma, src_vma,
 						  dst_addr, src_addr);
 			step_size = HPAGE_PMD_SIZE;
-		} else
+		} else if (thp_ret == -1)
+			/* The pmd was being split; wait_split_huge_page() has
+			 * completed the split, retry at the same address. */
+			continue;
+		else
 #endif
 		{
 			long ret;

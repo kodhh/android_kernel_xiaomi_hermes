@@ -555,6 +555,9 @@ config ARMV7_COMPAT_CPUINFO
 
 	 If you want to execute ARMv7 applications, say Y
 
+config HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	def_bool y
+
 source "mm/Kconfig"
 
 config SECCOMP

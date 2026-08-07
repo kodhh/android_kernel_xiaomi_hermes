@@ -163,17 +163,7 @@ static int start_khugepaged(void)
 }
 
 static atomic_t huge_zero_refcount;
-static struct page *huge_zero_page __read_mostly;
-
-static inline bool is_huge_zero_page(struct page *page)
-{
-	return ACCESS_ONCE(huge_zero_page) == page;
-}
-
-static inline bool is_huge_zero_pmd(pmd_t pmd)
-{
-	return is_huge_zero_page(pmd_page(pmd));
-}
+struct page *huge_zero_page __read_mostly;
 
 static struct page *get_huge_zero_page(void)
 {
@@ -1487,6 +1477,106 @@ int move_huge_pmd(struct vm_area_struct *vma, struct vm_area_struct *new_vma,
 	}
 out:
 	return ret;
+}
+
+/*
+ * Move a transparent huge pmd from src_pmd to dst_pmd. Both pmds belong
+ * to the same mm. Must be called with mm->page_table_lock held.
+ *
+ * On success the pmd is moved (not copied) and the deposited pgtable is
+ * transferred to the destination. On failure the src pmd is never left in
+ * a stale state: -EAGAIN means the caller should retry, other negative
+ * values are fatal for the move.
+ */
+int move_pages_huge_pmd(struct mm_struct *mm, pmd_t *dst_pmd,
+			pmd_t *src_pmd, pmd_t dst_pmdval,
+			struct vm_area_struct *dst_vma,
+			struct vm_area_struct *src_vma,
+			unsigned long dst_addr, unsigned long src_addr)
+{
+	pmd_t _dst_pmd, src_pmdval;
+	struct page *src_page;
+	struct anon_vma *src_anon_vma;
+	pgtable_t src_pgtable;
+	int err = 0;
+
+	src_pmdval = *src_pmd;
+
+	/* Sanity checks before the operation */
+	if (WARN_ON_ONCE(!pmd_none(dst_pmdval)) ||
+	    WARN_ON_ONCE(src_addr & ~HPAGE_PMD_MASK) ||
+	    WARN_ON_ONCE(dst_addr & ~HPAGE_PMD_MASK)) {
+		spin_unlock(&mm->page_table_lock);
+		return -EINVAL;
+	}
+
+	if (!pmd_trans_huge(src_pmdval)) {
+		spin_unlock(&mm->page_table_lock);
+		return -ENOENT;
+	}
+
+	src_page = pmd_page(src_pmdval);
+	if (unlikely(page_mapcount(src_page) != 1)) {
+		spin_unlock(&mm->page_table_lock);
+		return -EBUSY;
+	}
+
+	get_page(src_page);
+	spin_unlock(&mm->page_table_lock);
+
+	flush_cache_range(src_vma, src_addr, src_addr + HPAGE_PMD_SIZE);
+	mmu_notifier_invalidate_range_start(mm, src_addr,
+					    src_addr + HPAGE_PMD_SIZE);
+
+	lock_page(src_page);
+
+	/*
+	 * split_huge_page walks the anon_vma chain without the page
+	 * lock. Serialize against it with the anon_vma lock, the page
+	 * lock is not enough.
+	 */
+	src_anon_vma = page_get_anon_vma(src_page);
+	if (!src_anon_vma) {
+		err = -EAGAIN;
+		goto unlock_folio;
+	}
+	anon_vma_lock_write(src_anon_vma);
+
+	spin_lock(&mm->page_table_lock);
+	if (unlikely(!pmd_same(*src_pmd, src_pmdval) ||
+		     !pmd_same(*dst_pmd, dst_pmdval))) {
+		err = -EAGAIN;
+		goto unlock_ptls;
+	}
+	if (unlikely(page_mapcount(src_page) != 1)) {
+		err = -EBUSY;
+		goto unlock_ptls;
+	}
+	if (WARN_ON_ONCE(!PageHead(src_page)) ||
+	    WARN_ON_ONCE(!PageAnon(src_page))) {
+		err = -EBUSY;
+		goto unlock_ptls;
+	}
+
+	src_pmdval = pmdp_clear_flush(src_vma, src_addr, src_pmd);
+	WRITE_ONCE(src_page->index, linear_page_index(dst_vma, dst_addr));
+	page_move_anon_rmap(src_page, dst_vma, dst_addr);
+
+	_dst_pmd = mk_huge_pmd(src_page, dst_vma);
+	set_pmd_at(mm, dst_addr, dst_pmd, _dst_pmd);
+
+	src_pgtable = pgtable_trans_huge_withdraw(mm);
+	pgtable_trans_huge_deposit(mm, src_pgtable);
+unlock_ptls:
+	spin_unlock(&mm->page_table_lock);
+	anon_vma_unlock_write(src_anon_vma);
+	put_anon_vma(src_anon_vma);
+unlock_folio:
+	unlock_page(src_page);
+	mmu_notifier_invalidate_range_end(mm, src_addr,
+					  src_addr + HPAGE_PMD_SIZE);
+	put_page(src_page);
+	return err;
 }
 
 int change_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,

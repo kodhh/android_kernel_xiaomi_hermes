@@ -64,6 +64,17 @@ extern pmd_t *page_check_address_pmd(struct page *page,
 #define HPAGE_PMD_MASK HPAGE_MASK
 #define HPAGE_PMD_SIZE HPAGE_SIZE
 
+extern struct page *huge_zero_page;
+static inline bool is_huge_zero_page(struct page *page)
+{
+	return ACCESS_ONCE(huge_zero_page) == page;
+}
+
+static inline bool is_huge_zero_pmd(pmd_t pmd)
+{
+	return pmd_trans_huge(pmd) && is_huge_zero_page(pmd_page(pmd));
+}
+
 extern bool is_vma_temporary_stack(struct vm_area_struct *vma);
 
 #define transparent_hugepage_enabled(__vma)				\
@@ -162,6 +173,12 @@ static inline int hpage_nr_pages(struct page *page)
 
 extern int do_huge_pmd_numa_page(struct mm_struct *mm, struct vm_area_struct *vma,
 				unsigned long addr, pmd_t pmd, pmd_t *pmdp);
+
+extern int move_pages_huge_pmd(struct mm_struct *mm, pmd_t *dst_pmd,
+			       pmd_t *src_pmd, pmd_t dst_pmdval,
+			       struct vm_area_struct *dst_vma,
+			       struct vm_area_struct *src_vma,
+			       unsigned long dst_addr, unsigned long src_addr);
 
 #else /* CONFIG_TRANSPARENT_HUGEPAGE */
 #define HPAGE_PMD_SHIFT ({ BUILD_BUG(); 0; })
