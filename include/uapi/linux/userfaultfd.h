@@ -21,11 +21,13 @@
 #define UFFD_API_FEATURES (UFFD_FEATURE_EVENT_FORK |	    \
 			   UFFD_FEATURE_EVENT_REMAP |	    \
 			   UFFD_FEATURE_EVENT_MADVDONTNEED | \
-			   UFFD_FEATURE_SIGBUS)
+			   UFFD_FEATURE_SIGBUS |	    \
+			   UFFD_FEATURE_MOVE)
 #define UFFD_API_IOCTLS				\
 	((__u64)1 << _UFFDIO_REGISTER |		\
 	 (__u64)1 << _UFFDIO_UNREGISTER |	\
-	 (__u64)1 << _UFFDIO_API)
+	 (__u64)1 << _UFFDIO_API |		\
+	 (__u64)1 << _UFFDIO_MOVE)
 #define UFFD_API_RANGE_IOCTLS			\
 	((__u64)1 << _UFFDIO_WAKE |		\
 	 (__u64)1 << _UFFDIO_COPY |		\
@@ -44,6 +46,7 @@
 #define _UFFDIO_WAKE			(0x02)
 #define _UFFDIO_COPY			(0x03)
 #define _UFFDIO_ZEROPAGE		(0x04)
+#define _UFFDIO_MOVE			(0x05)
 #define _UFFDIO_API			(0x3F)
 
 /* userfaultfd ioctl ids */
@@ -60,6 +63,8 @@
 				      struct uffdio_copy)
 #define UFFDIO_ZEROPAGE		_IOWR(UFFDIO, _UFFDIO_ZEROPAGE,	\
 				      struct uffdio_zeropage)
+#define UFFDIO_MOVE		_IOWR(UFFDIO, _UFFDIO_MOVE,	\
+				      struct uffdio_move)
 
 /* read() structure */
 struct uffd_msg {
@@ -129,6 +134,7 @@ struct uffdio_api {
 #define UFFD_FEATURE_EVENT_REMAP		(1<<2)
 #define UFFD_FEATURE_EVENT_MADVDONTNEED		(1<<3)
 #define UFFD_FEATURE_SIGBUS			(1<<7)
+#define UFFD_FEATURE_MOVE			(1<<16)
 	__u64 features;
 
 	__u64 ioctls;
@@ -182,6 +188,38 @@ struct uffdio_zeropage {
 	 * the copy_from_user will not read the last 8 bytes.
 	 */
 	__s64 zeropage;
+};
+
+struct uffdio_move {
+	__u64 dst;
+	__u64 src;
+	__u64 len;
+	/*
+	 * Especially if used to wake up the process blocked on the
+	 * userfaultfd, this flag tells the kernel to only move the
+	 * range without waking up the processes.
+	 */
+#define UFFDIO_MOVE_MODE_DONTWAKE		((__u64)1<<0)
+	/*
+	 * Allow move for ranges that are not fully populated by
+	 * pages, i.e. holes in the source region are moved to the
+	 * destination.
+	 */
+#define UFFDIO_MOVE_MODE_ALLOW_SRC_HOLES	((__u64)1<<1)
+	/*
+	 * Mode flag to indicate that the caller intends the move to
+	 * happen to a fixed destination range, i.e. the destination
+	 * is not a candidate for move being resolved to a
+	 * "not-writable" mapping by the kernel.
+	 */
+#define UFFDIO_MOVE_MODE_CONFIRM_FIXED		((__u64)1<<62)
+	__u64 mode;
+
+	/*
+	 * "move" is written by the ioctl and must be at the end:
+	 * the copy_from_user will not read the last 8 bytes.
+	 */
+	__s64 move;
 };
 
 /*

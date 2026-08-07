@@ -1473,6 +1473,61 @@ out:
 	return ret;
 }
 
+static int userfaultfd_move(struct userfaultfd_ctx *ctx,
+			    unsigned long arg)
+{
+	__s64 ret;
+	struct uffdio_move uffdio_move;
+	struct uffdio_move __user *user_uffdio_move;
+	struct userfaultfd_wake_range range;
+
+	user_uffdio_move = (struct uffdio_move __user *) arg;
+
+	ret = -EFAULT;
+	if (copy_from_user(&uffdio_move, user_uffdio_move,
+			   /* don't copy "move" last field */
+			   sizeof(uffdio_move)-sizeof(__s64)))
+		goto out;
+
+	ret = validate_range(ctx->mm, uffdio_move.dst, uffdio_move.len);
+	if (ret)
+		goto out;
+
+	ret = validate_range(ctx->mm, uffdio_move.src, uffdio_move.len);
+	if (ret)
+		goto out;
+
+	ret = -EINVAL;
+	if (uffdio_move.mode & ~(UFFDIO_MOVE_MODE_ALLOW_SRC_HOLES|
+				 UFFDIO_MOVE_MODE_DONTWAKE|
+				 UFFDIO_MOVE_MODE_CONFIRM_FIXED))
+		goto out;
+
+	if (mmget_not_zero(ctx->mm)) {
+		ret = move_pages(ctx->mm, uffdio_move.dst, uffdio_move.src,
+				 uffdio_move.len, uffdio_move.mode);
+		mmput(ctx->mm);
+	} else {
+		return -ESRCH;
+	}
+	if (unlikely(put_user(ret, &user_uffdio_move->move)))
+		return -EFAULT;
+	if (ret < 0)
+		goto out;
+
+	/* len == 0 would wake all */
+	BUG_ON(!ret);
+	range.len = ret;
+	if (!(uffdio_move.mode & UFFDIO_MOVE_MODE_DONTWAKE)) {
+		range.start = uffdio_move.dst;
+		wake_userfault(ctx, &range);
+	}
+	ret = range.len == uffdio_move.len ? 0 : -EAGAIN;
+
+out:
+	return ret;
+}
+
 static inline unsigned int uffd_ctx_features(__u64 user_features)
 {
 	/*
@@ -1549,6 +1604,9 @@ static long userfaultfd_ioctl(struct file *file, unsigned cmd,
 		break;
 	case UFFDIO_ZEROPAGE:
 		ret = userfaultfd_zeropage(ctx, arg);
+		break;
+	case UFFDIO_MOVE:
+		ret = userfaultfd_move(ctx, arg);
 		break;
 	}
 	return ret;
