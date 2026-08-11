@@ -709,7 +709,7 @@ __SYSCALL(__NR_memfd_create, sys_memfd_create)
 #define __NR_bpf 280
 __SYSCALL(__NR_bpf, sys_ni_syscall)
 #define __NR_execveat 281
-__SYSCALL(__NR_execveat, sys_execveat)
+__SC_COMP(__NR_execveat, sys_execveat, compat_sys_execveat)
 
 #undef __NR_syscalls
 #define __NR_syscalls 282
