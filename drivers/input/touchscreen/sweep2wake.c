@@ -421,13 +421,14 @@ static ssize_t s2w_sweep2wake_show(struct device *dev,
 static ssize_t s2w_sweep2wake_dump(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	if (buf[1] == '\n') {
-		if (buf[0] == '0') {
-			s2w_switch = 0;
-		} else if (buf[0] == '1') {
-			s2w_switch = 1;
-		}
-	}
+	int err;
+	unsigned int val;
+
+	err = kstrtouint(buf, 10, &val);
+	if (err)
+		return count;
+
+	s2w_switch = val ? 1 : 0;
 
 	return count;
 }
@@ -448,13 +449,14 @@ static ssize_t s2w_s2w_s2sonly_show(struct device *dev,
 static ssize_t s2w_s2w_s2sonly_dump(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	if (buf[1] == '\n') {
-		if (buf[0] == '0') {
-			s2w_s2sonly = 0;
-		} else if (buf[0] == '1') {
-			s2w_s2sonly = 1;
-		}
-	}
+	int err;
+	unsigned int val;
+
+	err = kstrtouint(buf, 10, &val);
+	if (err)
+		return count;
+
+	s2w_s2sonly = val ? 1 : 0;
 
 	return count;
 }

@@ -26,5 +26,8 @@ extern int dt2w_switch;
 extern bool dt2w_scr_suspended;
 
 void doubletap2wake_setdev(struct input_dev *);
+void doubletap2wake_trigger(void);
+void doubletap2wake_screen_off(void);
+void doubletap2wake_screen_on(void);
 
 #endif	/* _LINUX_DOUBLETAP2WAKE_H */

@@ -514,65 +514,29 @@ static void tpd_create_attributes(struct device *dev, struct tpd_attrs *attrs)
 
 #ifdef CONFIG_TOUCHSCREEN_PREVENT_SLEEP
 static void eros_suspend(struct early_suspend *h) {
-#if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE) || defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	bool prevent_sleep = false;
-#endif
-	/*
-	 * we're taking a gamble here and assuming that the suspend/resume calls will
-	 * be correctly made by the kernel everytime screen suspend/resume is made.
-	 *
-	 * If it doesn't, well, that breaks things.
-	 *
-	 */
 #if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE)
-	prevent_sleep = (s2w_switch > 0) && (s2w_s2sonly == 0);
 	s2w_scr_suspended = true;
 #endif
 #if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
 	dt2w_scr_suspended = true;
 #endif
-
-	if (prevent_sleep) {
-		mt_eint_unmask(CUST_EINT_TOUCH_PANEL_NUM);
-	} else {
-		nyx_suspend(h);
-	}
+	/*
+	 * Always route through the real driver suspend: with dt2w/s2w enabled the
+	 * FT5346 is put into low-power hardware gesture mode (reg 0xD0) and its
+	 * EINT stays armed as a wakeup source, so the SoC can suspend instead of
+	 * being held awake (the old "prevent sleep" model that caused overheating).
+	 */
+	nyx_suspend(h);
 }
 
 static void eros_resume(struct early_suspend *h) {
-#if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE) || defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	bool prevent_sleep = false;
-#endif
 #if defined(CONFIG_TOUCHSCREEN_SWEEP2WAKE)
-	prevent_sleep = (s2w_switch > 0) && (s2w_s2sonly == 0);
 	s2w_scr_suspended = false;
 #endif
 #if defined(CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE)
-	prevent_sleep = prevent_sleep || (dt2w_switch > 0);
 	dt2w_scr_suspended = false;
 #endif
-
-	if (prevent_sleep) {
-		mt_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
-		/*
-		 * now that we've masked back CUST_EINT_TOUCH_PANEL_NUM, a touch panel reset
-		 * needs to be called. However, since sprout has 5 different panels, just
-		 * call a suspend/resume cycle to allow a normal ctp reset.
-		 * Time constraints shouldn't be much given just the GPIO's are cleared,
-		 * however, maybe we should just call _resume alone since the ctp driver
-		 * should be able to handle cases where the panel is already in _resume
-		 * but waiting for an IRQ flush (?) or a GPIO reset(?).
-		 *
-		 * This is similar to ft5x06_ts's panel behaviour during _HIBERNATE mode
-		 * where the ctp doesn't respond to anything but hard reset calls.
-		 *
-		 */
-		nyx_suspend(h);
-		nyx_resume(h);
-	} else {
-		nyx_resume(h);
-	}
+	nyx_resume(h);
 }
 #endif
 

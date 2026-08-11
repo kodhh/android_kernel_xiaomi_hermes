@@ -99,6 +99,29 @@ void doubletap2wake_setdev(struct input_dev * input_device) {
 	printk(LOGTAG"set doubletap2wake_pwrdev: %s\n", doubletap2wake_pwrdev->name);
 }
 
+/*
+ * Screen state hooks. On Android 10 SystemSuspend suspends via
+ * /sys/power/autosleep -> pm_suspend() directly, so the earlysuspend chain
+ * (and with it tpd_suspend/tpd_resume) never runs and dt2w_scr_suspended is
+ * never updated. The reliable screen-off/on signal is the display driver's
+ * suspend/resume (see primary_display.c). Keep the FT5346 in normal active
+ * mode and use the software double-tap detection in dt2w_input_event() -- the
+ * chip's low-power hardware gesture never reports a double tap (0x24) on this
+ * part. The touch EINT wakes the SoC briefly for the touch bursts; two taps
+ * within DT2W_TIME then inject KEY_POWER from the kernel.
+ */
+void doubletap2wake_screen_off(void)
+{
+	dt2w_scr_suspended = true;
+}
+EXPORT_SYMBOL(doubletap2wake_screen_off);
+
+void doubletap2wake_screen_on(void)
+{
+	dt2w_scr_suspended = false;
+}
+EXPORT_SYMBOL(doubletap2wake_screen_on);
+
 /* Read cmdline for dt2w */
 static int __init read_dt2w_cmdline(char *dt2w)
 {
@@ -144,6 +167,17 @@ static void doubletap2wake_pwrtrigger(void) {
 	schedule_work(&doubletap2wake_presspwr_work);
 	return;
 }
+
+/* Direct wake trigger for the FT5346 hardware double-tap gesture: the touch
+ * controller detects the double tap itself in low-power mode (just like the
+ * proximity sensor), so we bypass the input-event heuristics and act straight
+ * from the touch driver. */
+void doubletap2wake_trigger(void) {
+	if (dt2w_switch && dt2w_scr_suspended)
+		doubletap2wake_pwrtrigger();
+	return;
+}
+EXPORT_SYMBOL(doubletap2wake_trigger);
 
 /* unsigned */
 static unsigned int calc_feather(int coord, int prev_coord) {
@@ -383,19 +417,55 @@ static ssize_t dt2w_doubletap2wake_show(struct device *dev,
 static ssize_t dt2w_doubletap2wake_dump(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	if (buf[1] == '\n') {
-		if (buf[0] == '0') {
-			dt2w_switch = 0;
-		} else if (buf[0] == '1') {
-			dt2w_switch = 1;
-		}
-	}
+	int err;
+	unsigned int val;
+
+	err = kstrtouint(buf, 10, &val);
+	if (err)
+		return count;
+
+	dt2w_switch = val ? 1 : 0;
 
 	return count;
 }
 
 static DEVICE_ATTR(doubletap2wake, (S_IWUSR|S_IRUGO|S_IROTH|S_IWOTH),
 	dt2w_doubletap2wake_show, dt2w_doubletap2wake_dump);
+
+/* Direct gesture-mode control for userspace (powerhal / manual test).
+ * Writing 1 arms the FT5346 low-power hardware double-tap detection
+ * immediately (and marks the screen as off), writing 0 leaves it. Keeps
+ * dt2w_scr_suspended in sync so a detected double-tap wakes the device. */
+static ssize_t dt2w_gesture_mode_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	size_t count = 0;
+
+	count += sprintf(buf, "%d\n", dt2w_scr_suspended ? 1 : 0);
+
+	return count;
+}
+
+static ssize_t dt2w_gesture_mode_dump(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	int err;
+	unsigned int val;
+
+	err = kstrtouint(buf, 10, &val);
+	if (err)
+		return count;
+
+	if (val)
+		doubletap2wake_screen_off();
+	else
+		doubletap2wake_screen_on();
+
+	return count;
+}
+
+static DEVICE_ATTR(gesture_mode, (S_IWUSR|S_IRUGO|S_IROTH|S_IWOTH),
+	dt2w_gesture_mode_show, dt2w_gesture_mode_dump);
 
 static ssize_t dt2w_version_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -425,9 +495,43 @@ extern struct kobject *android_touch_kobj;
 struct kobject *android_touch_kobj;
 EXPORT_SYMBOL_GPL(android_touch_kobj);
 #endif
+
+/*
+ * The touch controller (FT5346) exposes no KEY_POWER, so inject the wake
+ * key on a dedicated virtual input device instead of the touch device.
+ */
+static int doubletap2wake_pwrdev_init(void)
+{
+	doubletap2wake_pwrdev = input_allocate_device();
+	if (!doubletap2wake_pwrdev)
+		return -ENOMEM;
+
+	doubletap2wake_pwrdev->name = "doubletap2wake_keypad";
+	doubletap2wake_pwrdev->phys = "doubletap2wake/input0";
+	doubletap2wake_pwrdev->id.bustype = BUS_HOST;
+	doubletap2wake_pwrdev->id.vendor = 0x0001;
+	doubletap2wake_pwrdev->id.product = 0x0001;
+	doubletap2wake_pwrdev->id.version = 0x0100;
+
+	set_bit(EV_KEY, doubletap2wake_pwrdev->evbit);
+	set_bit(KEY_POWER, doubletap2wake_pwrdev->keybit);
+
+	if (input_register_device(doubletap2wake_pwrdev)) {
+		input_free_device(doubletap2wake_pwrdev);
+		doubletap2wake_pwrdev = NULL;
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
 static int __init doubletap2wake_init(void)
 {
 	int rc = 0;
+
+	rc = doubletap2wake_pwrdev_init();
+	if (rc)
+		pr_err("%s: Failed to register pwrdev\n", __func__);
 
 	dt2w_input_wq = create_workqueue("dt2wiwq");
 	if (!dt2w_input_wq) {
@@ -464,6 +568,10 @@ static int __init doubletap2wake_init(void)
 	if (rc) {
 		pr_warn("%s: sysfs_create_file failed for doubletap2wake_version\n", __func__);
 	}
+	rc = sysfs_create_file(android_touch_kobj, &dev_attr_gesture_mode.attr);
+	if (rc) {
+		pr_warn("%s: sysfs_create_file failed for gesture_mode\n", __func__);
+	}
 
 	return 0;
 }
@@ -478,6 +586,10 @@ static void __exit doubletap2wake_exit(void)
 	lcd_unregister_client(&dt2w_lcd_notif);
 #endif
 #endif
+	if (doubletap2wake_pwrdev) {
+		input_unregister_device(doubletap2wake_pwrdev);
+		doubletap2wake_pwrdev = NULL;
+	}
 	input_unregister_handler(&dt2w_input_handler);
 	destroy_workqueue(dt2w_input_wq);
 	return;

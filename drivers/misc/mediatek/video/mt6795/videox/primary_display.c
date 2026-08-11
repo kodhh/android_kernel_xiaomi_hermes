@@ -4403,6 +4403,12 @@ int primary_suspend_release_fence(void)
 	return 0;
 }
 
+/* doubletap2wake screen state hooks (see drivers/input/touchscreen/doubletap2wake.c).
+ * Android 10 never runs the earlysuspend chain (autosleep -> pm_suspend), so the
+ * display driver's suspend/resume is the reliable screen-off/on signal. */
+extern void doubletap2wake_screen_off(void);
+extern void doubletap2wake_screen_on(void);
+
 int primary_display_suspend(void)
 {
 	DISP_STATUS ret = DISP_STATUS_OK;
@@ -4506,6 +4512,7 @@ done:
 	ipoh_after = 0;
 	MMProfileLogEx(ddp_mmp_get_events()->primary_suspend, MMProfileFlagEnd, 0, 0);
 	DISPCHECK("primary_display_suspend end\n");
+	doubletap2wake_screen_off();
 	return ret;
 }
 
@@ -4789,6 +4796,8 @@ done:
 	aee_kernel_wdt_kick_Powkey_api("mtkfb_late_resume", WDT_SETBY_Display);
 #endif
 	MMProfileLogEx(ddp_mmp_get_events()->primary_resume, MMProfileFlagEnd, 0, 0);
+
+	doubletap2wake_screen_on();
 
 	return 0;
 }

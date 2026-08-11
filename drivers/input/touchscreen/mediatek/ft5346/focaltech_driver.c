@@ -22,6 +22,7 @@
 #include "cust_gpio_usage.h"
 #include <linux/input/mt.h>		//slot
 #include <linux/input/doubletap2wake.h>
+#include <linux/input/sweep2wake.h>
 
 static bool TP_gesture_Switch;
 #define GESTURE_SWITCH_FILE 		"/data/data/com.example.setgesture/shared_prefs/gesture.xml"  //总开关文件,获取第一个value的值,为1开,为0关
@@ -695,6 +696,67 @@ static void fts_report_value(struct ts_event *data)
 
 #endif
 
+/* FT5346 hardware gesture wakeup: FocalTech FT5x46 gesture protocol reports
+ * the detected gesture from reg 0xD3, buf[0] = gesture id (0x24 = double
+ * tap), buf[1] = point count, then 4 bytes per point. Like the proximity
+ * sensor EINT path, the chip does the detection in low-power mode and pulses
+ * EINT; here we read the result and act directly.
+ */
+#define FTS_GESTURE_REGISTER		0xD3
+#define FTS_GESTURE_HEADER			8
+#define FTS_GESTURE_POINTER_LEN		4
+#define GESTURE_DOUBLECLICK			0x24
+#define GESTURE_TRACKING_ID			0x0A
+
+static bool fts_gesture_active;
+
+static void fts_report_gesture(void)
+{
+	u8 buf[FTS_GESTURE_POINTER_LEN * 128 + FTS_GESTURE_HEADER];
+	u8 reg = FTS_GESTURE_REGISTER;
+	int ret, i, pointnum = 0;
+
+	ret = fts_i2c_Read(i2c_client, (char *)&reg, 1, buf, FTS_GESTURE_HEADER);
+	if (ret < 0)
+		return;
+
+	/* double tap: trigger the wake directly */
+	if (buf[0] == GESTURE_DOUBLECLICK) {
+		printk("tpd fts gesture double click, wake\n");
+		doubletap2wake_trigger();
+		return;
+	}
+
+	/* sweeps/letters: report coordinates so sweep2wake can react */
+	pointnum = buf[1] & 0xFF;
+	if (pointnum > 128)
+		pointnum = 128;
+
+	reg = FTS_GESTURE_REGISTER;
+	ret = fts_i2c_Read(i2c_client, (char *)&reg, 1, buf,
+			   pointnum * FTS_GESTURE_POINTER_LEN + FTS_GESTURE_HEADER);
+	if (ret < 0)
+		return;
+
+	for (i = 0; i < pointnum; i++) {
+		int x = (((s16)buf[FTS_GESTURE_HEADER + FTS_GESTURE_POINTER_LEN * i]) & 0x0F) << 8 |
+			buf[FTS_GESTURE_HEADER + FTS_GESTURE_POINTER_LEN * i + 1];
+		int y = (((s16)buf[FTS_GESTURE_HEADER + FTS_GESTURE_POINTER_LEN * i + 2]) & 0x0F) << 8 |
+			buf[FTS_GESTURE_HEADER + FTS_GESTURE_POINTER_LEN * i + 3];
+
+		input_mt_slot(tpd->dev, GESTURE_TRACKING_ID);
+		input_mt_report_slot_state(tpd->dev, MT_TOOL_FINGER, 1);
+		input_report_abs(tpd->dev, ABS_MT_POSITION_X, x);
+		input_report_abs(tpd->dev, ABS_MT_POSITION_Y, y);
+		input_mt_report_pointer_emulation(tpd->dev, false);
+		input_sync(tpd->dev);
+	}
+	input_mt_slot(tpd->dev, GESTURE_TRACKING_ID);
+	input_mt_report_slot_state(tpd->dev, MT_TOOL_FINGER, 0);
+	input_mt_report_pointer_emulation(tpd->dev, false);
+	input_sync(tpd->dev);
+}
+
 extern int FG_charging_status ;
 int close_to_ps_flag_value = 1;	// 1: close ; 0: far away
 int charging_flag = 0;
@@ -757,6 +819,11 @@ int charging_flag = 0;
 		
 #ifdef MT_PROTOCOL_B
 		{
+			if (fts_gesture_active) {
+				fts_report_gesture();
+				continue;
+			}
+
         	ret = fts_read_Touchdata(&pevent);
 			if (ret == 0)
 				fts_report_value(&pevent);
@@ -1082,10 +1149,48 @@ static int tpd_local_init(void)
     return 0; 
  }
 
+ /* DT2W gesture mode: FocalTech reg 0xD0 puts the FT5346 into low-power
+ * hardware gesture detection; it pulses EINT only on a (double-)tap so the
+ * SoC can stay suspended/deep-idled. Keep the touch EINT armed as the
+ * wakeup source.
+ *
+ * Note: this part's wakeup FW never reports a double tap (0x24), so dt2w on
+ * Android 10 uses the software input-event path in doubletap2wake.c instead
+ * (the chip stays in normal active mode during screen-off, the touch EINT
+ * wakes the SoC for the bursts, and two taps within DT2W_TIME inject
+ * KEY_POWER). This low-power mode is kept only for sweep-to-wake, which
+ * still uses the swipe gesture reports.
+ */
+static void fts_dt2w_gesture_mode(bool enable)
+{
+	u8 d0 = enable ? 0x01 : 0x00;
+	u8 d = 0xff;
+
+	if (!i2c_client)
+		return;
+
+	fts_gesture_active = enable;
+	DBG("TPD dt2w gesture mode %s\n", enable ? "ON" : "OFF");
+	i2c_smbus_write_i2c_block_data(i2c_client, 0xD0, 1, &d0);
+
+	if (enable) {
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD1, 1, &d);
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD2, 1, &d);
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD5, 1, &d);
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD6, 1, &d);
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD7, 1, &d);
+		i2c_smbus_write_i2c_block_data(i2c_client, 0xD8, 1, &d);
+		mt_eint_unmask(CUST_EINT_TOUCH_PANEL_NUM);
+	}
+}
+
  static void tpd_resume( struct early_suspend *h )
 {
 	static char i = 0;
 	DBG("TPD wake up\n");
+
+	if (dt2w_switch || s2w_switch)
+		fts_dt2w_gesture_mode(false);
 
 	mt_set_gpio_mode(GPIO_CTP_RST_PIN, GPIO_CTP_RST_PIN_M_GPIO);
 	mt_set_gpio_dir(GPIO_CTP_RST_PIN, GPIO_DIR_OUT);
@@ -1141,7 +1246,14 @@ static int tpd_local_init(void)
  	DBG("zax TPD enter sleep done\n");
 
 	if (dt2w_switch) {
-		DBG("TPD dt2w enabled, stay awake for doubletap\n");
+		DBG("TPD dt2w enabled, enter gesture mode\n");
+		fts_dt2w_gesture_mode(true);
+		return;
+	}
+
+	if (s2w_switch) {
+		DBG("TPD s2w enabled, enter gesture mode\n");
+		fts_dt2w_gesture_mode(true);
 		return;
 	}
 
