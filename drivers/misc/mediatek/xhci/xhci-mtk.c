@@ -497,13 +497,50 @@ void mtk_xhci_mode_switch(struct work_struct *work)
 {
 	static bool is_load = false;
 	static bool is_pwoff = false;
+	bool has_charge = false;
+	int pool_over_4v = 0;
+	int pool_less_4v = 0;
+	int sample_cnt = 0;
+	int retry = 0;
+	int retry_time = 3;
+	int max_retry = 30;
 	int ret = 0;
 
 	if (mtk_idpin_cur_stat == IDPIN_OUT) {
 		is_load = false;
 
 		/* expect next isr is for id-pin out action */
-		mtk_idpin_cur_stat = (mtk_is_charger_4_vol())? IDPIN_IN_DEVICE : IDPIN_IN_HOST;
+		do {
+			has_charge = mtk_is_charger_4_vol();
+			if (has_charge)
+				pool_over_4v++;
+			else
+				pool_less_4v++;
+			retry++;
+
+			if (retry == retry_time) {
+				if (pool_over_4v >= retry_time) {	/* stable device */
+					mtk_idpin_cur_stat = IDPIN_IN_DEVICE;
+					break;
+				} else if (pool_less_4v >= retry_time) {	/* stable host */
+					mtk_idpin_cur_stat = IDPIN_IN_HOST;
+					break;
+				} else {	/* no stable state */
+					if (sample_cnt >= max_retry) {
+						mtk_idpin_cur_stat = IDPIN_IN_DEVICE;
+						mtk_xhci_mtk_log("no stable state detected, default to device !!!\n");
+						break;
+					}
+					retry = 0;
+					pool_over_4v = 0;
+					pool_less_4v = 0;
+					mtk_xhci_mtk_log("no stable state detected, try again !!!\n");
+				}
+			}
+			mdelay(3);
+			sample_cnt++;
+		} while (retry < retry_time);
+
 		/* make id pin to detect the plug-out */
 		mtk_set_iddig_out_detect();
 
