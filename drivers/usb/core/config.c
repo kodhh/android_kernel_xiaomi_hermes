@@ -514,6 +514,7 @@ static int usb_parse_configuration(struct usb_device *dev, int cfgidx,
 	size -= config->desc.bLength;
 
 	nintf = nintf_orig = config->desc.bNumInterfaces;
+	config->desc.bNumInterfaces = 0;	// Adjusted later
 	if (nintf > USB_MAXINTERFACES) {
 		dev_warn(ddev, "config %d has too many interfaces: %d, "
 		    "using maximum allowed: %d\n",
