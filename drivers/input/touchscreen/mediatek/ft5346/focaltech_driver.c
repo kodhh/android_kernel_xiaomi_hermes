@@ -1245,15 +1245,18 @@ static void fts_dt2w_gesture_mode(bool enable)
 	
  	DBG("zax TPD enter sleep done\n");
 
-	if (dt2w_switch) {
-		DBG("TPD dt2w enabled, enter gesture mode\n");
-		fts_dt2w_gesture_mode(true);
-		return;
-	}
-
-	if (s2w_switch) {
-		DBG("TPD s2w enabled, enter gesture mode\n");
-		fts_dt2w_gesture_mode(true);
+	if (dt2w_switch || s2w_switch) {
+		/* This part's wakeup FW never reports a hardware gesture (reg 0xD3
+		 * returns 0x0), so the low-power gesture mode (reg 0xD0) is useless
+		 * and would starve the software detectors in doubletap2wake.c /
+		 * sweep2wake.c of real touch data. Keep the chip in normal active
+		 * mode with the touch EINT armed as the wakeup source: touches while
+		 * the screen is off wake the SoC briefly, the input events drive the
+		 * software double-tap / sweep detection, which injects KEY_POWER on
+		 * a match. */
+		DBG("TPD gesture wake enabled, keep chip active + EINT armed\n");
+		fts_gesture_active = false;
+		mt_eint_unmask(CUST_EINT_TOUCH_PANEL_NUM);
 		return;
 	}
 
