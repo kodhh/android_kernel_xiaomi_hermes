@@ -33,6 +33,7 @@
 #include <linux/input.h>
 #include <linux/hrtimer.h>
 #include <asm-generic/cputime.h>
+#include <linux/wakelock.h>
 #include <linux/input/doubletap2wake.h>
 
 /* uncomment since no touchscreen defines android touch, do that here */
@@ -78,6 +79,17 @@ MODULE_LICENSE("GPLv2");
 
 /* Resources */
 int dt2w_switch = DT2W_DEFAULT;
+static struct wake_lock dt2w_wakelock;
+
+static void dt2w_wake_lock_sync(void)
+{
+	if (dt2w_switch) {
+		if (!wake_lock_active(&dt2w_wakelock))
+			wake_lock(&dt2w_wakelock);
+	} else if (wake_lock_active(&dt2w_wakelock)) {
+		wake_unlock(&dt2w_wakelock);
+	}
+}
 static cputime64_t tap_time_pre = 0;
 static int touch_x = 0, touch_y = 0, touch_nr = 0, x_pre = 0, y_pre = 0;
 static bool touch_x_called = false, touch_y_called = false, touch_cnt = true;
@@ -425,6 +437,7 @@ static ssize_t dt2w_doubletap2wake_dump(struct device *dev,
 		return count;
 
 	dt2w_switch = val ? 1 : 0;
+	dt2w_wake_lock_sync();
 
 	return count;
 }
@@ -543,6 +556,9 @@ static int __init doubletap2wake_init(void)
 	if (rc)
 		pr_err("%s: Failed to register dt2w_input_handler\n", __func__);
 
+	wake_lock_init(&dt2w_wakelock, WAKE_LOCK_SUSPEND, "dt2w_keepawake");
+	dt2w_wake_lock_sync();
+
 #ifndef WAKE_HOOKS_DEFINED
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	dt2w_lcd_notif.notifier_call = lcd_notifier_callback;
@@ -590,6 +606,8 @@ static void __exit doubletap2wake_exit(void)
 		input_unregister_device(doubletap2wake_pwrdev);
 		doubletap2wake_pwrdev = NULL;
 	}
+	wake_unlock(&dt2w_wakelock);
+	wake_lock_destroy(&dt2w_wakelock);
 	input_unregister_handler(&dt2w_input_handler);
 	destroy_workqueue(dt2w_input_wq);
 	return;
