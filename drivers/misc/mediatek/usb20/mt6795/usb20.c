@@ -331,24 +331,23 @@ bool usb_cable_connected(void)
 
 	//ALPS00775710
     int iddig_state = 1;
+	u8 devctl = 0;
 
     iddig_state = mt_get_gpio_in(GPIO_OTG_IDDIG_EINT_PIN);
 	DBG(0,"iddig_state = %d\n", iddig_state);
 
 	if(!iddig_state)
-		return;
+		return false;
 	//ALPS00775710
 
-//#ifdef CONFIG_POWER_EXT
-	if (upmu_get_rgs_chrdet()
-//#else
-//	if (upmu_is_chr_det()
-//#endif
-	   ) {
-		return true;
-	} else {
-		return false;
+	if (mtk_musb && mtk_musb->mregs) {
+		devctl = musb_readb(mtk_musb->mregs, MUSB_DEVCTL);
+		DBG(0,"usb_cable_connected devctl = 0x%x\n", devctl);
+		if (devctl & MUSB_DEVCTL_BDEVICE)
+			return true;
 	}
+
+	return false;
 #endif // end FPGA_PLATFORM
 }
 

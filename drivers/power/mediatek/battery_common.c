@@ -298,9 +298,11 @@ extern bool mt_usb_is_device(void);
 #if defined(CONFIG_USB_MTK_HDRC) || defined(CONFIG_USB_MU3D_DRV)
 extern void mt_usb_connect(void);
 extern void mt_usb_disconnect(void);
+extern bool usb_cable_connected(void);
 #else
 #define mt_usb_connect() do { } while (0)
 #define mt_usb_disconnect() do { } while (0)
+#define usb_cable_connected() false
 #endif
 /* extern int set_rtc_spare_fg_value(int val); */
 
@@ -2772,7 +2774,7 @@ CHARGER_TYPE mt_get_charger_type(void)
 
 static void mt_battery_charger_detect_check(void)
 {
-	if (upmu_is_chr_det() == KAL_TRUE) {
+	if ((get_charger_detect_status() == KAL_TRUE) || usb_cable_connected()) {
 		wake_lock(&battery_suspend_lock);
 
 		#if !defined(CONFIG_MTK_DUAL_INPUT_CHARGER_SUPPORT)
@@ -2800,6 +2802,9 @@ static void mt_battery_charger_detect_check(void)
 			}
 		}
 #endif
+
+		if (usb_cable_connected())
+			mt_usb_connect();
 
 		battery_log(BAT_LOG_CRTI, "[BAT_thread]Cable in, CHR_Type_num=%d\r\n",
 				    BMT_status.charger_type);
@@ -2863,7 +2868,7 @@ void do_chrdet_int_task(void)
 {
 	if (g_bat_init_flag == KAL_TRUE) {
 		#if !defined(CONFIG_MTK_DUAL_INPUT_CHARGER_SUPPORT)
-		if (upmu_is_chr_det() == KAL_TRUE) {
+		if (get_charger_detect_status() == KAL_TRUE || usb_cable_connected()) {
 		#else
 		battery_charging_control(CHARGING_CMD_GET_DISO_STATE, &DISO_data);
 		if ((DISO_data.diso_state.cur_vusb_state == DISO_ONLINE) ||
